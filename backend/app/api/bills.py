@@ -15,8 +15,13 @@ def create_bill(payload: BillCreate) -> BillRead:
 
 
 @router.get("", response_model=list[BillRead])
-def list_bills() -> list[BillRead]:
-    return bill_store.list()
+def list_bills(
+    year: int | None = Query(default=None, ge=1970),
+    month: int | None = Query(default=None, ge=1, le=12),
+) -> list[BillRead]:
+    now = datetime.now(timezone.utc)
+    target_year = year or (now.year if month is not None else None)
+    return bill_store.list(year=target_year, month=month)
 
 
 @router.get("/statistics/monthly", response_model=MonthlyBillStatistics)

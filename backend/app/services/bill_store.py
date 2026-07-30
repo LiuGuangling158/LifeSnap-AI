@@ -28,8 +28,14 @@ class InMemoryBillStore:
         self._bills[bill.id] = bill
         return bill
 
-    def list(self) -> list[BillRead]:
-        return sorted(self._bills.values(), key=lambda bill: bill.paid_at, reverse=True)
+    def list(self, year: int | None = None, month: int | None = None) -> list[BillRead]:
+        bills = list(self._bills.values())
+        if year is not None:
+            bills = [bill for bill in bills if bill.paid_at.year == year]
+        if month is not None:
+            bills = [bill for bill in bills if bill.paid_at.month == month]
+
+        return sorted(bills, key=lambda bill: bill.paid_at, reverse=True)
 
     def get(self, bill_id: UUID) -> BillRead | None:
         return self._bills.get(bill_id)

@@ -46,6 +46,12 @@ List bills:
 GET /bills
 ```
 
+Filter bills by month:
+
+```text
+GET /bills?year=2026&month=7
+```
+
 Get monthly statistics:
 
 ```text
