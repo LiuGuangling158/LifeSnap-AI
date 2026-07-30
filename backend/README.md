@@ -97,3 +97,71 @@ Delete one bill:
 ```text
 DELETE /bills/{bill_id}
 ```
+
+## Tasks
+
+Create a todo:
+
+```http
+POST /tasks
+Content-Type: application/json
+
+{
+  "title": "交房租",
+  "category": "居住",
+  "task_type": "todo",
+  "due_at": "2026-08-01T09:00:00+08:00",
+  "priority": "high",
+  "source": "manual"
+}
+```
+
+Create a reminder:
+
+```http
+POST /tasks
+Content-Type: application/json
+
+{
+  "title": "医院复诊",
+  "description": "带医保卡和检查报告",
+  "category": "医疗",
+  "task_type": "reminder",
+  "remind_at": "2026-08-02T15:00:00+08:00",
+  "source": "manual"
+}
+```
+
+List tasks:
+
+```text
+GET /tasks
+GET /tasks?status=pending
+GET /tasks?task_type=reminder
+GET /tasks?category=医疗
+GET /tasks?due_from=2026-08-01T00:00:00+08:00&due_to=2026-08-07T23:59:59+08:00
+```
+
+Complete one task:
+
+```text
+POST /tasks/{task_id}/complete
+```
+
+Update one task:
+
+```http
+PATCH /tasks/{task_id}
+Content-Type: application/json
+
+{
+  "priority": "medium",
+  "status": "cancelled"
+}
+```
+
+Delete one task:
+
+```text
+DELETE /tasks/{task_id}
+```
