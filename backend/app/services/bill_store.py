@@ -39,5 +39,12 @@ class InMemoryBillStore:
         self._bills[bill_id] = updated
         return updated
 
+    def delete(self, bill_id: UUID) -> bool:
+        if bill_id not in self._bills:
+            return False
+
+        del self._bills[bill_id]
+        return True
+
 
 bill_store = InMemoryBillStore()

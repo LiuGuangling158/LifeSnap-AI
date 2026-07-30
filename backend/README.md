@@ -63,3 +63,9 @@ Content-Type: application/json
   "note": "用户手动修正分类"
 }
 ```
+
+Delete one bill:
+
+```text
+DELETE /bills/{bill_id}
+```

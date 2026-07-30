@@ -32,3 +32,10 @@ def update_bill(bill_id: UUID, payload: BillUpdate) -> BillRead:
     if bill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
     return bill
+
+
+@router.delete("/{bill_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_bill(bill_id: UUID) -> None:
+    deleted = bill_store.delete(bill_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
