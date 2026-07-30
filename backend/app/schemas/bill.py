@@ -33,8 +33,19 @@ class BillCreate(BaseModel):
     source: BillSource = BillSource.manual
 
 
+class BillUpdate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    merchant: str | None = Field(default=None, min_length=1, max_length=120)
+    category: str | None = Field(default=None, min_length=1, max_length=40)
+    payment_method: str | None = Field(default=None, max_length=40)
+    transaction_type: TransactionType | None = None
+    paid_at: datetime | None = None
+    note: str | None = Field(default=None, max_length=500)
+    source: BillSource | None = None
+
+
 class BillRead(BillCreate):
     id: UUID
     created_at: datetime
     updated_at: datetime
-

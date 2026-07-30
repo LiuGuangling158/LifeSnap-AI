@@ -51,3 +51,15 @@ Get one bill:
 ```text
 GET /bills/{bill_id}
 ```
+
+Update one bill:
+
+```http
+PATCH /bills/{bill_id}
+Content-Type: application/json
+
+{
+  "category": "餐饮",
+  "note": "用户手动修正分类"
+}
+```

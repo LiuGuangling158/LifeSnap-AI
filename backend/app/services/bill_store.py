@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from app.schemas.bill import BillCreate, BillRead
+from app.schemas.bill import BillCreate, BillRead, BillUpdate
 
 
 class InMemoryBillStore:
@@ -25,6 +25,19 @@ class InMemoryBillStore:
 
     def get(self, bill_id: UUID) -> BillRead | None:
         return self._bills.get(bill_id)
+
+    def update(self, bill_id: UUID, payload: BillUpdate) -> BillRead | None:
+        existing = self.get(bill_id)
+        if existing is None:
+            return None
+
+        data = existing.model_dump()
+        data.update(payload.model_dump(exclude_none=True, exclude_unset=True))
+        data["updated_at"] = datetime.now(timezone.utc)
+
+        updated = BillRead(**data)
+        self._bills[bill_id] = updated
+        return updated
 
 
 bill_store = InMemoryBillStore()
