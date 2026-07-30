@@ -46,10 +46,26 @@ List bills:
 GET /bills
 ```
 
-Filter bills by month:
+The list endpoint returns a paginated response:
+
+```json
+{
+  "items": [],
+  "total": 0,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 0
+}
+```
+
+Filter bills:
 
 ```text
 GET /bills?year=2026&month=7
+GET /bills?category=餐饮
+GET /bills?transaction_type=expense
+GET /bills?source=manual
+GET /bills?q=咖啡&page=1&page_size=20
 ```
 
 Get monthly statistics:

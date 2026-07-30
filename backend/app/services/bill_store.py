@@ -1,9 +1,12 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from math import ceil
 from uuid import UUID, uuid4
 
 from app.schemas.bill import (
+    BillSource,
     BillCreate,
+    BillListResponse,
     BillRead,
     BillUpdate,
     CategoryBreakdown,
@@ -28,14 +31,53 @@ class InMemoryBillStore:
         self._bills[bill.id] = bill
         return bill
 
-    def list(self, year: int | None = None, month: int | None = None) -> list[BillRead]:
+    def list(
+        self,
+        year: int | None = None,
+        month: int | None = None,
+        category: str | None = None,
+        transaction_type: TransactionType | None = None,
+        source: BillSource | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> BillListResponse:
         bills = list(self._bills.values())
         if year is not None:
             bills = [bill for bill in bills if bill.paid_at.year == year]
         if month is not None:
             bills = [bill for bill in bills if bill.paid_at.month == month]
+        if category is not None:
+            bills = [bill for bill in bills if bill.category == category]
+        if transaction_type is not None:
+            bills = [bill for bill in bills if bill.transaction_type == transaction_type]
+        if source is not None:
+            bills = [bill for bill in bills if bill.source == source]
+        if keyword is not None:
+            normalized_keyword = keyword.casefold()
+            bills = [bill for bill in bills if self._matches_keyword(bill, normalized_keyword)]
 
-        return sorted(bills, key=lambda bill: bill.paid_at, reverse=True)
+        sorted_bills = sorted(bills, key=lambda bill: bill.paid_at, reverse=True)
+        total = len(sorted_bills)
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        return BillListResponse(
+            items=sorted_bills[start:end],
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=ceil(total / page_size) if total else 0,
+        )
+
+    def _matches_keyword(self, bill: BillRead, keyword: str) -> bool:
+        fields = [
+            bill.merchant,
+            bill.category,
+            bill.payment_method or "",
+            bill.note or "",
+        ]
+        return any(keyword in field.casefold() for field in fields)
 
     def get(self, bill_id: UUID) -> BillRead | None:
         return self._bills.get(bill_id)

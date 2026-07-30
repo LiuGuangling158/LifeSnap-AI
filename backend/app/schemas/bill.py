@@ -51,6 +51,14 @@ class BillRead(BillCreate):
     updated_at: datetime
 
 
+class BillListResponse(BaseModel):
+    items: list[BillRead]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 class CategoryBreakdown(BaseModel):
     category: str
     amount: Decimal

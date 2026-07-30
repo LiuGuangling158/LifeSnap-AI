@@ -3,7 +3,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.schemas.bill import BillCreate, BillRead, BillUpdate, MonthlyBillStatistics
+from app.schemas.bill import (
+    BillCreate,
+    BillListResponse,
+    BillRead,
+    BillSource,
+    BillUpdate,
+    MonthlyBillStatistics,
+    TransactionType,
+)
 from app.services.bill_store import bill_store
 
 router = APIRouter(prefix="/bills", tags=["bills"])
@@ -14,14 +22,29 @@ def create_bill(payload: BillCreate) -> BillRead:
     return bill_store.create(payload)
 
 
-@router.get("", response_model=list[BillRead])
+@router.get("", response_model=BillListResponse)
 def list_bills(
     year: int | None = Query(default=None, ge=1970),
     month: int | None = Query(default=None, ge=1, le=12),
-) -> list[BillRead]:
+    category: str | None = Query(default=None, min_length=1, max_length=40),
+    transaction_type: TransactionType | None = Query(default=None),
+    source: BillSource | None = Query(default=None),
+    q: str | None = Query(default=None, min_length=1, max_length=80),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> BillListResponse:
     now = datetime.now(timezone.utc)
     target_year = year or (now.year if month is not None else None)
-    return bill_store.list(year=target_year, month=month)
+    return bill_store.list(
+        year=target_year,
+        month=month,
+        category=category,
+        transaction_type=transaction_type,
+        source=source,
+        keyword=q,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/statistics/monthly", response_model=MonthlyBillStatistics)
