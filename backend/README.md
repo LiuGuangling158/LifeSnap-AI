@@ -22,6 +22,22 @@ Health check:
 GET /health
 ```
 
+## Agent
+
+Parse OCR text into a bill candidate:
+
+```http
+POST /agent/parse-bill
+Content-Type: application/json
+
+{
+  "text": "瑞幸咖啡\n微信支付\n实付 18.50 元\n支付成功",
+  "source": "screenshot"
+}
+```
+
+This endpoint returns a candidate only. It does not create a saved bill. The user still needs to confirm or edit the result before saving through `POST /bills`.
+
 ## Dashboard
 
 Get homepage summary:
