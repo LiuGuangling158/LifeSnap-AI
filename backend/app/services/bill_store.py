@@ -23,5 +23,8 @@ class InMemoryBillStore:
     def list(self) -> list[BillRead]:
         return sorted(self._bills.values(), key=lambda bill: bill.paid_at, reverse=True)
 
+    def get(self, bill_id: UUID) -> BillRead | None:
+        return self._bills.get(bill_id)
+
 
 bill_store = InMemoryBillStore()

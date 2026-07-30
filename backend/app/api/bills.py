@@ -1,4 +1,6 @@
-from fastapi import APIRouter, status
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, status
 
 from app.schemas.bill import BillCreate, BillRead
 from app.services.bill_store import bill_store
@@ -15,3 +17,10 @@ def create_bill(payload: BillCreate) -> BillRead:
 def list_bills() -> list[BillRead]:
     return bill_store.list()
 
+
+@router.get("/{bill_id}", response_model=BillRead)
+def get_bill(bill_id: UUID) -> BillRead:
+    bill = bill_store.get(bill_id)
+    if bill is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
+    return bill

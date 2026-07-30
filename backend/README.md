@@ -45,3 +45,9 @@ List bills:
 ```text
 GET /bills
 ```
+
+Get one bill:
+
+```text
+GET /bills/{bill_id}
+```
