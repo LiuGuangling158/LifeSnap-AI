@@ -38,6 +38,20 @@ Content-Type: application/json
 
 This endpoint returns a candidate only. It does not create a saved bill. The user still needs to confirm or edit the result before saving through `POST /bills`.
 
+Get a bill candidate:
+
+```text
+GET /agent/bill-candidates/{candidate_id}
+```
+
+Confirm a bill candidate and save it as a bill:
+
+```text
+POST /agent/bill-candidates/{candidate_id}/confirm
+```
+
+Candidates missing required fields, such as `amount` or `merchant`, cannot be confirmed directly. The user should edit the result and save it through `POST /bills`.
+
 ## Dashboard
 
 Get homepage summary:
