@@ -49,3 +49,20 @@ class BillRead(BillCreate):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class CategoryBreakdown(BaseModel):
+    category: str
+    amount: Decimal
+    count: int
+
+
+class MonthlyBillStatistics(BaseModel):
+    year: int
+    month: int
+    bill_count: int
+    total_expense: Decimal
+    total_income: Decimal
+    total_refund: Decimal
+    net_amount: Decimal
+    category_breakdown: list[CategoryBreakdown]

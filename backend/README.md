@@ -46,6 +46,12 @@ List bills:
 GET /bills
 ```
 
+Get monthly statistics:
+
+```text
+GET /bills/statistics/monthly?year=2026&month=7
+```
+
 Get one bill:
 
 ```text

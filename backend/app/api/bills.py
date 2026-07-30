@@ -1,8 +1,9 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
-from app.schemas.bill import BillCreate, BillRead, BillUpdate
+from app.schemas.bill import BillCreate, BillRead, BillUpdate, MonthlyBillStatistics
 from app.services.bill_store import bill_store
 
 router = APIRouter(prefix="/bills", tags=["bills"])
@@ -16,6 +17,17 @@ def create_bill(payload: BillCreate) -> BillRead:
 @router.get("", response_model=list[BillRead])
 def list_bills() -> list[BillRead]:
     return bill_store.list()
+
+
+@router.get("/statistics/monthly", response_model=MonthlyBillStatistics)
+def get_monthly_bill_statistics(
+    year: int | None = Query(default=None, ge=1970),
+    month: int | None = Query(default=None, ge=1, le=12),
+) -> MonthlyBillStatistics:
+    now = datetime.now(timezone.utc)
+    target_year = year or now.year
+    target_month = month or now.month
+    return bill_store.monthly_statistics(target_year, target_month)
 
 
 @router.get("/{bill_id}", response_model=BillRead)
