@@ -1,0 +1,2 @@
+"""LifeSnap AI backend package."""
+
