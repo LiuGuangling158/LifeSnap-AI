@@ -22,3 +22,26 @@ Health check:
 GET /health
 ```
 
+## Bills
+
+Create a manual bill:
+
+```http
+POST /bills
+Content-Type: application/json
+
+{
+  "amount": 18.5,
+  "merchant": "早餐店",
+  "category": "餐饮",
+  "payment_method": "微信支付",
+  "transaction_type": "expense",
+  "source": "manual"
+}
+```
+
+List bills:
+
+```text
+GET /bills
+```
