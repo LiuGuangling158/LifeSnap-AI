@@ -22,6 +22,21 @@ Health check:
 GET /health
 ```
 
+## Dashboard
+
+Get homepage summary:
+
+```text
+GET /dashboard/summary
+GET /dashboard/summary?year=2026&month=7&upcoming_days=7
+```
+
+The dashboard summary includes:
+
+- monthly bill statistics
+- today's pending todo items
+- upcoming reminders
+
 ## Bills
 
 Create a manual bill:

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from uuid import UUID, uuid4
 
@@ -104,6 +104,37 @@ class InMemoryTaskStore:
         del self._tasks[task_id]
         return True
 
+    def today_tasks(self, now: datetime, limit: int = 10) -> list[TaskRead]:
+        start_at = self._start_of_day(now)
+        end_at = start_at + timedelta(days=1)
+        tasks = [
+            task
+            for task in self._tasks.values()
+            if task.status == TaskStatus.pending
+            and task.task_type == TaskType.todo
+            and task.due_at is not None
+            and start_at <= self._as_utc(task.due_at) < end_at
+        ]
+        return sorted(tasks, key=self._sort_key)[:limit]
+
+    def upcoming_reminders(
+        self,
+        now: datetime,
+        days: int = 7,
+        limit: int = 10,
+    ) -> list[TaskRead]:
+        start_at = self._as_utc(now)
+        end_at = start_at + timedelta(days=days)
+        reminders = [
+            task
+            for task in self._tasks.values()
+            if task.status == TaskStatus.pending
+            and task.task_type == TaskType.reminder
+            and task.remind_at is not None
+            and start_at <= self._as_utc(task.remind_at) <= end_at
+        ]
+        return sorted(reminders, key=self._sort_key)[:limit]
+
     def _sort_key(self, task: TaskRead) -> tuple[int, datetime]:
         target_at = task.remind_at or task.due_at
         if target_at is not None:
@@ -114,6 +145,10 @@ class InMemoryTaskStore:
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
+
+    def _start_of_day(self, value: datetime) -> datetime:
+        value_utc = self._as_utc(value)
+        return value_utc.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 task_store = InMemoryTaskStore()
