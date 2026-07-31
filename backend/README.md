@@ -426,6 +426,31 @@ Complete one task:
 POST /tasks/{task_id}/complete
 ```
 
+Snooze a reminder or todo:
+
+```http
+POST /tasks/{task_id}/snooze
+Content-Type: application/json
+
+{
+  "minutes": 30
+}
+```
+
+Or snooze to a specific time:
+
+```http
+POST /tasks/{task_id}/snooze
+Content-Type: application/json
+
+{
+  "snooze_until": "2026-08-02T16:00:00+08:00"
+}
+```
+
+Only pending tasks can be snoozed. Reminder tasks update `remind_at`; todo tasks
+update `due_at`.
+
 Update one task:
 
 ```http

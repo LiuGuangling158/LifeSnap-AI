@@ -53,14 +53,16 @@ class InMemoryTaskStore:
             tasks = [
                 task
                 for task in tasks
-                if task.due_at is not None and self._as_utc(task.due_at) >= due_from_utc
+                if self._target_at(task) is not None
+                and self._as_utc(self._target_at(task)) >= due_from_utc
             ]
         if due_to is not None:
             due_to_utc = self._as_utc(due_to)
             tasks = [
                 task
                 for task in tasks
-                if task.due_at is not None and self._as_utc(task.due_at) <= due_to_utc
+                if self._target_at(task) is not None
+                and self._as_utc(self._target_at(task)) <= due_to_utc
             ]
 
         sorted_tasks = sorted(tasks, key=self._sort_key)
@@ -101,6 +103,30 @@ class InMemoryTaskStore:
 
     def complete(self, task_id: UUID) -> TaskRead | None:
         return self.update(task_id, TaskUpdate(status=TaskStatus.done))
+
+    def snooze(
+        self,
+        task_id: UUID,
+        snooze_until: datetime | None = None,
+        minutes: int | None = None,
+    ) -> TaskRead | None:
+        existing = self.get(task_id)
+        if existing is None:
+            return None
+
+        target_at = snooze_until
+        if target_at is None and minutes is not None:
+            now = datetime.now(timezone.utc)
+            base_at = self._target_at(existing)
+            if base_at is None or self._as_utc(base_at) < now:
+                base_at = now
+            target_at = base_at + timedelta(minutes=minutes)
+        if target_at is None:
+            return None
+
+        if existing.task_type == TaskType.reminder:
+            return self.update(task_id, TaskUpdate(remind_at=target_at))
+        return self.update(task_id, TaskUpdate(due_at=target_at))
 
     def delete(self, task_id: UUID) -> bool:
         if task_id not in self._tasks:
@@ -146,10 +172,15 @@ class InMemoryTaskStore:
         return sorted(reminders, key=self._sort_key)[:limit]
 
     def _sort_key(self, task: TaskRead) -> tuple[int, datetime]:
-        target_at = task.remind_at or task.due_at
+        target_at = self._target_at(task)
         if target_at is not None:
             return (0, self._as_utc(target_at))
         return (1, self._as_utc(task.created_at))
+
+    def _target_at(self, task: TaskRead) -> datetime | None:
+        if task.task_type == TaskType.reminder:
+            return task.remind_at or task.due_at
+        return task.due_at or task.remind_at
 
     def _as_utc(self, value: datetime) -> datetime:
         if value.tzinfo is None:

@@ -50,6 +50,11 @@ class TaskUpdate(BaseModel):
     source: TaskSource | None = None
 
 
+class TaskSnoozeRequest(BaseModel):
+    snooze_until: datetime | None = None
+    minutes: int | None = Field(default=None, ge=1, le=43200)
+
+
 class TaskRead(TaskCreate):
     id: UUID
     status: TaskStatus
@@ -64,4 +69,3 @@ class TaskListResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
-

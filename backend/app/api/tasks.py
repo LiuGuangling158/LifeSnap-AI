@@ -7,6 +7,7 @@ from app.schemas.task import (
     TaskCreate,
     TaskListResponse,
     TaskRead,
+    TaskSnoozeRequest,
     TaskStatus,
     TaskType,
     TaskUpdate,
@@ -66,9 +67,39 @@ def complete_task(task_id: UUID) -> TaskRead:
     return task
 
 
+@router.post("/{task_id}/snooze", response_model=TaskRead)
+def snooze_task(task_id: UUID, payload: TaskSnoozeRequest) -> TaskRead:
+    existing = task_store.get(task_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if existing.status != TaskStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending tasks can be snoozed",
+        )
+    if payload.snooze_until is None and payload.minutes is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide snooze_until or minutes",
+        )
+    if payload.snooze_until is not None and payload.minutes is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide only one of snooze_until or minutes",
+        )
+
+    task = task_store.snooze(
+        task_id,
+        snooze_until=payload.snooze_until,
+        minutes=payload.minutes,
+    )
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return task
+
+
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: UUID) -> None:
     deleted = task_store.delete(task_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-
