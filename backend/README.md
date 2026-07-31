@@ -4,7 +4,9 @@ FastAPI backend for LifeSnap AI.
 
 ## Current Increment
 
-This first backend increment only provides a minimal application shell and a health check endpoint.
+The backend currently provides the MVP shell, health check, bill management,
+task/reminder management, attachment metadata, dashboard summary, and rule-based
+AI candidate flows for bills and tasks.
 
 ## Local Run
 
@@ -65,6 +67,51 @@ POST /agent/bill-candidates/{candidate_id}/confirm
 ```
 
 Candidates missing required fields, such as `amount` or `merchant`, cannot be confirmed directly. The user should edit the result and save it through `POST /bills`.
+
+Parse chat text into a task or reminder candidate:
+
+```http
+POST /agent/parse-task
+Content-Type: application/json
+
+{
+  "text": "明天下午 3 点提醒我去医院复诊，记得带医保卡和检查报告。",
+  "source": "ai_chat"
+}
+```
+
+This endpoint returns a candidate only. It does not create a saved task. The
+user still needs to confirm or edit the result before it is saved.
+
+Get a task candidate:
+
+```text
+GET /agent/task-candidates/{candidate_id}
+```
+
+Update a task candidate before confirmation:
+
+```http
+PATCH /agent/task-candidates/{candidate_id}
+Content-Type: application/json
+
+{
+  "title": "去医院复诊",
+  "category": "医疗",
+  "task_type": "reminder",
+  "remind_at": "2026-08-01T15:00:00+08:00",
+  "priority": "high"
+}
+```
+
+Confirm a task candidate and save it as a task:
+
+```text
+POST /agent/task-candidates/{candidate_id}/confirm
+```
+
+Reminder candidates missing required fields, such as `title` or `remind_at`,
+cannot be confirmed directly. Todo candidates require at least a `title`.
 
 ## Attachments
 

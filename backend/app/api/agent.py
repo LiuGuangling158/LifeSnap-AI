@@ -3,9 +3,19 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 
 from app.schemas.bill import BillRead
-from app.schemas.agent import BillCandidateUpdate, ParseBillRequest, ParseBillResponse
+from app.schemas.agent import (
+    BillCandidateUpdate,
+    ParseBillRequest,
+    ParseBillResponse,
+    ParseTaskRequest,
+    ParseTaskResponse,
+    TaskCandidateUpdate,
+)
+from app.schemas.task import TaskRead
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
+from app.services.task_candidate_store import task_candidate_store
+from app.services.task_parser import task_parser
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -62,3 +72,57 @@ def confirm_bill_candidate(candidate_id: UUID) -> BillRead:
             detail="Bill candidate not found",
         )
     return bill
+
+
+@router.post("/parse-task", response_model=ParseTaskResponse)
+def parse_task(payload: ParseTaskRequest) -> ParseTaskResponse:
+    candidate = task_parser.parse_task(payload)
+    return task_candidate_store.save(candidate)
+
+
+@router.get("/task-candidates/{candidate_id}", response_model=ParseTaskResponse)
+def get_task_candidate(candidate_id: UUID) -> ParseTaskResponse:
+    candidate = task_candidate_store.get(candidate_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task candidate not found",
+        )
+    return candidate
+
+
+@router.patch("/task-candidates/{candidate_id}", response_model=ParseTaskResponse)
+def update_task_candidate(
+    candidate_id: UUID,
+    payload: TaskCandidateUpdate,
+) -> ParseTaskResponse:
+    candidate = task_candidate_store.update(candidate_id, payload)
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task candidate not found",
+        )
+    return candidate
+
+
+@router.post("/task-candidates/{candidate_id}/confirm", response_model=TaskRead)
+def confirm_task_candidate(candidate_id: UUID) -> TaskRead:
+    candidate = task_candidate_store.get(candidate_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task candidate not found",
+        )
+    if not task_candidate_store.is_confirmable(candidate):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Task candidate is missing required fields",
+        )
+
+    task = task_candidate_store.confirm(candidate_id)
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task candidate not found",
+        )
+    return task
