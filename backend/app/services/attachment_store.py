@@ -2,7 +2,12 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from uuid import UUID, uuid4
 
-from app.schemas.attachment import AttachmentRead, AttachmentSource, RetentionPolicy
+from app.schemas.attachment import (
+    AttachmentDuplicateResponse,
+    AttachmentRead,
+    AttachmentSource,
+    RetentionPolicy,
+)
 
 
 class AttachmentTooLargeError(ValueError):
@@ -41,12 +46,15 @@ class InMemoryAttachmentStore:
 
         now = datetime.now(timezone.utc)
         attachment_id = uuid4()
+        checksum = sha256(content).hexdigest()
+        duplicate_matches = self._find_by_checksum(checksum)
         attachment = AttachmentRead(
             id=attachment_id,
             filename=filename,
             content_type=content_type,
             file_size=len(content),
-            checksum=sha256(content).hexdigest(),
+            checksum=checksum,
+            duplicate_of=duplicate_matches[0].id if duplicate_matches else None,
             source=source,
             retention_policy=(
                 RetentionPolicy.keep_until_user_delete
@@ -68,6 +76,26 @@ class InMemoryAttachmentStore:
 
     def all(self) -> list[AttachmentRead]:
         return list(self._attachments.values())
+
+    def duplicates_for(self, attachment_id: UUID) -> AttachmentDuplicateResponse | None:
+        attachment = self.get(attachment_id)
+        if attachment is None:
+            return None
+
+        matches = [
+            match
+            for match in self._find_by_checksum(attachment.checksum)
+            if match.id != attachment_id
+        ]
+        duplicate_of = attachment.duplicate_of or (matches[0].id if matches else None)
+        return AttachmentDuplicateResponse(
+            attachment_id=attachment.id,
+            checksum=attachment.checksum,
+            is_duplicate=bool(matches),
+            duplicate_of=duplicate_of,
+            duplicate_count=len(matches),
+            matches=matches,
+        )
 
     def update_ocr_text(self, attachment_id: UUID, ocr_text: str) -> AttachmentRead | None:
         attachment = self.get(attachment_id)
@@ -106,6 +134,14 @@ class InMemoryAttachmentStore:
         self._attachments.clear()
         self._original_files.clear()
         return count
+
+    def _find_by_checksum(self, checksum: str) -> list[AttachmentRead]:
+        matches = [
+            attachment
+            for attachment in self._attachments.values()
+            if attachment.checksum == checksum
+        ]
+        return sorted(matches, key=lambda attachment: attachment.created_at)
 
 
 attachment_store = InMemoryAttachmentStore()

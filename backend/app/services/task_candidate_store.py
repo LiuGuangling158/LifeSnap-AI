@@ -32,7 +32,7 @@ class InMemoryTaskCandidateStore:
         data = candidate.data.model_dump()
         updates = payload.model_dump(exclude_unset=True)
         for field in ("category", "task_type", "priority", "source"):
-            if updates.get(field) is None:
+            if field in updates and updates[field] is None:
                 updates.pop(field)
         data.update(updates)
 

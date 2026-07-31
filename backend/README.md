@@ -102,6 +102,15 @@ Content-Type: application/json
 }
 ```
 
+Check whether a bill candidate looks duplicated before confirmation:
+
+```text
+POST /agent/bill-candidates/{candidate_id}/check-duplicate?time_window_minutes=10
+```
+
+This uses the same duplicate rule as `POST /bills/check-duplicate`. Candidates
+missing required fields, such as `amount` or `merchant`, return `400`.
+
 Confirm a bill candidate and save it as a bill:
 
 ```text
@@ -282,6 +291,16 @@ Get attachment metadata:
 ```text
 GET /attachments/{attachment_id}
 ```
+
+Check duplicate attachments by checksum:
+
+```text
+GET /attachments/{attachment_id}/duplicates
+```
+
+Uploading the same file bytes again does not block the upload. The second
+attachment returns `duplicate_of` in its metadata, and the duplicate query
+returns all current attachments with the same checksum.
 
 Set OCR text for an attachment:
 

@@ -104,8 +104,10 @@ def _run_checks(client: ApiClient) -> None:
     _check_health(client)
     _check_chat_task_candidate_confirmation(client)
     _check_bill_idempotency(client)
+    _check_bill_candidate_duplicate_detection(client)
     _check_task_snooze_idempotency(client)
     _check_privacy_switch(client)
+    _check_attachment_duplicate_detection(client)
     _check_ocr_fallback_flow(client)
     _check_data_export_and_clear(client)
 
@@ -123,6 +125,17 @@ def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     _assert(body["intent"] == "create_task", "Chat should create a task candidate")
 
     candidate_id = body["candidate_id"]
+    status, patched = client.request(
+        "PATCH",
+        f"/agent/task-candidates/{candidate_id}",
+        {"priority": "high"},
+    )
+    _assert(status == 200, "Task candidate partial update should return 200")
+    _assert(
+        patched["data"]["priority"] == "high",
+        "Task candidate partial update should apply provided fields",
+    )
+
     headers = {"Idempotency-Key": "smoke-confirm-task-001"}
     status, first = client.request(
         "POST",
@@ -155,6 +168,59 @@ def _check_bill_idempotency(client: ApiClient) -> None:
     conflict_payload = payload | {"amount": 19}
     conflict_status, _ = client.request("POST", "/bills", conflict_payload, headers=headers)
     _assert(conflict_status == 409, "Same Idempotency-Key with different payload should conflict")
+
+
+def _check_bill_candidate_duplicate_detection(client: ApiClient) -> None:
+    payload = {
+        "amount": 21,
+        "merchant": "\u5496\u5561\u5e97",
+        "category": "\u9910\u996e",
+        "payment_method": "\u5fae\u4fe1\u652f\u4ed8",
+        "transaction_type": "expense",
+        "paid_at": "2026-08-01T09:00:00+08:00",
+        "source": "manual",
+    }
+    status, bill = client.request(
+        "POST",
+        "/bills",
+        payload,
+        headers={"Idempotency-Key": "smoke-candidate-duplicate-bill"},
+    )
+    _assert(status == 201, "Duplicate setup bill should be created")
+
+    status, candidate = client.request(
+        "POST",
+        "/agent/parse-bill",
+        {
+            "text": "\u5496\u5561\u5e97\n\u5fae\u4fe1\u652f\u4ed8\n\u5b9e\u4ed8 21 \u5143",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Bill candidate should be parsed")
+
+    status, candidate = client.request(
+        "PATCH",
+        f"/agent/bill-candidates/{candidate['candidate_id']}",
+        {
+            "amount": payload["amount"],
+            "merchant": payload["merchant"],
+            "category": payload["category"],
+            "payment_method": payload["payment_method"],
+            "paid_at": payload["paid_at"],
+        },
+    )
+    _assert(status == 200, "Bill candidate should be editable")
+
+    status, duplicate = client.request(
+        "POST",
+        f"/agent/bill-candidates/{candidate['candidate_id']}/check-duplicate",
+    )
+    _assert(status == 200, "Bill candidate duplicate check should return 200")
+    _assert(duplicate["is_duplicate"], "Bill candidate duplicate check should find a match")
+    _assert(
+        duplicate["matches"][0]["bill"]["id"] == bill["id"],
+        "Bill candidate duplicate check should include the matching bill",
+    )
 
 
 def _check_task_snooze_idempotency(client: ApiClient) -> None:
@@ -215,6 +281,25 @@ def _check_privacy_switch(client: ApiClient) -> None:
         {"allow_ai_text_processing": True},
     )
     _assert(status == 200, "AI text processing should be re-enabled")
+
+
+def _check_attachment_duplicate_detection(client: ApiClient) -> None:
+    first_status, first = client.upload_png()
+    second_status, second = client.upload_png()
+    _assert(first_status == 201 and second_status == 201, "Duplicate upload setup should work")
+    _assert(
+        second["duplicate_of"] == first["id"],
+        "Second upload of the same bytes should point at the first attachment",
+    )
+
+    status, duplicates = client.request("GET", f"/attachments/{second['id']}/duplicates")
+    _assert(status == 200, "Duplicate query should return 200")
+    _assert(duplicates["is_duplicate"], "Duplicate query should mark duplicate attachments")
+    _assert(duplicates["duplicate_count"] == 1, "Duplicate query should include one match")
+    _assert(
+        duplicates["matches"][0]["id"] == first["id"],
+        "Duplicate query should include the original attachment",
+    )
 
 
 def _check_ocr_fallback_flow(client: ApiClient) -> None:

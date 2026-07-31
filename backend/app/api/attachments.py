@@ -3,7 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.schemas.agent import ParseBillRequest, ParseBillResponse
-from app.schemas.attachment import AttachmentOcrTextUpdate, AttachmentRead, AttachmentSource
+from app.schemas.attachment import (
+    AttachmentDuplicateResponse,
+    AttachmentOcrTextUpdate,
+    AttachmentRead,
+    AttachmentSource,
+)
 from app.schemas.bill import BillSource
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
@@ -52,6 +57,17 @@ def get_attachment(attachment_id: UUID) -> AttachmentRead:
             detail="Attachment not found",
         )
     return attachment
+
+
+@router.get("/{attachment_id}/duplicates", response_model=AttachmentDuplicateResponse)
+def get_attachment_duplicates(attachment_id: UUID) -> AttachmentDuplicateResponse:
+    duplicates = attachment_store.duplicates_for(attachment_id)
+    if duplicates is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found",
+        )
+    return duplicates
 
 
 @router.patch("/{attachment_id}/ocr-text", response_model=AttachmentRead)

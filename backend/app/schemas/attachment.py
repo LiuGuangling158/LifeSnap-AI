@@ -22,6 +22,7 @@ class AttachmentRead(BaseModel):
     content_type: str
     file_size: int
     checksum: str
+    duplicate_of: UUID | None = None
     source: AttachmentSource
     storage_type: str = "memory"
     retention_policy: RetentionPolicy
@@ -34,3 +35,11 @@ class AttachmentRead(BaseModel):
 class AttachmentOcrTextUpdate(BaseModel):
     ocr_text: str = Field(min_length=1, max_length=10000)
 
+
+class AttachmentDuplicateResponse(BaseModel):
+    attachment_id: UUID
+    checksum: str
+    is_duplicate: bool
+    duplicate_of: UUID | None = None
+    duplicate_count: int
+    matches: list[AttachmentRead]
