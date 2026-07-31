@@ -66,6 +66,59 @@ POST /agent/bill-candidates/{candidate_id}/confirm
 
 Candidates missing required fields, such as `amount` or `merchant`, cannot be confirmed directly. The user should edit the result and save it through `POST /bills`.
 
+## Attachments
+
+Upload an image or PDF attachment:
+
+```http
+POST /attachments/upload
+Content-Type: multipart/form-data
+
+file=<binary>
+source=album
+save_original=false
+```
+
+Supported content types:
+
+- `image/jpeg`
+- `image/png`
+- `image/webp`
+- `application/pdf`
+
+Maximum file size: 10MB.
+
+Get attachment metadata:
+
+```text
+GET /attachments/{attachment_id}
+```
+
+Set OCR text for an attachment:
+
+```http
+PATCH /attachments/{attachment_id}/ocr-text
+Content-Type: application/json
+
+{
+  "ocr_text": "瑞幸咖啡\n微信支付\n实付 18.50 元\n支付成功"
+}
+```
+
+Parse attachment OCR text into a bill candidate:
+
+```text
+POST /attachments/{attachment_id}/parse-bill
+```
+
+This currently uses stored OCR text and the rule-based bill parser. It does not run a real OCR engine yet.
+
+Delete an attachment:
+
+```text
+DELETE /attachments/{attachment_id}
+```
+
 ## Dashboard
 
 Get homepage summary:

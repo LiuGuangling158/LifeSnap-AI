@@ -18,6 +18,7 @@ class BillSource(str, Enum):
     manual = "manual"
     screenshot = "screenshot"
     album = "album"
+    upload = "upload"
     ai_chat = "ai_chat"
 
 
