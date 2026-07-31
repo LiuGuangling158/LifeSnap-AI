@@ -12,6 +12,7 @@ from app.services.attachment_store import (
     UnsupportedAttachmentTypeError,
     attachment_store,
 )
+from app.services.settings_store import settings_store
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
@@ -20,16 +21,21 @@ router = APIRouter(prefix="/attachments", tags=["attachments"])
 async def upload_attachment(
     file: UploadFile = File(...),
     source: AttachmentSource = Form(default=AttachmentSource.upload),
-    save_original: bool = Form(default=False),
+    save_original: bool | None = Form(default=None),
 ) -> AttachmentRead:
     content = await file.read()
+    should_save_original = (
+        save_original
+        if save_original is not None
+        else settings_store.get_privacy_settings().save_original_attachments_by_default
+    )
     try:
         return attachment_store.create(
             filename=file.filename or "attachment",
             content_type=file.content_type or "application/octet-stream",
             content=content,
             source=source,
-            save_original=save_original,
+            save_original=should_save_original,
         )
     except AttachmentTooLargeError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc))
@@ -64,6 +70,13 @@ def update_attachment_ocr_text(
 
 @router.post("/{attachment_id}/parse-bill", response_model=ParseBillResponse)
 def parse_attachment_bill(attachment_id: UUID) -> ParseBillResponse:
+    privacy_settings = settings_store.get_privacy_settings()
+    if not privacy_settings.allow_ai_text_processing:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI text processing is disabled in privacy settings",
+        )
+
     attachment = attachment_store.get(attachment_id)
     if attachment is None:
         raise HTTPException(
@@ -82,7 +95,10 @@ def parse_attachment_bill(attachment_id: UUID) -> ParseBillResponse:
             source=_bill_source_from_attachment(attachment.source),
         )
     )
-    return bill_candidate_store.save(candidate)
+    saved_candidate = bill_candidate_store.save(candidate)
+    if not privacy_settings.keep_ocr_text:
+        attachment_store.clear_ocr_text(attachment_id)
+    return saved_candidate
 
 
 @router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)

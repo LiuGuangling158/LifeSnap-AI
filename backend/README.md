@@ -152,6 +152,67 @@ Chat responses do not create formal bills or tasks directly. If the response
 contains `candidate_id`, the user still needs to confirm it through the related
 candidate confirmation endpoint.
 
+## Settings
+
+Get privacy settings:
+
+```text
+GET /settings/privacy
+```
+
+Update privacy settings:
+
+```http
+PATCH /settings/privacy
+Content-Type: application/json
+
+{
+  "local_only_mode": true,
+  "allow_ai_text_processing": true,
+  "save_original_attachments_by_default": false,
+  "keep_ocr_text": true
+}
+```
+
+When `save_original_attachments_by_default` is enabled, attachment uploads that
+do not pass `save_original` will keep the original file in memory. When
+`allow_ai_text_processing` is disabled, chat and parse endpoints stop generating
+AI candidates. When `keep_ocr_text` is disabled, attachment OCR text is removed
+after parsing.
+
+## Local Data
+
+Get local data summary:
+
+```text
+GET /data/summary
+```
+
+Export local data as JSON:
+
+```text
+GET /data/export
+```
+
+Clear local data:
+
+```http
+POST /data/clear
+Content-Type: application/json
+
+{
+  "confirm": true,
+  "include_bills": true,
+  "include_tasks": true,
+  "include_attachments": true,
+  "include_candidates": true,
+  "reset_privacy_settings": false
+}
+```
+
+The clear endpoint returns data counts before and after the operation. It
+requires `confirm: true` to avoid accidental deletion.
+
 ## Attachments
 
 Upload an image or PDF attachment:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from math import ceil
@@ -84,6 +86,9 @@ class InMemoryBillStore:
     def get(self, bill_id: UUID) -> BillRead | None:
         return self._bills.get(bill_id)
 
+    def all(self) -> list[BillRead]:
+        return list(self._bills.values())
+
     def update(self, bill_id: UUID, payload: BillUpdate) -> BillRead | None:
         existing = self.get(bill_id)
         if existing is None:
@@ -103,6 +108,11 @@ class InMemoryBillStore:
 
         del self._bills[bill_id]
         return True
+
+    def clear(self) -> int:
+        count = len(self._bills)
+        self._bills.clear()
+        return count
 
     def check_duplicate(
         self,

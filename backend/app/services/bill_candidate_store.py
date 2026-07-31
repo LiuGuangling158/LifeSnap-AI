@@ -16,6 +16,9 @@ class InMemoryBillCandidateStore:
     def get(self, candidate_id: UUID) -> ParseBillResponse | None:
         return self._candidates.get(candidate_id)
 
+    def all(self) -> list[ParseBillResponse]:
+        return list(self._candidates.values())
+
     def update(
         self,
         candidate_id: UUID,
@@ -63,6 +66,11 @@ class InMemoryBillCandidateStore:
 
     def is_confirmable(self, candidate: ParseBillResponse) -> bool:
         return candidate.data.amount is not None and candidate.data.merchant is not None
+
+    def clear(self) -> int:
+        count = len(self._candidates)
+        self._candidates.clear()
+        return count
 
     def _warnings(self, data: BillCandidateData) -> list[str]:
         warnings: list[str] = []

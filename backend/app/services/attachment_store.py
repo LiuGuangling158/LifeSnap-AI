@@ -66,6 +66,9 @@ class InMemoryAttachmentStore:
     def get(self, attachment_id: UUID) -> AttachmentRead | None:
         return self._attachments.get(attachment_id)
 
+    def all(self) -> list[AttachmentRead]:
+        return list(self._attachments.values())
+
     def update_ocr_text(self, attachment_id: UUID, ocr_text: str) -> AttachmentRead | None:
         attachment = self.get(attachment_id)
         if attachment is None:
@@ -73,6 +76,18 @@ class InMemoryAttachmentStore:
 
         data = attachment.model_dump()
         data["ocr_text"] = ocr_text
+        data["updated_at"] = datetime.now(timezone.utc)
+        updated = AttachmentRead(**data)
+        self._attachments[attachment_id] = updated
+        return updated
+
+    def clear_ocr_text(self, attachment_id: UUID) -> AttachmentRead | None:
+        attachment = self.get(attachment_id)
+        if attachment is None:
+            return None
+
+        data = attachment.model_dump()
+        data["ocr_text"] = None
         data["updated_at"] = datetime.now(timezone.utc)
         updated = AttachmentRead(**data)
         self._attachments[attachment_id] = updated
@@ -86,6 +101,11 @@ class InMemoryAttachmentStore:
         self._original_files.pop(attachment_id, None)
         return True
 
+    def clear(self) -> int:
+        count = len(self._attachments)
+        self._attachments.clear()
+        self._original_files.clear()
+        return count
+
 
 attachment_store = InMemoryAttachmentStore()
-

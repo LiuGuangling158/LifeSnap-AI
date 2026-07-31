@@ -79,6 +79,9 @@ class InMemoryTaskStore:
     def get(self, task_id: UUID) -> TaskRead | None:
         return self._tasks.get(task_id)
 
+    def all(self) -> list[TaskRead]:
+        return list(self._tasks.values())
+
     def update(self, task_id: UUID, payload: TaskUpdate) -> TaskRead | None:
         existing = self.get(task_id)
         if existing is None:
@@ -105,6 +108,11 @@ class InMemoryTaskStore:
 
         del self._tasks[task_id]
         return True
+
+    def clear(self) -> int:
+        count = len(self._tasks)
+        self._tasks.clear()
+        return count
 
     def today_tasks(self, now: datetime, limit: int = 10) -> list[TaskRead]:
         start_at = self._start_of_day(now)

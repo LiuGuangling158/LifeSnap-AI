@@ -12,6 +12,7 @@ from app.schemas.chat import (
 from app.schemas.task import TaskSource
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
+from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
 from app.services.task_parser import task_parser
 
@@ -56,6 +57,18 @@ class RuleBasedChatService:
 
     def handle_message(self, payload: ChatMessageRequest) -> ChatMessageResponse:
         text = payload.message.strip()
+        if not settings_store.get_privacy_settings().allow_ai_text_processing:
+            return ChatMessageResponse(
+                message_id=uuid4(),
+                reply="AI text processing is disabled in privacy settings.",
+                intent=ChatIntent.unsupported,
+                confidence=1.0,
+                action_type=ChatActionType.none,
+                candidate=None,
+                warnings=["ai_text_processing_disabled"],
+                need_user_confirmation=False,
+            )
+
         unsupported_reply = self._unsupported_reply(text)
         if unsupported_reply is not None and not self._looks_like_simple_bill(text):
             return ChatMessageResponse(

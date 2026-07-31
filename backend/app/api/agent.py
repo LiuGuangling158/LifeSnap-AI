@@ -14,6 +14,7 @@ from app.schemas.agent import (
 from app.schemas.task import TaskRead
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
+from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
 from app.services.task_parser import task_parser
 
@@ -22,6 +23,11 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 @router.post("/parse-bill", response_model=ParseBillResponse)
 def parse_bill(payload: ParseBillRequest) -> ParseBillResponse:
+    if not settings_store.get_privacy_settings().allow_ai_text_processing:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI text processing is disabled in privacy settings",
+        )
     candidate = bill_parser.parse_bill(payload)
     return bill_candidate_store.save(candidate)
 
@@ -76,6 +82,11 @@ def confirm_bill_candidate(candidate_id: UUID) -> BillRead:
 
 @router.post("/parse-task", response_model=ParseTaskResponse)
 def parse_task(payload: ParseTaskRequest) -> ParseTaskResponse:
+    if not settings_store.get_privacy_settings().allow_ai_text_processing:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI text processing is disabled in privacy settings",
+        )
     candidate = task_parser.parse_task(payload)
     return task_candidate_store.save(candidate)
 

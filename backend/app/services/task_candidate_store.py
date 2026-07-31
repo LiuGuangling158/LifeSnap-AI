@@ -17,6 +17,9 @@ class InMemoryTaskCandidateStore:
     def get(self, candidate_id: UUID) -> ParseTaskResponse | None:
         return self._candidates.get(candidate_id)
 
+    def all(self) -> list[ParseTaskResponse]:
+        return list(self._candidates.values())
+
     def update(
         self,
         candidate_id: UUID,
@@ -74,6 +77,11 @@ class InMemoryTaskCandidateStore:
         if candidate.data.task_type == TaskType.reminder:
             return candidate.data.remind_at is not None
         return True
+
+    def clear(self) -> int:
+        count = len(self._candidates)
+        self._candidates.clear()
+        return count
 
 
 task_candidate_store = InMemoryTaskCandidateStore()
