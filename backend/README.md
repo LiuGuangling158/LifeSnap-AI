@@ -298,6 +298,41 @@ Delete an attachment:
 DELETE /attachments/{attachment_id}
 ```
 
+## OCR
+
+Recognize text from an uploaded attachment:
+
+```http
+POST /ocr/recognize
+Content-Type: application/json
+
+{
+  "attachment_id": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+This increment does not run a real OCR engine yet. It returns stored OCR text
+when available. If the attachment has no OCR text, it returns:
+
+```json
+{
+  "status": "manual_required",
+  "text": null,
+  "manual_entry_required": true,
+  "warnings": ["ocr_engine_not_configured", "manual_entry_required"]
+}
+```
+
+The fallback flow is:
+
+```text
+POST /attachments/upload
+POST /ocr/recognize
+PATCH /attachments/{attachment_id}/ocr-text
+POST /ocr/recognize
+POST /attachments/{attachment_id}/parse-bill
+```
+
 ## Dashboard
 
 Get homepage summary:
