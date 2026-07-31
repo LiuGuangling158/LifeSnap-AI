@@ -24,6 +24,16 @@ Health check:
 GET /health
 ```
 
+Run backend smoke test:
+
+```powershell
+cd ..
+.\backend\.venv\Scripts\python.exe backend\scripts\smoke_test.py
+```
+
+The smoke test starts a temporary backend server, verifies the core API flow, and
+then shuts the temporary server down. It does not use the existing `8000` server.
+
 ## Idempotency
 
 Create and state-changing endpoints support an optional `Idempotency-Key` header
