@@ -9,6 +9,7 @@ from app.schemas.bill import (
     BillRead,
     BillSource,
     BillUpdate,
+    DuplicateBillCheckResponse,
     MonthlyBillStatistics,
     TransactionType,
 )
@@ -56,6 +57,17 @@ def get_monthly_bill_statistics(
     target_year = year or now.year
     target_month = month or now.month
     return bill_store.monthly_statistics(target_year, target_month)
+
+
+@router.post("/check-duplicate", response_model=DuplicateBillCheckResponse)
+def check_duplicate_bill(
+    payload: BillCreate,
+    time_window_minutes: int = Query(default=10, ge=1, le=1440),
+) -> DuplicateBillCheckResponse:
+    return bill_store.check_duplicate(
+        payload,
+        time_window_minutes=time_window_minutes,
+    )
 
 
 @router.get("/{bill_id}", response_model=BillRead)

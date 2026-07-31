@@ -60,6 +60,17 @@ class BillListResponse(BaseModel):
     total_pages: int
 
 
+class DuplicateBillMatch(BaseModel):
+    bill: BillRead
+    reason: str
+
+
+class DuplicateBillCheckResponse(BaseModel):
+    is_duplicate: bool
+    time_window_minutes: int
+    matches: list[DuplicateBillMatch]
+
+
 class CategoryBreakdown(BaseModel):
     category: str
     amount: Decimal

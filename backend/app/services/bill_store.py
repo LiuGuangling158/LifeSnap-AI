@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from math import ceil
 from uuid import UUID, uuid4
@@ -10,6 +10,8 @@ from app.schemas.bill import (
     BillRead,
     BillUpdate,
     CategoryBreakdown,
+    DuplicateBillCheckResponse,
+    DuplicateBillMatch,
     MonthlyBillStatistics,
     TransactionType,
 )
@@ -102,6 +104,38 @@ class InMemoryBillStore:
         del self._bills[bill_id]
         return True
 
+    def check_duplicate(
+        self,
+        payload: BillCreate,
+        time_window_minutes: int = 10,
+    ) -> DuplicateBillCheckResponse:
+        target_paid_at = self._as_utc(payload.paid_at or datetime.now(timezone.utc))
+        time_window = timedelta(minutes=time_window_minutes)
+        matches: list[DuplicateBillMatch] = []
+
+        for bill in self._bills.values():
+            if bill.amount != payload.amount:
+                continue
+            if bill.transaction_type != payload.transaction_type:
+                continue
+            if bill.merchant.casefold() != payload.merchant.casefold():
+                continue
+            if abs(self._as_utc(bill.paid_at) - target_paid_at) > time_window:
+                continue
+
+            matches.append(
+                DuplicateBillMatch(
+                    bill=bill,
+                    reason="same_merchant_amount_type_and_nearby_paid_at",
+                )
+            )
+
+        return DuplicateBillCheckResponse(
+            is_duplicate=bool(matches),
+            time_window_minutes=time_window_minutes,
+            matches=matches,
+        )
+
     def monthly_statistics(self, year: int, month: int) -> MonthlyBillStatistics:
         monthly_bills = [
             bill
@@ -147,6 +181,11 @@ class InMemoryBillStore:
             net_amount=total_income + total_refund - total_expense,
             category_breakdown=category_breakdown,
         )
+
+    def _as_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 bill_store = InMemoryBillStore()

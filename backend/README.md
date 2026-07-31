@@ -152,6 +152,25 @@ Content-Type: application/json
 }
 ```
 
+Check whether a bill looks duplicated:
+
+```http
+POST /bills/check-duplicate?time_window_minutes=10
+Content-Type: application/json
+
+{
+  "amount": 18.5,
+  "merchant": "瑞幸咖啡",
+  "category": "餐饮",
+  "payment_method": "微信支付",
+  "transaction_type": "expense",
+  "paid_at": "2026-07-31T09:30:00+08:00",
+  "source": "screenshot"
+}
+```
+
+The duplicate check only returns possible matches. It does not block `POST /bills`.
+
 List bills:
 
 ```text
