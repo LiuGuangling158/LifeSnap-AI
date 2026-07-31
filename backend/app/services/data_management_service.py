@@ -9,6 +9,7 @@ from app.schemas.settings import (
 from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
+from app.services.idempotency_store import idempotency_store
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
 from app.services.task_store import task_store
@@ -49,6 +50,14 @@ class DataManagementService:
             task_candidate_store.clear()
         if payload.reset_privacy_settings:
             settings_store.reset_privacy_settings()
+        if (
+            payload.include_bills
+            or payload.include_tasks
+            or payload.include_attachments
+            or payload.include_candidates
+            or payload.reset_privacy_settings
+        ):
+            idempotency_store.clear()
 
         return DataClearResponse(
             cleared_at=datetime.now(timezone.utc),

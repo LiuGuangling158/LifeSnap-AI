@@ -24,6 +24,38 @@ Health check:
 GET /health
 ```
 
+## Idempotency
+
+Create and state-changing endpoints support an optional `Idempotency-Key` header
+for weak-network retries. Repeating the same endpoint with the same key and same
+payload returns the first successful result instead of applying the action again.
+Reusing the same key with a different payload returns `409 Conflict`.
+
+Example:
+
+```http
+POST /tasks
+Idempotency-Key: create-rent-task-001
+Content-Type: application/json
+
+{
+  "title": "交房租",
+  "category": "居住",
+  "task_type": "todo",
+  "due_at": "2026-08-01T09:00:00+08:00",
+  "source": "manual"
+}
+```
+
+Currently covered endpoints:
+
+- `POST /bills`
+- `POST /tasks`
+- `POST /tasks/{task_id}/complete`
+- `POST /tasks/{task_id}/snooze`
+- `POST /agent/bill-candidates/{candidate_id}/confirm`
+- `POST /agent/task-candidates/{candidate_id}/confirm`
+
 ## Agent
 
 Parse OCR text into a bill candidate:

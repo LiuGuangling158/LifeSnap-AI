@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, status
 
 from app.schemas.bill import (
     BillCreate,
@@ -14,13 +14,25 @@ from app.schemas.bill import (
     TransactionType,
 )
 from app.services.bill_store import bill_store
+from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 
 router = APIRouter(prefix="/bills", tags=["bills"])
 
 
 @router.post("", response_model=BillRead, status_code=status.HTTP_201_CREATED)
-def create_bill(payload: BillCreate) -> BillRead:
-    return bill_store.create(payload)
+def create_bill(
+    payload: BillCreate,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> BillRead:
+    try:
+        return idempotency_store.run(
+            scope="POST /bills",
+            key=idempotency_key,
+            fingerprint=payload.model_dump(mode="json"),
+            factory=lambda: bill_store.create(payload),
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.get("", response_model=BillListResponse)

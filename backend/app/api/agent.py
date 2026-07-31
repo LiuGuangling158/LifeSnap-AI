@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 
 from app.schemas.bill import BillRead
 from app.schemas.agent import (
@@ -14,6 +14,7 @@ from app.schemas.agent import (
 from app.schemas.task import TaskRead
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
+from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
 from app.services.task_parser import task_parser
@@ -58,26 +59,40 @@ def update_bill_candidate(
 
 
 @router.post("/bill-candidates/{candidate_id}/confirm", response_model=BillRead)
-def confirm_bill_candidate(candidate_id: UUID) -> BillRead:
-    candidate = bill_candidate_store.get(candidate_id)
-    if candidate is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Bill candidate not found",
-        )
-    if not bill_candidate_store.is_confirmable(candidate):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bill candidate is missing required fields",
-        )
+def confirm_bill_candidate(
+    candidate_id: UUID,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> BillRead:
+    def confirm() -> BillRead:
+        candidate = bill_candidate_store.get(candidate_id)
+        if candidate is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Bill candidate not found",
+            )
+        if not bill_candidate_store.is_confirmable(candidate):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Bill candidate is missing required fields",
+            )
 
-    bill = bill_candidate_store.confirm(candidate_id)
-    if bill is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Bill candidate not found",
+        bill = bill_candidate_store.confirm(candidate_id)
+        if bill is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Bill candidate not found",
+            )
+        return bill
+
+    try:
+        return idempotency_store.run(
+            scope="POST /agent/bill-candidates/confirm",
+            key=idempotency_key,
+            fingerprint={"candidate_id": str(candidate_id)},
+            factory=confirm,
         )
-    return bill
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.post("/parse-task", response_model=ParseTaskResponse)
@@ -117,23 +132,37 @@ def update_task_candidate(
 
 
 @router.post("/task-candidates/{candidate_id}/confirm", response_model=TaskRead)
-def confirm_task_candidate(candidate_id: UUID) -> TaskRead:
-    candidate = task_candidate_store.get(candidate_id)
-    if candidate is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task candidate not found",
-        )
-    if not task_candidate_store.is_confirmable(candidate):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Task candidate is missing required fields",
-        )
+def confirm_task_candidate(
+    candidate_id: UUID,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TaskRead:
+    def confirm() -> TaskRead:
+        candidate = task_candidate_store.get(candidate_id)
+        if candidate is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task candidate not found",
+            )
+        if not task_candidate_store.is_confirmable(candidate):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Task candidate is missing required fields",
+            )
 
-    task = task_candidate_store.confirm(candidate_id)
-    if task is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Task candidate not found",
+        task = task_candidate_store.confirm(candidate_id)
+        if task is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task candidate not found",
+            )
+        return task
+
+    try:
+        return idempotency_store.run(
+            scope="POST /agent/task-candidates/confirm",
+            key=idempotency_key,
+            fingerprint={"candidate_id": str(candidate_id)},
+            factory=confirm,
         )
-    return task
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
