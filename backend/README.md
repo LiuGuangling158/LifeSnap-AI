@@ -44,6 +44,20 @@ Get a bill candidate:
 GET /agent/bill-candidates/{candidate_id}
 ```
 
+Update a bill candidate before confirmation:
+
+```http
+PATCH /agent/bill-candidates/{candidate_id}
+Content-Type: application/json
+
+{
+  "amount": 18.5,
+  "merchant": "瑞幸咖啡",
+  "category": "餐饮",
+  "payment_method": "微信支付"
+}
+```
+
 Confirm a bill candidate and save it as a bill:
 
 ```text

@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status
 
 from app.schemas.bill import BillRead
-from app.schemas.agent import ParseBillRequest, ParseBillResponse
+from app.schemas.agent import BillCandidateUpdate, ParseBillRequest, ParseBillResponse
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
 
@@ -19,6 +19,20 @@ def parse_bill(payload: ParseBillRequest) -> ParseBillResponse:
 @router.get("/bill-candidates/{candidate_id}", response_model=ParseBillResponse)
 def get_bill_candidate(candidate_id: UUID) -> ParseBillResponse:
     candidate = bill_candidate_store.get(candidate_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bill candidate not found",
+        )
+    return candidate
+
+
+@router.patch("/bill-candidates/{candidate_id}", response_model=ParseBillResponse)
+def update_bill_candidate(
+    candidate_id: UUID,
+    payload: BillCandidateUpdate,
+) -> ParseBillResponse:
+    candidate = bill_candidate_store.update(candidate_id, payload)
     if candidate is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
