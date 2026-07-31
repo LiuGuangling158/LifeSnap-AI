@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from app.api.agent import router as agent_router
 from app.api.attachments import router as attachments_router
 from app.api.bills import router as bills_router
+from app.api.chat import router as chat_router
 from app.api.dashboard import router as dashboard_router
 from app.api.health import router as health_router
 from app.api.tasks import router as tasks_router
@@ -17,6 +18,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(bills_router)
     app.include_router(tasks_router)
+    app.include_router(chat_router)
     return app
 
 

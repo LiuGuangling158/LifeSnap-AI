@@ -113,6 +113,45 @@ POST /agent/task-candidates/{candidate_id}/confirm
 Reminder candidates missing required fields, such as `title` or `remind_at`,
 cannot be confirmed directly. Todo candidates require at least a `title`.
 
+## Chat
+
+Send a user message to the MVP AI entry:
+
+```http
+POST /chat/messages
+Content-Type: application/json
+
+{
+  "message": "明天下午 3 点提醒我去医院复诊，记得带医保卡和检查报告。"
+}
+```
+
+The endpoint returns one of three outcomes:
+
+- a bill candidate
+- a task or reminder candidate
+- an MVP fallback message for unsupported intents
+
+Example bill input:
+
+```json
+{
+  "message": "记一笔 18 元早餐"
+}
+```
+
+Example unsupported input:
+
+```json
+{
+  "message": "帮我管理这个会员订阅，下个月扣费前提醒"
+}
+```
+
+Chat responses do not create formal bills or tasks directly. If the response
+contains `candidate_id`, the user still needs to confirm it through the related
+candidate confirmation endpoint.
+
 ## Attachments
 
 Upload an image or PDF attachment:
