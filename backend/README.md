@@ -245,6 +245,17 @@ Export local data as JSON:
 GET /data/export
 ```
 
+Export local data as CSV:
+
+```text
+GET /data/export/bills.csv
+GET /data/export/tasks.csv
+GET /data/export/attachments.csv
+```
+
+CSV exports include structured records only. Attachment CSV exports metadata and
+OCR presence, not original file bytes.
+
 Clear local data:
 
 ```http

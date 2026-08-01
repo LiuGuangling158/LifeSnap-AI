@@ -40,10 +40,10 @@ class ApiClient:
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
                 body = response.read().decode("utf-8")
-                return response.status, json.loads(body) if body else None
+                return response.status, self._parse_body(body)
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8")
-            return exc.code, json.loads(body) if body else None
+            return exc.code, self._parse_body(body)
 
     def upload_png(self) -> tuple[int, Any]:
         boundary = "----LifeSnapSmokeBoundary"
@@ -64,6 +64,14 @@ class ApiClient:
         )
         with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, json.loads(response.read().decode("utf-8"))
+
+    def _parse_body(self, body: str) -> Any:
+        if not body:
+            return None
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            return body
 
 
 def main() -> int:
@@ -329,6 +337,21 @@ def _check_data_export_and_clear(client: ApiClient) -> None:
     _assert(status == 200, "GET /data/export should return 200")
     _assert(body["bills"], "Data export should include created bills")
     _assert(body["tasks"], "Data export should include created tasks")
+
+    status, bills_csv = client.request("GET", "/data/export/bills.csv")
+    _assert(status == 200, "GET /data/export/bills.csv should return 200")
+    _assert("merchant" in bills_csv and "\u65e9\u9910\u5e97" in bills_csv, "Bills CSV should include bill rows")
+
+    status, tasks_csv = client.request("GET", "/data/export/tasks.csv")
+    _assert(status == 200, "GET /data/export/tasks.csv should return 200")
+    _assert("title" in tasks_csv and "\u533b\u9662\u590d\u8bca" in tasks_csv, "Tasks CSV should include task rows")
+
+    status, attachments_csv = client.request("GET", "/data/export/attachments.csv")
+    _assert(status == 200, "GET /data/export/attachments.csv should return 200")
+    _assert(
+        "checksum" in attachments_csv and "receipt.png" in attachments_csv,
+        "Attachments CSV should include attachment metadata",
+    )
 
     status, body = client.request("POST", "/data/clear", {"include_bills": True})
     _assert(status == 400, "Data clear should require explicit confirmation")
