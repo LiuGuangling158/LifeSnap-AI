@@ -65,6 +65,7 @@ Currently covered endpoints:
 - `POST /tasks/{task_id}/snooze`
 - `POST /agent/bill-candidates/{candidate_id}/confirm`
 - `POST /agent/task-candidates/{candidate_id}/confirm`
+- `POST /chat/confirm-action`
 
 ## Agent
 
@@ -201,7 +202,24 @@ Example unsupported input:
 
 Chat responses do not create formal bills or tasks directly. If the response
 contains `candidate_id`, the user still needs to confirm it through the related
-candidate confirmation endpoint.
+candidate confirmation endpoint, or through the unified chat action endpoint.
+
+Confirm the candidate returned by `POST /chat/messages`:
+
+```http
+POST /chat/confirm-action
+Idempotency-Key: chat-confirm-001
+Content-Type: application/json
+
+{
+  "action_type": "task_candidate",
+  "candidate_id": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+Supported `action_type` values are `bill_candidate` and `task_candidate`. The
+response includes `created_bill` or `created_task` when the candidate is saved.
+Candidates with incomplete required fields still need to be edited first.
 
 ## Settings
 

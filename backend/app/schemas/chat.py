@@ -4,6 +4,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.schemas.agent import ParseBillResponse, ParseTaskResponse
+from app.schemas.bill import BillRead
+from app.schemas.task import TaskRead
 
 
 class ChatIntent(str, Enum):
@@ -32,3 +34,18 @@ class ChatMessageResponse(BaseModel):
     candidate: ParseBillResponse | ParseTaskResponse | None = None
     warnings: list[str] = []
     need_user_confirmation: bool = True
+
+
+class ChatConfirmActionRequest(BaseModel):
+    action_type: ChatActionType
+    candidate_id: UUID
+
+
+class ChatConfirmActionResponse(BaseModel):
+    message_id: UUID
+    reply: str
+    action_type: ChatActionType
+    candidate_id: UUID
+    created_bill: BillRead | None = None
+    created_task: TaskRead | None = None
+    warnings: list[str] = []

@@ -145,18 +145,28 @@ def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     )
 
     headers = {"Idempotency-Key": "smoke-confirm-task-001"}
+    confirm_payload = {
+        "action_type": "task_candidate",
+        "candidate_id": candidate_id,
+    }
     status, first = client.request(
         "POST",
-        f"/agent/task-candidates/{candidate_id}/confirm",
+        "/chat/confirm-action",
+        confirm_payload,
         headers=headers,
     )
     status_again, second = client.request(
         "POST",
-        f"/agent/task-candidates/{candidate_id}/confirm",
+        "/chat/confirm-action",
+        confirm_payload,
         headers=headers,
     )
     _assert(status == 200 and status_again == 200, "Candidate confirmation should be repeatable")
-    _assert(first["id"] == second["id"], "Repeated confirmation should return the first task")
+    _assert(
+        first["created_task"]["id"] == second["created_task"]["id"],
+        "Repeated confirmation should return the first task",
+    )
+    _assert(first["action_type"] == "task_candidate", "Chat confirmation should keep action type")
 
 
 def _check_bill_idempotency(client: ApiClient) -> None:
