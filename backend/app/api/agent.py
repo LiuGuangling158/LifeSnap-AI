@@ -5,11 +5,14 @@ from fastapi import APIRouter, Header, HTTPException, Query, status
 from app.schemas.bill import BillRead, DuplicateBillCheckResponse
 from app.schemas.agent import (
     BillCandidateUpdate,
+    BillCandidateListResponse,
+    CandidateListResponse,
     ParseBillRequest,
     ParseBillResponse,
     ParseTaskRequest,
     ParseTaskResponse,
     TaskCandidateUpdate,
+    TaskCandidateListResponse,
 )
 from app.schemas.task import TaskRead
 from app.services.bill_candidate_store import bill_candidate_store
@@ -32,6 +35,47 @@ def parse_bill(payload: ParseBillRequest) -> ParseBillResponse:
         )
     candidate = bill_parser.parse_bill(payload)
     return bill_candidate_store.save(candidate)
+
+
+@router.get("/candidates", response_model=CandidateListResponse)
+def list_candidates(
+    confirmable_only: bool = Query(default=False),
+) -> CandidateListResponse:
+    bill_candidates = bill_candidate_store.all()
+    task_candidates = task_candidate_store.all()
+    if confirmable_only:
+        bill_candidates = [
+            candidate
+            for candidate in bill_candidates
+            if bill_candidate_store.is_confirmable(candidate)
+        ]
+        task_candidates = [
+            candidate
+            for candidate in task_candidates
+            if task_candidate_store.is_confirmable(candidate)
+        ]
+
+    return CandidateListResponse(
+        bill_candidates=bill_candidates,
+        task_candidates=task_candidates,
+        bill_candidate_count=len(bill_candidates),
+        task_candidate_count=len(task_candidates),
+        total=len(bill_candidates) + len(task_candidates),
+    )
+
+
+@router.get("/bill-candidates", response_model=BillCandidateListResponse)
+def list_bill_candidates(
+    confirmable_only: bool = Query(default=False),
+) -> BillCandidateListResponse:
+    candidates = bill_candidate_store.all()
+    if confirmable_only:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if bill_candidate_store.is_confirmable(candidate)
+        ]
+    return BillCandidateListResponse(items=candidates, total=len(candidates))
 
 
 @router.get("/bill-candidates/{candidate_id}", response_model=ParseBillResponse)
@@ -57,6 +101,16 @@ def update_bill_candidate(
             detail="Bill candidate not found",
         )
     return candidate
+
+
+@router.delete("/bill-candidates/{candidate_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_bill_candidate(candidate_id: UUID) -> None:
+    deleted = bill_candidate_store.delete(candidate_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bill candidate not found",
+        )
 
 
 @router.post(
@@ -134,6 +188,20 @@ def parse_task(payload: ParseTaskRequest) -> ParseTaskResponse:
     return task_candidate_store.save(candidate)
 
 
+@router.get("/task-candidates", response_model=TaskCandidateListResponse)
+def list_task_candidates(
+    confirmable_only: bool = Query(default=False),
+) -> TaskCandidateListResponse:
+    candidates = task_candidate_store.all()
+    if confirmable_only:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if task_candidate_store.is_confirmable(candidate)
+        ]
+    return TaskCandidateListResponse(items=candidates, total=len(candidates))
+
+
 @router.get("/task-candidates/{candidate_id}", response_model=ParseTaskResponse)
 def get_task_candidate(candidate_id: UUID) -> ParseTaskResponse:
     candidate = task_candidate_store.get(candidate_id)
@@ -157,6 +225,16 @@ def update_task_candidate(
             detail="Task candidate not found",
         )
     return candidate
+
+
+@router.delete("/task-candidates/{candidate_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task_candidate(candidate_id: UUID) -> None:
+    deleted = task_candidate_store.delete(candidate_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task candidate not found",
+        )
 
 
 @router.post("/task-candidates/{candidate_id}/confirm", response_model=TaskRead)

@@ -110,6 +110,7 @@ def main() -> int:
 
 def _run_checks(client: ApiClient) -> None:
     _check_health(client)
+    _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_bill_idempotency(client)
     _check_bill_candidate_duplicate_detection(client)
@@ -124,6 +125,42 @@ def _check_health(client: ApiClient) -> None:
     status, body = client.request("GET", "/health")
     _assert(status == 200, "GET /health should return 200")
     _assert(body["status"] == "ok", "GET /health should return ok")
+
+
+def _check_candidate_discard_flow(client: ApiClient) -> None:
+    status, bill_candidate = client.request(
+        "POST",
+        "/agent/parse-bill",
+        {
+            "text": "\u4fbf\u5229\u5e97\n\u5b9e\u4ed8 9 \u5143",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Discard setup bill candidate should be parsed")
+    bill_candidate_id = bill_candidate["candidate_id"]
+
+    status, _ = client.request("DELETE", f"/agent/bill-candidates/{bill_candidate_id}")
+    _assert(status == 204, "Bill candidate discard should return 204")
+
+    status, _ = client.request("GET", f"/agent/bill-candidates/{bill_candidate_id}")
+    _assert(status == 404, "Discarded bill candidate should not be readable")
+
+    status, task_candidate = client.request(
+        "POST",
+        "/agent/parse-task",
+        {
+            "text": "\u660e\u5929 8 \u70b9\u63d0\u9192\u6211\u53d6\u5feb\u9012",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Discard setup task candidate should be parsed")
+    task_candidate_id = task_candidate["candidate_id"]
+
+    status, _ = client.request("DELETE", f"/agent/task-candidates/{task_candidate_id}")
+    _assert(status == 204, "Task candidate discard should return 204")
+
+    status, _ = client.request("GET", f"/agent/task-candidates/{task_candidate_id}")
+    _assert(status == 404, "Discarded task candidate should not be readable")
 
 
 def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
@@ -142,6 +179,25 @@ def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     _assert(
         patched["data"]["priority"] == "high",
         "Task candidate partial update should apply provided fields",
+    )
+    status, task_candidates = client.request("GET", "/agent/task-candidates")
+    _assert(status == 200, "Task candidate list should return 200")
+    _assert(
+        any(candidate["candidate_id"] == candidate_id for candidate in task_candidates["items"]),
+        "Task candidate list should include the pending candidate",
+    )
+
+    status, confirmable_candidates = client.request(
+        "GET",
+        "/agent/candidates?confirmable_only=true",
+    )
+    _assert(status == 200, "Unified confirmable candidate list should return 200")
+    _assert(
+        any(
+            candidate["candidate_id"] == candidate_id
+            for candidate in confirmable_candidates["task_candidates"]
+        ),
+        "Unified candidate list should include the confirmable task candidate",
     )
 
     headers = {"Idempotency-Key": "smoke-confirm-task-001"}
@@ -167,6 +223,13 @@ def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
         "Repeated confirmation should return the first task",
     )
     _assert(first["action_type"] == "task_candidate", "Chat confirmation should keep action type")
+
+    status, task_candidates = client.request("GET", "/agent/task-candidates")
+    _assert(status == 200, "Task candidate list after confirmation should return 200")
+    _assert(
+        all(candidate["candidate_id"] != candidate_id for candidate in task_candidates["items"]),
+        "Confirmed task candidate should leave the pending candidate list",
+    )
 
 
 def _check_bill_idempotency(client: ApiClient) -> None:
@@ -238,6 +301,19 @@ def _check_bill_candidate_duplicate_detection(client: ApiClient) -> None:
     _assert(
         duplicate["matches"][0]["bill"]["id"] == bill["id"],
         "Bill candidate duplicate check should include the matching bill",
+    )
+
+    status, bill_candidates = client.request(
+        "GET",
+        "/agent/bill-candidates?confirmable_only=true",
+    )
+    _assert(status == 200, "Bill candidate list should return 200")
+    _assert(
+        any(
+            item["candidate_id"] == candidate["candidate_id"]
+            for item in bill_candidates["items"]
+        ),
+        "Bill candidate list should include the confirmable bill candidate",
     )
 
 

@@ -89,6 +89,13 @@ Get a bill candidate:
 GET /agent/bill-candidates/{candidate_id}
 ```
 
+List pending bill candidates:
+
+```text
+GET /agent/bill-candidates
+GET /agent/bill-candidates?confirmable_only=true
+```
+
 Update a bill candidate before confirmation:
 
 ```http
@@ -120,6 +127,12 @@ POST /agent/bill-candidates/{candidate_id}/confirm
 
 Candidates missing required fields, such as `amount` or `merchant`, cannot be confirmed directly. The user should edit the result and save it through `POST /bills`.
 
+Discard a pending bill candidate:
+
+```text
+DELETE /agent/bill-candidates/{candidate_id}
+```
+
 Parse chat text into a task or reminder candidate:
 
 ```http
@@ -139,6 +152,20 @@ Get a task candidate:
 
 ```text
 GET /agent/task-candidates/{candidate_id}
+```
+
+List pending task candidates:
+
+```text
+GET /agent/task-candidates
+GET /agent/task-candidates?confirmable_only=true
+```
+
+List all pending candidates together:
+
+```text
+GET /agent/candidates
+GET /agent/candidates?confirmable_only=true
 ```
 
 Update a task candidate before confirmation:
@@ -164,6 +191,12 @@ POST /agent/task-candidates/{candidate_id}/confirm
 
 Reminder candidates missing required fields, such as `title` or `remind_at`,
 cannot be confirmed directly. Todo candidates require at least a `title`.
+
+Discard a pending task candidate:
+
+```text
+DELETE /agent/task-candidates/{candidate_id}
+```
 
 ## Chat
 

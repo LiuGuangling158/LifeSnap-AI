@@ -82,3 +82,21 @@ class ParseTaskResponse(BaseModel):
     field_confidence: dict[str, float]
     warnings: list[str]
     need_user_confirmation: bool = True
+
+
+class BillCandidateListResponse(BaseModel):
+    items: list[ParseBillResponse]
+    total: int
+
+
+class TaskCandidateListResponse(BaseModel):
+    items: list[ParseTaskResponse]
+    total: int
+
+
+class CandidateListResponse(BaseModel):
+    bill_candidates: list[ParseBillResponse]
+    task_candidates: list[ParseTaskResponse]
+    bill_candidate_count: int
+    task_candidate_count: int
+    total: int

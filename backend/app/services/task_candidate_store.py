@@ -71,6 +71,12 @@ class InMemoryTaskCandidateStore:
         del self._candidates[candidate_id]
         return task
 
+    def delete(self, candidate_id: UUID) -> bool:
+        if candidate_id not in self._candidates:
+            return False
+        del self._candidates[candidate_id]
+        return True
+
     def is_confirmable(self, candidate: ParseTaskResponse) -> bool:
         if candidate.data.title is None:
             return False

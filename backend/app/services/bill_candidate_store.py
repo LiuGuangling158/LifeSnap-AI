@@ -48,6 +48,12 @@ class InMemoryBillCandidateStore:
         del self._candidates[candidate_id]
         return bill
 
+    def delete(self, candidate_id: UUID) -> bool:
+        if candidate_id not in self._candidates:
+            return False
+        del self._candidates[candidate_id]
+        return True
+
     def is_confirmable(self, candidate: ParseBillResponse) -> bool:
         return candidate.data.amount is not None and candidate.data.merchant is not None
 
