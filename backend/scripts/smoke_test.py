@@ -118,6 +118,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_standard_error_responses(client)
     _check_demo_data_seed(client)
     _check_app_bootstrap(client)
+    _check_bill_statistics_overview(client)
     _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_bill_idempotency(client)
@@ -257,6 +258,87 @@ def _check_app_bootstrap(client: ApiClient) -> None:
         bootstrap["capabilities"]["app_version"] == capabilities["app_version"],
         "App bootstrap should include the same capabilities version",
     )
+
+
+def _check_bill_statistics_overview(client: ApiClient) -> None:
+    bills = [
+        {
+            "amount": 100,
+            "merchant": "Stats Anchor Merchant",
+            "category": "Dining",
+            "transaction_type": "expense",
+            "paid_at": "2026-08-01T09:00:00+08:00",
+            "source": "manual",
+        },
+        {
+            "amount": 25,
+            "merchant": "Stats Anchor Merchant",
+            "category": "Dining",
+            "transaction_type": "expense",
+            "paid_at": "2026-08-01T12:00:00+08:00",
+            "source": "manual",
+        },
+        {
+            "amount": 35,
+            "merchant": "Stats Metro",
+            "category": "Transport",
+            "transaction_type": "expense",
+            "paid_at": "2026-08-02T08:00:00+08:00",
+            "source": "manual",
+        },
+        {
+            "amount": 300,
+            "merchant": "Stats Salary",
+            "category": "Income",
+            "transaction_type": "income",
+            "paid_at": "2026-08-03T10:00:00+08:00",
+            "source": "manual",
+        },
+        {
+            "amount": 15,
+            "merchant": "Stats Previous Month",
+            "category": "Shopping",
+            "transaction_type": "expense",
+            "paid_at": "2026-07-15T10:00:00+08:00",
+            "source": "manual",
+        },
+    ]
+    for index, payload in enumerate(bills, start=1):
+        status, _ = client.request(
+            "POST",
+            "/bills",
+            payload,
+            headers={"Idempotency-Key": f"smoke-statistics-bill-{index}"},
+        )
+        _assert(status == 201, "Statistics overview setup bills should be created")
+
+    status, overview = client.request(
+        "GET",
+        "/bills/statistics/overview?year=2026&month=8&trend_months=2&top_merchant_limit=2",
+    )
+    _assert(status == 200, "GET /bills/statistics/overview should return 200")
+    _assert(overview["year"] == 2026 and overview["month"] == 8, "Overview period changed")
+    _assert(len(overview["daily_breakdown"]) == 31, "August daily breakdown should be zero-filled")
+    _assert(
+        overview["daily_breakdown"][0]["bill_count"] >= 2,
+        "Daily breakdown should include fixed August 1 bills",
+    )
+    _assert(
+        len(overview["monthly_trend"]) == 2
+        and overview["monthly_trend"][0]["month"] == 7
+        and overview["monthly_trend"][1]["month"] == 8,
+        "Monthly trend should include July and August",
+    )
+    _assert(
+        overview["top_merchants"][0]["merchant"] == "Stats Anchor Merchant",
+        "Top merchants should be sorted by expense amount",
+    )
+    dining = next(
+        item
+        for item in overview["monthly_statistics"]["category_breakdown"]
+        if item["category"] == "Dining"
+    )
+    _assert(float(dining["percentage"]) > 0, "Category breakdown should include percentage")
 
 
 def _check_candidate_discard_flow(client: ApiClient) -> None:

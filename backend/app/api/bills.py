@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
 from app.schemas.bill import (
+    BillStatisticsOverview,
     BillCreate,
     BillListResponse,
     BillRead,
@@ -73,6 +74,24 @@ def get_monthly_bill_statistics(
     target_year = year or now.year
     target_month = month or now.month
     return bill_store.monthly_statistics(target_year, target_month)
+
+
+@router.get("/statistics/overview", response_model=BillStatisticsOverview)
+def get_bill_statistics_overview(
+    year: int | None = Query(default=None, ge=1970),
+    month: int | None = Query(default=None, ge=1, le=12),
+    trend_months: int = Query(default=6, ge=1, le=24),
+    top_merchant_limit: int = Query(default=5, ge=1, le=20),
+) -> BillStatisticsOverview:
+    now = datetime.now(timezone.utc)
+    target_year = year or now.year
+    target_month = month or now.month
+    return bill_store.statistics_overview(
+        target_year,
+        target_month,
+        trend_months=trend_months,
+        top_merchant_limit=top_merchant_limit,
+    )
 
 
 @router.post("/check-duplicate", response_model=DuplicateBillCheckResponse)

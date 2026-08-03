@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from math import ceil
 from uuid import UUID, uuid4
 
 from app.schemas.bill import (
+    BillStatisticsOverview,
     BillSource,
     BillCreate,
     BillListResponse,
     BillRead,
     BillUpdate,
     CategoryBreakdown,
+    DailyBillStatistics,
     DuplicateBillCheckResponse,
     DuplicateBillMatch,
+    MerchantBreakdown,
     MonthlyBillStatistics,
+    MonthlyBillTrendItem,
     TransactionType,
 )
 
@@ -190,50 +194,196 @@ class InMemoryBillStore:
         )
 
     def monthly_statistics(self, year: int, month: int) -> MonthlyBillStatistics:
-        monthly_bills = [
+        monthly_bills = self._bills_for_month(year, month)
+        totals = self._totals(monthly_bills)
+        category_breakdown = self._category_breakdown(monthly_bills, totals["total_expense"])
+        return MonthlyBillStatistics(
+            year=year,
+            month=month,
+            bill_count=len(monthly_bills),
+            total_expense=totals["total_expense"],
+            total_income=totals["total_income"],
+            total_refund=totals["total_refund"],
+            net_amount=totals["net_amount"],
+            category_breakdown=category_breakdown,
+        )
+
+    def statistics_overview(
+        self,
+        year: int,
+        month: int,
+        trend_months: int = 6,
+        top_merchant_limit: int = 5,
+    ) -> BillStatisticsOverview:
+        monthly_bills = self._bills_for_month(year, month)
+        return BillStatisticsOverview(
+            generated_at=datetime.now(timezone.utc),
+            year=year,
+            month=month,
+            monthly_statistics=self.monthly_statistics(year, month),
+            daily_breakdown=self._daily_breakdown(year, month, monthly_bills),
+            monthly_trend=self._monthly_trend(year, month, trend_months),
+            top_merchants=self._top_merchants(monthly_bills, top_merchant_limit),
+        )
+
+    def _bills_for_month(self, year: int, month: int) -> list[BillRead]:
+        return [
             bill
             for bill in self.all()
             if bill.paid_at.year == year and bill.paid_at.month == month
         ]
 
+    def _totals(self, bills: list[BillRead]) -> dict[str, Decimal]:
         total_expense = Decimal("0")
         total_income = Decimal("0")
         total_refund = Decimal("0")
-        category_amounts: dict[str, Decimal] = {}
-        category_counts: dict[str, int] = {}
 
-        for bill in monthly_bills:
+        for bill in bills:
             if bill.transaction_type == TransactionType.expense:
                 total_expense += bill.amount
-                category_amounts[bill.category] = (
-                    category_amounts.get(bill.category, Decimal("0")) + bill.amount
-                )
-                category_counts[bill.category] = category_counts.get(bill.category, 0) + 1
             elif bill.transaction_type == TransactionType.income:
                 total_income += bill.amount
             elif bill.transaction_type == TransactionType.refund:
                 total_refund += bill.amount
+
+        return {
+            "total_expense": total_expense,
+            "total_income": total_income,
+            "total_refund": total_refund,
+            "net_amount": total_income + total_refund - total_expense,
+        }
+
+    def _category_breakdown(
+        self,
+        bills: list[BillRead],
+        total_expense: Decimal,
+    ) -> list[CategoryBreakdown]:
+        category_amounts: dict[str, Decimal] = {}
+        category_counts: dict[str, int] = {}
+        for bill in bills:
+            if bill.transaction_type != TransactionType.expense:
+                continue
+            category_amounts[bill.category] = (
+                category_amounts.get(bill.category, Decimal("0")) + bill.amount
+            )
+            category_counts[bill.category] = category_counts.get(bill.category, 0) + 1
 
         category_breakdown = [
             CategoryBreakdown(
                 category=category,
                 amount=amount,
                 count=category_counts[category],
+                percentage=self._percentage(amount, total_expense),
             )
             for category, amount in category_amounts.items()
         ]
         category_breakdown.sort(key=lambda item: item.amount, reverse=True)
+        return category_breakdown
 
-        return MonthlyBillStatistics(
-            year=year,
-            month=month,
-            bill_count=len(monthly_bills),
-            total_expense=total_expense,
-            total_income=total_income,
-            total_refund=total_refund,
-            net_amount=total_income + total_refund - total_expense,
-            category_breakdown=category_breakdown,
-        )
+    def _daily_breakdown(
+        self,
+        year: int,
+        month: int,
+        bills: list[BillRead],
+    ) -> list[DailyBillStatistics]:
+        days = self._days_in_month(year, month)
+        bills_by_date: dict[date, list[BillRead]] = {}
+        for bill in bills:
+            paid_date = bill.paid_at.date()
+            bills_by_date.setdefault(paid_date, []).append(bill)
+
+        breakdown: list[DailyBillStatistics] = []
+        for day in range(1, days + 1):
+            current_date = date(year, month, day)
+            daily_bills = bills_by_date.get(current_date, [])
+            totals = self._totals(daily_bills)
+            breakdown.append(
+                DailyBillStatistics(
+                    date=current_date,
+                    bill_count=len(daily_bills),
+                    total_expense=totals["total_expense"],
+                    total_income=totals["total_income"],
+                    total_refund=totals["total_refund"],
+                    net_amount=totals["net_amount"],
+                )
+            )
+        return breakdown
+
+    def _monthly_trend(
+        self,
+        year: int,
+        month: int,
+        trend_months: int,
+    ) -> list[MonthlyBillTrendItem]:
+        trend: list[MonthlyBillTrendItem] = []
+        for trend_year, trend_month in self._month_sequence(year, month, trend_months):
+            bills = self._bills_for_month(trend_year, trend_month)
+            totals = self._totals(bills)
+            trend.append(
+                MonthlyBillTrendItem(
+                    year=trend_year,
+                    month=trend_month,
+                    bill_count=len(bills),
+                    total_expense=totals["total_expense"],
+                    total_income=totals["total_income"],
+                    total_refund=totals["total_refund"],
+                    net_amount=totals["net_amount"],
+                )
+            )
+        return trend
+
+    def _top_merchants(
+        self,
+        bills: list[BillRead],
+        limit: int,
+    ) -> list[MerchantBreakdown]:
+        merchant_amounts: dict[str, Decimal] = {}
+        merchant_counts: dict[str, int] = {}
+        for bill in bills:
+            if bill.transaction_type != TransactionType.expense:
+                continue
+            merchant_amounts[bill.merchant] = (
+                merchant_amounts.get(bill.merchant, Decimal("0")) + bill.amount
+            )
+            merchant_counts[bill.merchant] = merchant_counts.get(bill.merchant, 0) + 1
+
+        total_expense = sum(merchant_amounts.values(), Decimal("0"))
+        merchants = [
+            MerchantBreakdown(
+                merchant=merchant,
+                amount=amount,
+                count=merchant_counts[merchant],
+                percentage=self._percentage(amount, total_expense),
+            )
+            for merchant, amount in merchant_amounts.items()
+        ]
+        merchants.sort(key=lambda item: item.amount, reverse=True)
+        return merchants[:limit]
+
+    def _percentage(self, amount: Decimal, total: Decimal) -> Decimal:
+        if total == 0:
+            return Decimal("0")
+        return ((amount / total) * Decimal("100")).quantize(Decimal("0.01"))
+
+    def _days_in_month(self, year: int, month: int) -> int:
+        if month == 12:
+            next_month = date(year + 1, 1, 1)
+        else:
+            next_month = date(year, month + 1, 1)
+        return (next_month - date(year, month, 1)).days
+
+    def _month_sequence(
+        self,
+        year: int,
+        month: int,
+        count: int,
+    ) -> list[tuple[int, int]]:
+        month_index = year * 12 + (month - 1)
+        start_index = month_index - count + 1
+        return [
+            (index // 12, index % 12 + 1)
+            for index in range(start_index, month_index + 1)
+        ]
 
     def _as_utc(self, value: datetime) -> datetime:
         if value.tzinfo is None:

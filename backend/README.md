@@ -37,6 +37,18 @@ attachment size limits, parser providers, storage backend, and known
 limitations. `/app/bootstrap` combines capabilities, privacy settings, local
 data counts, and dashboard summary for frontend startup.
 
+Bill statistics:
+
+```text
+GET /bills/statistics/monthly
+GET /bills/statistics/monthly?year=2026&month=8
+GET /bills/statistics/overview?year=2026&month=8&trend_months=6&top_merchant_limit=5
+```
+
+`/bills/statistics/overview` is intended for chart screens. It returns monthly
+totals, category percentages, a zero-filled daily breakdown, recent monthly
+trend rows, and top expense merchants.
+
 Run backend smoke test:
 
 ```powershell

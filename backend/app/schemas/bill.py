@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID
@@ -76,6 +76,7 @@ class CategoryBreakdown(BaseModel):
     category: str
     amount: Decimal
     count: int
+    percentage: Decimal = Decimal("0")
 
 
 class MonthlyBillStatistics(BaseModel):
@@ -87,3 +88,39 @@ class MonthlyBillStatistics(BaseModel):
     total_refund: Decimal
     net_amount: Decimal
     category_breakdown: list[CategoryBreakdown]
+
+
+class DailyBillStatistics(BaseModel):
+    date: date
+    bill_count: int
+    total_expense: Decimal
+    total_income: Decimal
+    total_refund: Decimal
+    net_amount: Decimal
+
+
+class MerchantBreakdown(BaseModel):
+    merchant: str
+    amount: Decimal
+    count: int
+    percentage: Decimal
+
+
+class MonthlyBillTrendItem(BaseModel):
+    year: int
+    month: int
+    bill_count: int
+    total_expense: Decimal
+    total_income: Decimal
+    total_refund: Decimal
+    net_amount: Decimal
+
+
+class BillStatisticsOverview(BaseModel):
+    generated_at: datetime
+    year: int
+    month: int
+    monthly_statistics: MonthlyBillStatistics
+    daily_breakdown: list[DailyBillStatistics]
+    monthly_trend: list[MonthlyBillTrendItem]
+    top_merchants: list[MerchantBreakdown]
