@@ -4,6 +4,9 @@ from io import StringIO
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from pydantic import ValidationError
+
+from app.core.config import settings
 from app.schemas.agent import (
     BillCandidateData,
     ParseBillResponse,
@@ -18,6 +21,11 @@ from app.schemas.settings import (
     DataImportRequest,
     DataImportResponse,
     DataExportResponse,
+    DataSnapshotDeleteResponse,
+    DataSnapshotLoadRequest,
+    DataSnapshotLoadResponse,
+    DataSnapshotSaveResponse,
+    DataSnapshotStatus,
     DemoDataSeedRequest,
     DemoDataSeedResponse,
     LocalDataSummary,
@@ -44,15 +52,68 @@ class DataManagementService:
             deleted_task_count=task_store.deleted_count(),
         )
 
-    def export(self) -> DataExportResponse:
+    def export(self, include_deleted: bool = False) -> DataExportResponse:
         return DataExportResponse(
             generated_at=datetime.now(timezone.utc),
             privacy_settings=settings_store.get_privacy_settings(),
-            bills=bill_store.all(),
-            tasks=task_store.all(),
+            bills=bill_store.all(include_deleted=include_deleted),
+            tasks=task_store.all(include_deleted=include_deleted),
             attachments=attachment_store.all(),
             bill_candidates=bill_candidate_store.all(),
             task_candidates=task_candidate_store.all(),
+        )
+
+    def snapshot_status(self) -> DataSnapshotStatus:
+        return self._snapshot_status()
+
+    def save_snapshot(self) -> DataSnapshotSaveResponse:
+        snapshot_path = settings.local_snapshot_path
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = snapshot_path.with_suffix(".tmp")
+        saved_at = datetime.now(timezone.utc)
+        temp_path.write_text(
+            self.export(include_deleted=True).model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(snapshot_path)
+        status = self._snapshot_status()
+        return DataSnapshotSaveResponse(
+            saved_at=saved_at,
+            **status.model_dump(),
+        )
+
+    def load_snapshot(self, payload: DataSnapshotLoadRequest) -> DataSnapshotLoadResponse:
+        snapshot = self._read_snapshot()
+        import_result = self.import_data(
+            DataImportRequest(
+                confirm=payload.confirm,
+                dry_run=payload.dry_run,
+                reset_existing=payload.reset_existing,
+                include_bills=payload.include_bills,
+                include_tasks=payload.include_tasks,
+                include_attachments=payload.include_attachments,
+                include_candidates=payload.include_candidates,
+                import_privacy_settings=payload.import_privacy_settings,
+                snapshot=snapshot,
+            )
+        )
+        return DataSnapshotLoadResponse(
+            loaded_at=datetime.now(timezone.utc),
+            snapshot_path=str(settings.local_snapshot_path),
+            import_result=import_result,
+        )
+
+    def delete_snapshot(self) -> DataSnapshotDeleteResponse:
+        snapshot_path = settings.local_snapshot_path
+        deleted = False
+        if snapshot_path.exists():
+            snapshot_path.unlink()
+            deleted = True
+        return DataSnapshotDeleteResponse(
+            deleted_at=datetime.now(timezone.utc),
+            snapshot_path=str(snapshot_path),
+            deleted=deleted,
+            current_data_summary=self.summary(),
         )
 
     def import_data(self, payload: DataImportRequest) -> DataImportResponse:
@@ -129,6 +190,57 @@ class DataManagementService:
             imported_bill_candidate_count=imported_bill_candidate_count,
             imported_task_candidate_count=imported_task_candidate_count,
             privacy_settings=settings_store.get_privacy_settings(),
+        )
+
+    def _snapshot_status(self) -> DataSnapshotStatus:
+        snapshot_path = settings.local_snapshot_path
+        exists = snapshot_path.exists()
+        stat = snapshot_path.stat() if exists else None
+        snapshot_data_summary: LocalDataSummary | None = None
+        snapshot_error: str | None = None
+        if exists:
+            try:
+                snapshot_data_summary = self._summary_from_snapshot(self._read_snapshot())
+            except (FileNotFoundError, ValueError) as exc:
+                snapshot_error = str(exc)
+        return DataSnapshotStatus(
+            snapshot_path=str(snapshot_path),
+            exists=exists,
+            file_size_bytes=stat.st_size if stat is not None else None,
+            updated_at=(
+                datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                if stat is not None
+                else None
+            ),
+            snapshot_data_summary=snapshot_data_summary,
+            snapshot_error=snapshot_error,
+            current_data_summary=self.summary(),
+        )
+
+    def _read_snapshot(self) -> DataExportResponse:
+        snapshot_path = settings.local_snapshot_path
+        if not snapshot_path.exists():
+            raise FileNotFoundError("Local snapshot not found")
+        try:
+            return DataExportResponse.model_validate_json(
+                snapshot_path.read_text(encoding="utf-8")
+            )
+        except ValidationError as exc:
+            raise ValueError("Local snapshot is invalid") from exc
+
+    def _summary_from_snapshot(self, snapshot: DataExportResponse) -> LocalDataSummary:
+        active_bills = [bill for bill in snapshot.bills if bill.deleted_at is None]
+        deleted_bills = [bill for bill in snapshot.bills if bill.deleted_at is not None]
+        active_tasks = [task for task in snapshot.tasks if task.deleted_at is None]
+        deleted_tasks = [task for task in snapshot.tasks if task.deleted_at is not None]
+        return LocalDataSummary(
+            bill_count=len(active_bills),
+            task_count=len(active_tasks),
+            attachment_count=len(snapshot.attachments),
+            bill_candidate_count=len(snapshot.bill_candidates),
+            task_candidate_count=len(snapshot.task_candidates),
+            deleted_bill_count=len(deleted_bills),
+            deleted_task_count=len(deleted_tasks),
         )
 
     def export_bills_csv(self) -> str:

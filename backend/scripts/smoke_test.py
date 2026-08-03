@@ -131,6 +131,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_ocr_fallback_flow(client)
     _check_audit_log_and_request_id(client)
     _check_data_import_restore(client)
+    _check_local_snapshot_persistence(client)
     _check_data_quality_diagnostics(client)
     _check_dashboard_summary(client)
     _check_data_export_and_clear(client)
@@ -358,7 +359,7 @@ def _check_bill_statistics_overview(client: ApiClient) -> None:
 
 
 def _check_task_statistics_overview(client: ApiClient) -> None:
-    now = datetime.now(LOCAL_TZ).replace(second=0, microsecond=0)
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     today_noon = now.replace(hour=12, minute=0)
     task_payloads = [
         {
@@ -434,7 +435,7 @@ def _check_task_statistics_overview(client: ApiClient) -> None:
 
     status, overview = client.request(
         "GET",
-        "/tasks/statistics/overview?upcoming_days=3&item_limit=5",
+        "/tasks/statistics/overview?upcoming_days=3&item_limit=50",
     )
     _assert(status == 200, "GET /tasks/statistics/overview should return 200")
     _assert(overview["pending_count"] >= 4, "Task overview should count pending tasks")
@@ -1062,6 +1063,185 @@ def _check_data_import_restore(client: ApiClient) -> None:
     )
     _assert(status == 200, "Audit data import event list should return 200")
     _assert(import_events["total"] >= 1, "Audit log should include data import events")
+
+
+def _check_local_snapshot_persistence(client: ApiClient) -> None:
+    status, body = client.request("DELETE", "/data/snapshot")
+    _assert(status == 400, "Snapshot delete should require confirmation")
+    _assert(
+        body["detail"] == "Set confirm to true before deleting local snapshot",
+        "Snapshot delete confirmation guard message changed",
+    )
+
+    status, _ = client.request("DELETE", "/data/snapshot", {"confirm": True})
+    _assert(status == 200, "Snapshot cleanup should return 200")
+
+    status, snapshot_status = client.request("GET", "/data/snapshot/status")
+    _assert(status == 200, "Snapshot status should return 200")
+    _assert(not snapshot_status["exists"], "Snapshot status should start without a snapshot")
+
+    status, deleted_bill = client.request(
+        "POST",
+        "/bills",
+        {
+            "amount": 19.5,
+            "merchant": "Snapshot Deleted Merchant",
+            "category": "QA",
+            "transaction_type": "expense",
+            "source": "manual",
+        },
+        headers={"Idempotency-Key": "smoke-snapshot-deleted-bill-create"},
+    )
+    _assert(status == 201, "Snapshot deleted bill setup should create a bill")
+    status, deleted_task = client.request(
+        "POST",
+        "/tasks",
+        {
+            "title": "Snapshot Deleted Task",
+            "category": "QA",
+            "task_type": "todo",
+            "source": "manual",
+        },
+        headers={"Idempotency-Key": "smoke-snapshot-deleted-task-create"},
+    )
+    _assert(status == 201, "Snapshot deleted task setup should create a task")
+    deleted_bill_id = deleted_bill["id"]
+    deleted_task_id = deleted_task["id"]
+
+    status, _ = client.request("DELETE", f"/bills/{deleted_bill_id}")
+    _assert(status == 204, "Snapshot setup should soft-delete a bill")
+    status, _ = client.request("DELETE", f"/tasks/{deleted_task_id}")
+    _assert(status == 204, "Snapshot setup should soft-delete a task")
+
+    status, saved = client.request("POST", "/data/snapshot/save")
+    _assert(status == 200, "Snapshot save should return 200")
+    _assert(saved["exists"], "Snapshot save should create a snapshot")
+    _assert(saved["file_size_bytes"] > 0, "Snapshot save should write bytes")
+    saved_bill_count = saved["snapshot_data_summary"]["bill_count"]
+    saved_task_count = saved["snapshot_data_summary"]["task_count"]
+    saved_deleted_bill_count = saved["snapshot_data_summary"]["deleted_bill_count"]
+    saved_deleted_task_count = saved["snapshot_data_summary"]["deleted_task_count"]
+    saved_total_bill_count = saved_bill_count + saved_deleted_bill_count
+    saved_total_task_count = saved_task_count + saved_deleted_task_count
+    _assert(saved_bill_count >= 1, "Snapshot save setup should include bills")
+    _assert(saved_task_count >= 1, "Snapshot save setup should include tasks")
+    _assert(
+        saved_deleted_bill_count >= 1,
+        "Snapshot save should include soft-deleted bills",
+    )
+    _assert(
+        saved_deleted_task_count >= 1,
+        "Snapshot save should include soft-deleted tasks",
+    )
+    _assert(
+        saved["current_data_summary"]["deleted_bill_count"] >= 1,
+        "Snapshot save should expose current deleted bill count",
+    )
+
+    status, cleared = client.request("POST", "/data/clear", {"confirm": True})
+    _assert(status == 200, "Snapshot load setup clear should return 200")
+    _assert(cleared["after"]["bill_count"] == 0, "Snapshot load setup should clear bills")
+    _assert(cleared["after"]["task_count"] == 0, "Snapshot load setup should clear tasks")
+
+    status, snapshot_status = client.request("GET", "/data/snapshot/status")
+    _assert(status == 200, "Snapshot status after clear should return 200")
+    _assert(
+        snapshot_status["snapshot_data_summary"]["bill_count"] == saved_bill_count,
+        "Snapshot status should report saved bill count, not current bill count",
+    )
+    _assert(
+        snapshot_status["current_data_summary"]["bill_count"] == 0,
+        "Snapshot status should separately report current cleared bill count",
+    )
+
+    status, dry_run = client.request(
+        "POST",
+        "/data/snapshot/load",
+        {"dry_run": True},
+    )
+    _assert(status == 200, "Snapshot load dry run should return 200")
+    _assert(dry_run["import_result"]["dry_run"], "Snapshot load dry run should mark dry_run")
+    _assert(
+        dry_run["import_result"]["imported_bill_count"] == saved_total_bill_count,
+        "Snapshot load dry run should count active and soft-deleted bills",
+    )
+
+    status, summary = client.request("GET", "/data/summary")
+    _assert(status == 200, "Snapshot dry run summary should return 200")
+    _assert(summary["bill_count"] == 0, "Snapshot dry run should not restore bills")
+    _assert(summary["task_count"] == 0, "Snapshot dry run should not restore tasks")
+
+    status, body = client.request("POST", "/data/snapshot/load", {})
+    _assert(status == 400, "Snapshot load should require confirmation unless dry run")
+    _assert(
+        body["detail"] == "Set confirm to true before loading local snapshot",
+        "Snapshot load confirmation guard message changed",
+    )
+
+    status, loaded = client.request(
+        "POST",
+        "/data/snapshot/load",
+        {"confirm": True, "reset_existing": True},
+    )
+    _assert(status == 200, "Confirmed snapshot load should return 200")
+    _assert(
+        loaded["import_result"]["after"]["bill_count"] == saved_bill_count,
+        "Confirmed snapshot load should restore bills",
+    )
+    _assert(
+        loaded["import_result"]["after"]["task_count"] == saved_task_count,
+        "Confirmed snapshot load should restore tasks",
+    )
+    _assert(
+        loaded["import_result"]["after"]["deleted_bill_count"] == saved_deleted_bill_count,
+        "Confirmed snapshot load should restore soft-deleted bills",
+    )
+    _assert(
+        loaded["import_result"]["after"]["deleted_task_count"] == saved_deleted_task_count,
+        "Confirmed snapshot load should restore soft-deleted tasks",
+    )
+    _assert(
+        loaded["import_result"]["imported_bill_count"] == saved_total_bill_count,
+        "Confirmed snapshot load should import active and soft-deleted bills",
+    )
+    _assert(
+        loaded["import_result"]["imported_task_count"] == saved_total_task_count,
+        "Confirmed snapshot load should import active and soft-deleted tasks",
+    )
+
+    status, restored_deleted_bill = client.request(
+        "GET",
+        f"/bills/{deleted_bill_id}?include_deleted=true",
+    )
+    _assert(status == 200, "Snapshot load should restore soft-deleted bill id")
+    _assert(
+        restored_deleted_bill["deleted_at"],
+        "Snapshot load should preserve bill deleted_at",
+    )
+    status, restored_deleted_task = client.request(
+        "GET",
+        f"/tasks/{deleted_task_id}?include_deleted=true",
+    )
+    _assert(status == 200, "Snapshot load should restore soft-deleted task id")
+    _assert(
+        restored_deleted_task["deleted_at"],
+        "Snapshot load should preserve task deleted_at",
+    )
+
+    status, load_events = client.request(
+        "GET",
+        "/audit/events?action=data_snapshot_loaded&entity_type=data&page_size=5",
+    )
+    _assert(status == 200, "Audit snapshot load event list should return 200")
+    _assert(load_events["total"] >= 1, "Audit log should include snapshot load events")
+
+    status, deleted = client.request("DELETE", "/data/snapshot", {"confirm": True})
+    _assert(status == 200, "Snapshot delete should return 200")
+    _assert(deleted["deleted"], "Snapshot delete should remove the saved snapshot")
+
+    status, snapshot_status = client.request("GET", "/data/snapshot/status")
+    _assert(status == 200, "Snapshot status after delete should return 200")
+    _assert(not snapshot_status["exists"], "Snapshot status should show deleted snapshot")
 
 
 def _check_data_quality_diagnostics(client: ApiClient) -> None:

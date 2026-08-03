@@ -142,6 +142,21 @@ validates and counts records without changing local data. Real imports require
 `confirm=true`; `reset_existing=true` clears selected local datasets before
 restoring the snapshot.
 
+Local snapshot persistence:
+
+```text
+GET /data/snapshot/status
+POST /data/snapshot/save
+POST /data/snapshot/load
+DELETE /data/snapshot
+```
+
+Snapshots are stored at `backend/data/local_snapshot.json`, which is ignored by
+Git. Loading supports `dry_run=true`; real loads require `confirm=true` and reuse
+the same selective import flags as `/data/import`. Snapshot saves include
+soft-deleted bills and tasks so the restore bin survives local persistence.
+Deleting a snapshot also requires `confirm=true`.
+
 Diagnostics:
 
 ```text

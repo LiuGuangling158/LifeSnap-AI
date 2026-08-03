@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Header, HTTPException, Request, Response, status
 
 from app.schemas.settings import (
     DataClearRequest,
@@ -6,6 +6,12 @@ from app.schemas.settings import (
     DataExportResponse,
     DataImportRequest,
     DataImportResponse,
+    DataSnapshotDeleteRequest,
+    DataSnapshotDeleteResponse,
+    DataSnapshotLoadRequest,
+    DataSnapshotLoadResponse,
+    DataSnapshotSaveResponse,
+    DataSnapshotStatus,
     DemoDataSeedRequest,
     DemoDataSeedResponse,
     LocalDataSummary,
@@ -102,6 +108,87 @@ def export_task_candidates_csv(request: Request) -> Response:
         data_management_service.export_task_candidates_csv(),
         filename="lifesnap-task-candidates.csv",
     )
+
+
+@router.get("/snapshot/status", response_model=DataSnapshotStatus)
+def get_local_snapshot_status() -> DataSnapshotStatus:
+    return data_management_service.snapshot_status()
+
+
+@router.post("/snapshot/save", response_model=DataSnapshotSaveResponse)
+def save_local_snapshot(request: Request) -> DataSnapshotSaveResponse:
+    result = data_management_service.save_snapshot()
+    audit_log_store.record(
+        action="data_snapshot_saved",
+        entity_type="data",
+        request=request,
+        metadata={
+            "snapshot_path": result.snapshot_path,
+            "file_size_bytes": result.file_size_bytes,
+        },
+    )
+    return result
+
+
+@router.post("/snapshot/load", response_model=DataSnapshotLoadResponse)
+def load_local_snapshot(
+    payload: DataSnapshotLoadRequest,
+    request: Request,
+) -> DataSnapshotLoadResponse:
+    if not payload.dry_run and not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set confirm to true before loading local snapshot",
+        )
+
+    try:
+        result = data_management_service.load_snapshot(payload)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Local snapshot not found",
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    audit_log_store.record(
+        action="data_snapshot_loaded" if not payload.dry_run else "data_snapshot_load_dry_run",
+        entity_type="data",
+        request=request,
+        metadata={
+            "snapshot_path": result.snapshot_path,
+            "dry_run": payload.dry_run,
+            "reset_existing": payload.reset_existing,
+            "imported_bill_count": result.import_result.imported_bill_count,
+            "imported_task_count": result.import_result.imported_task_count,
+        },
+    )
+    return result
+
+
+@router.delete("/snapshot", response_model=DataSnapshotDeleteResponse)
+def delete_local_snapshot(
+    request: Request,
+    payload: DataSnapshotDeleteRequest = Body(
+        default_factory=DataSnapshotDeleteRequest,
+    ),
+) -> DataSnapshotDeleteResponse:
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set confirm to true before deleting local snapshot",
+        )
+    result = data_management_service.delete_snapshot()
+    audit_log_store.record(
+        action="data_snapshot_deleted",
+        entity_type="data",
+        request=request,
+        metadata={"snapshot_path": result.snapshot_path, "deleted": result.deleted},
+    )
+    return result
 
 
 @router.post("/clear", response_model=DataClearResponse)

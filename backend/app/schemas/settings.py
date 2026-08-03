@@ -70,6 +70,48 @@ class DataImportResponse(BaseModel):
     privacy_settings: PrivacySettings
 
 
+class DataSnapshotStatus(BaseModel):
+    snapshot_path: str
+    exists: bool
+    file_size_bytes: int | None = None
+    updated_at: datetime | None = None
+    snapshot_data_summary: LocalDataSummary | None = None
+    snapshot_error: str | None = None
+    current_data_summary: LocalDataSummary
+
+
+class DataSnapshotSaveResponse(DataSnapshotStatus):
+    saved_at: datetime
+
+
+class DataSnapshotLoadRequest(BaseModel):
+    confirm: bool = False
+    dry_run: bool = False
+    reset_existing: bool = True
+    include_bills: bool = True
+    include_tasks: bool = True
+    include_attachments: bool = True
+    include_candidates: bool = True
+    import_privacy_settings: bool = True
+
+
+class DataSnapshotLoadResponse(BaseModel):
+    loaded_at: datetime
+    snapshot_path: str
+    import_result: DataImportResponse
+
+
+class DataSnapshotDeleteRequest(BaseModel):
+    confirm: bool = False
+
+
+class DataSnapshotDeleteResponse(BaseModel):
+    deleted_at: datetime
+    snapshot_path: str
+    deleted: bool
+    current_data_summary: LocalDataSummary
+
+
 class DataClearRequest(BaseModel):
     confirm: bool = False
     include_bills: bool = True

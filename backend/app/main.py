@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.agent import router as agent_router
 from app.api.audit import router as audit_router
@@ -35,6 +38,9 @@ def create_app() -> FastAPI:
     app.include_router(data_router)
     app.include_router(diagnostics_router)
     app.include_router(ocr_router)
+    frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+    if (frontend_dir / "index.html").exists():
+        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     return app
 
 

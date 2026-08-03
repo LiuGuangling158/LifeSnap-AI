@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+backend/data/
 
 # Virtual environments
 .venv/
@@ -25,4 +26,3 @@ build/
 Thumbs.db
 .idea/
 .vscode/
-
