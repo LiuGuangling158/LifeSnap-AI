@@ -40,6 +40,21 @@ const state = {
   error: "",
   toast: "",
   modalOpen: false,
+  editingBill: null,
+  deleteTarget: null,
+  billFilters: {
+    year: "",
+    month: "",
+    category: "",
+    transaction_type: "",
+    q: "",
+  },
+  billListMeta: {
+    total: 0,
+    page: 1,
+    page_size: 12,
+    total_pages: 0,
+  },
   bootstrap: null,
   billOverview: null,
   bills: [],
@@ -61,14 +76,54 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-open-bill-modal]")) {
+    state.editingBill = null;
     state.modalOpen = true;
+    render();
+    return;
+  }
+
+  const editButton = event.target.closest("[data-edit-bill]");
+  if (editButton) {
+    state.editingBill = state.bills.find((bill) => bill.id === editButton.dataset.editBill) ?? null;
+    state.modalOpen = Boolean(state.editingBill);
+    render();
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-bill]");
+  if (deleteButton) {
+    state.deleteTarget = state.bills.find((bill) => bill.id === deleteButton.dataset.deleteBill) ?? null;
     render();
     return;
   }
 
   if (event.target.closest("[data-close-modal]")) {
     state.modalOpen = false;
+    state.editingBill = null;
     render();
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-delete]")) {
+    state.deleteTarget = null;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-confirm-delete]")) {
+    deleteBill();
+    return;
+  }
+
+  if (event.target.closest("[data-reset-bill-filters]")) {
+    state.billFilters = {
+      year: "",
+      month: "",
+      category: "",
+      transaction_type: "",
+      q: "",
+    };
+    loadData();
     return;
   }
 
@@ -78,18 +133,25 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.modalOpen) {
+  if (event.key === "Escape" && (state.modalOpen || state.deleteTarget)) {
     state.modalOpen = false;
+    state.editingBill = null;
+    state.deleteTarget = null;
     render();
   }
 });
 
 document.addEventListener("submit", async (event) => {
-  if (!event.target.matches("[data-bill-form]")) {
+  if (event.target.matches("[data-bill-filter]")) {
+    event.preventDefault();
+    applyBillFilters(new FormData(event.target));
     return;
   }
-  event.preventDefault();
-  await submitBill(new FormData(event.target));
+
+  if (event.target.matches("[data-bill-form]")) {
+    event.preventDefault();
+    await submitBill(new FormData(event.target));
+  }
 });
 
 loadData();
@@ -103,12 +165,18 @@ async function loadData() {
     const [bootstrap, billOverview, billList, taskList] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
-      api("/bills?page_size=8"),
+      api(buildBillListPath()),
       api("/tasks?page_size=8"),
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
     state.bills = billList.items ?? [];
+    state.billListMeta = {
+      total: billList.total ?? 0,
+      page: billList.page ?? 1,
+      page_size: billList.page_size ?? 12,
+      total_pages: billList.total_pages ?? 0,
+    };
     state.tasks = taskList.items ?? [];
   } catch (error) {
     state.error = error.message || "后端连接失败";
@@ -121,6 +189,7 @@ async function loadData() {
 async function submitBill(formData) {
   const amount = Number(formData.get("amount"));
   const paidAt = formData.get("paid_at");
+  const editingBill = state.editingBill;
   const payload = {
     amount,
     merchant: String(formData.get("merchant") || "").trim(),
@@ -129,22 +198,25 @@ async function submitBill(formData) {
     transaction_type: formData.get("transaction_type"),
     paid_at: paidAt ? new Date(paidAt).toISOString() : null,
     note: String(formData.get("note") || "").trim() || null,
-    source: "manual",
   };
+  if (!editingBill) {
+    payload.source = "manual";
+  }
 
   state.saving = true;
   render();
   try {
-    await api("/bills", {
-      method: "POST",
+    await api(editingBill ? `/bills/${editingBill.id}` : "/bills", {
+      method: editingBill ? "PATCH" : "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": `web-bill-${crypto.randomUUID()}`,
+        ...(editingBill ? {} : { "Idempotency-Key": `web-bill-${crypto.randomUUID()}` }),
       },
       body: JSON.stringify(payload),
     });
     state.modalOpen = false;
-    state.toast = "账单已保存";
+    state.editingBill = null;
+    state.toast = editingBill ? "账单已更新" : "账单已保存";
     await loadData();
     window.setTimeout(() => {
       state.toast = "";
@@ -157,6 +229,52 @@ async function submitBill(formData) {
     state.saving = false;
     render();
   }
+}
+
+async function deleteBill() {
+  if (!state.deleteTarget) {
+    return;
+  }
+  const bill = state.deleteTarget;
+  state.saving = true;
+  render();
+  try {
+    await api(`/bills/${bill.id}`, { method: "DELETE" });
+    state.deleteTarget = null;
+    state.toast = "账单已删除";
+    await loadData();
+    window.setTimeout(() => {
+      state.toast = "";
+      render();
+    }, 2200);
+  } catch (error) {
+    state.toast = error.message || "删除失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+function applyBillFilters(formData) {
+  state.billFilters = {
+    year: String(formData.get("year") || "").trim(),
+    month: String(formData.get("month") || "").trim(),
+    category: String(formData.get("category") || "").trim(),
+    transaction_type: String(formData.get("transaction_type") || "").trim(),
+    q: String(formData.get("q") || "").trim(),
+  };
+  loadData();
+}
+
+function buildBillListPath() {
+  const params = new URLSearchParams({ page_size: String(state.billListMeta.page_size) });
+  Object.entries(state.billFilters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+  return `/bills?${params.toString()}`;
 }
 
 async function api(path, options = {}) {
@@ -198,6 +316,7 @@ function render() {
         ${renderPage()}
       </main>
       ${state.modalOpen ? renderBillModal() : ""}
+      ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""}
     </div>
   `;
@@ -305,10 +424,12 @@ function renderBillsPage() {
     <section class="surface">
       <div class="section-header">
         <div>
-          <h2 class="section-title">最近账单</h2>
-          <p class="section-note">当前先接入查看和新增，编辑、删除会放到下一轮前端增量。</p>
+          <h2 class="section-title">账单记录</h2>
+          <p class="section-note">支持按月份、分类、交易类型和关键词筛选；删除会进入软删除。</p>
         </div>
+        <span class="pill">${state.billListMeta.total} 条</span>
       </div>
+      ${renderBillFilters()}
       ${state.bills.length ? renderBillsTable(state.bills) : empty("还没有账单，可以先新增一条手动记录。")}
     </section>
   `;
@@ -401,6 +522,50 @@ function renderBillList(bills) {
   `;
 }
 
+function renderBillFilters() {
+  const filters = state.billFilters;
+  return `
+    <form class="filter-form" data-bill-filter>
+      <div class="field">
+        <label for="filter_year">年份</label>
+        <input id="filter_year" name="year" type="number" min="1970" max="2100" placeholder="全部"
+          value="${escapeHtml(filters.year)}" />
+      </div>
+      <div class="field">
+        <label for="filter_month">月份</label>
+        <select id="filter_month" name="month">
+          <option value="">全部</option>
+          ${Array.from({ length: 12 }, (_, index) => {
+            const month = String(index + 1);
+            return `<option value="${month}" ${filters.month === month ? "selected" : ""}>${month} 月</option>`;
+          }).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label for="filter_category">分类</label>
+        <input id="filter_category" name="category" maxlength="40" placeholder="如 餐饮"
+          value="${escapeHtml(filters.category)}" />
+      </div>
+      <div class="field">
+        <label for="filter_transaction_type">类型</label>
+        <select id="filter_transaction_type" name="transaction_type">
+          <option value="">全部</option>
+          ${transactionOptions(filters.transaction_type)}
+        </select>
+      </div>
+      <div class="field filter-keyword">
+        <label for="filter_q">关键词</label>
+        <input id="filter_q" name="q" maxlength="80" placeholder="商户、分类、备注"
+          value="${escapeHtml(filters.q)}" />
+      </div>
+      <div class="filter-actions">
+        <button class="button" type="submit">${icon("search")}筛选</button>
+        <button class="button ghost" type="button" data-reset-bill-filters>${icon("reset")}清空</button>
+      </div>
+    </form>
+  `;
+}
+
 function renderBillsTable(bills) {
   return `
     <div class="table-wrap">
@@ -412,6 +577,7 @@ function renderBillsTable(bills) {
             <th>类型</th>
             <th>时间</th>
             <th>金额</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -424,6 +590,16 @@ function renderBillsTable(bills) {
                   <td>${labelTransaction(bill.transaction_type)}</td>
                   <td>${formatDate(bill.paid_at)}</td>
                   <td class="amount ${bill.transaction_type}">${money(bill.amount)}</td>
+                  <td>
+                    <div class="table-actions">
+                      <button class="icon-button" type="button" data-edit-bill="${bill.id}" aria-label="编辑 ${escapeHtml(bill.merchant)}" title="编辑">
+                        ${icon("edit")}
+                      </button>
+                      <button class="icon-button danger" type="button" data-delete-bill="${bill.id}" aria-label="删除 ${escapeHtml(bill.merchant)}" title="删除">
+                        ${icon("trash")}
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               `,
             )
@@ -455,13 +631,16 @@ function renderTaskList(tasks) {
 }
 
 function renderBillModal() {
+  const bill = state.editingBill;
+  const title = bill ? "编辑账单" : "新增账单";
+  const description = bill ? "修改后会立即更新列表和首页统计。" : "先支持手动记录，后续接入截图识别候选。";
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="bill-modal-title">
         <div class="modal-header">
           <div>
-            <h2 class="modal-title" id="bill-modal-title">新增账单</h2>
-            <p class="section-note">先支持手动记录，后续接入截图识别候选。</p>
+            <h2 class="modal-title" id="bill-modal-title">${title}</h2>
+            <p class="section-note">${description}</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -471,44 +650,76 @@ function renderBillModal() {
           <div class="form-grid">
             <div class="field">
               <label for="amount">金额</label>
-              <input id="amount" name="amount" type="number" min="0.01" step="0.01" required placeholder="18.50" />
+              <input id="amount" name="amount" type="number" min="0.01" step="0.01" required placeholder="18.50"
+                value="${escapeHtml(bill?.amount ?? "")}" />
             </div>
             <div class="field">
               <label for="transaction_type">类型</label>
               <select id="transaction_type" name="transaction_type">
-                <option value="expense">支出</option>
-                <option value="income">收入</option>
-                <option value="refund">退款</option>
+                ${transactionOptions(bill?.transaction_type ?? "expense")}
               </select>
             </div>
             <div class="field">
               <label for="merchant">商户</label>
-              <input id="merchant" name="merchant" required maxlength="80" placeholder="早餐店" />
+              <input id="merchant" name="merchant" required maxlength="120" placeholder="早餐店"
+                value="${escapeHtml(bill?.merchant ?? "")}" />
             </div>
             <div class="field">
               <label for="category">分类</label>
-              <input id="category" name="category" required maxlength="40" placeholder="餐饮" />
+              <input id="category" name="category" required maxlength="40" placeholder="餐饮"
+                value="${escapeHtml(bill?.category ?? "")}" />
             </div>
             <div class="field">
               <label for="payment_method">支付方式</label>
-              <input id="payment_method" name="payment_method" maxlength="40" placeholder="微信支付" />
+              <input id="payment_method" name="payment_method" maxlength="40" placeholder="微信支付"
+                value="${escapeHtml(bill?.payment_method ?? "")}" />
             </div>
             <div class="field">
               <label for="paid_at">时间</label>
-              <input id="paid_at" name="paid_at" type="datetime-local" />
+              <input id="paid_at" name="paid_at" type="datetime-local"
+                value="${escapeHtml(toDateTimeLocal(bill?.paid_at))}" />
             </div>
             <div class="field full">
               <label for="note">备注</label>
-              <textarea id="note" name="note" maxlength="240" placeholder="可选"></textarea>
+              <textarea id="note" name="note" maxlength="500" placeholder="可选">${escapeHtml(bill?.note ?? "")}</textarea>
             </div>
           </div>
           <div class="form-actions">
             <button class="button ghost" type="button" data-close-modal>取消</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
-              ${icon("save")}${state.saving ? "保存中..." : "保存账单"}
+              ${icon("save")}${state.saving ? "保存中..." : (bill ? "更新账单" : "保存账单")}
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderDeleteBillModal() {
+  const bill = state.deleteTarget;
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="delete-bill-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="delete-bill-title">删除账单</h2>
+            <p class="section-note">这会将账单移入软删除状态，不会立即从后端存储中彻底移除。</p>
+          </div>
+          <button class="button ghost" type="button" data-cancel-delete aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="confirm-body">
+          <p class="item-title">${escapeHtml(bill?.merchant ?? "账单")}</p>
+          <p class="item-meta">${escapeHtml(bill?.category ?? "")} · ${formatDate(bill?.paid_at)} · ${money(bill?.amount)}</p>
+        </div>
+        <div class="form-actions modal-actions">
+          <button class="button ghost" type="button" data-cancel-delete>取消</button>
+          <button class="button danger" type="button" data-confirm-delete ${state.saving ? "disabled" : ""}>
+            ${icon("trash")}${state.saving ? "删除中..." : "确认删除"}
+          </button>
+        </div>
       </section>
     </div>
   `;
@@ -567,7 +778,33 @@ function labelTransaction(value) {
     expense: "支出",
     income: "收入",
     refund: "退款",
+    transfer: "转账",
+    top_up: "充值",
   }[value] ?? value;
+}
+
+function transactionOptions(selectedValue = "") {
+  const options = [
+    ["expense", "支出"],
+    ["income", "收入"],
+    ["refund", "退款"],
+    ["transfer", "转账"],
+    ["top_up", "充值"],
+  ];
+  return options
+    .map(
+      ([value, label]) =>
+        `<option value="${value}" ${selectedValue === value ? "selected" : ""}>${label}</option>`,
+    )
+    .join("");
+}
+
+function toDateTimeLocal(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60 * 1000);
+  return local.toISOString().slice(0, 16);
 }
 
 function labelTaskStatus(value) {
@@ -593,6 +830,10 @@ function icon(name) {
     settings: '<circle cx="12" cy="12" r="3"></circle><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.4 3.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 3.1h5l.4-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"></path>',
     plus: '<path d="M12 5v14"></path><path d="M5 12h14"></path>',
     refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 16v-5h-5"></path>',
+    search: '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path>',
+    reset: '<path d="M4 7h11a5 5 0 1 1-3.5 8.5"></path><path d="M4 7l4-4"></path><path d="M4 7l4 4"></path>',
+    edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="M13.5 6.5l4 4"></path>',
+    trash: '<path d="M4 7h16"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M6 7l1 14h10l1-14"></path><path d="M9 7V4h6v3"></path>',
     close: '<path d="M6 6l12 12"></path><path d="M18 6L6 18"></path>',
     save: '<path d="M5 3h12l2 2v16H5V3z"></path><path d="M8 3v6h8"></path><path d="M8 17h8"></path>',
     spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"></path>',
