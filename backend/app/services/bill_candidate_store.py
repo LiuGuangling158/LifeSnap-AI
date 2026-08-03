@@ -80,6 +80,11 @@ class InMemoryBillCandidateStore:
         self._candidates.clear()
         return count
 
+    def upsert_many(self, candidates: list[ParseBillResponse]) -> int:
+        for candidate in candidates:
+            self._candidates[candidate.candidate_id] = candidate
+        return len(candidates)
+
     def _warnings(self, data: BillCandidateData) -> list[str]:
         warnings: list[str] = []
         if data.amount is None:

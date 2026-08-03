@@ -4,6 +4,8 @@ from app.schemas.settings import (
     DataClearRequest,
     DataClearResponse,
     DataExportResponse,
+    DataImportRequest,
+    DataImportResponse,
     DemoDataSeedRequest,
     DemoDataSeedResponse,
     LocalDataSummary,
@@ -122,6 +124,34 @@ def clear_local_data(payload: DataClearRequest, request: Request) -> DataClearRe
             "reset_privacy_settings": payload.reset_privacy_settings,
             "after_bill_count": result.after.bill_count,
             "after_task_count": result.after.task_count,
+        },
+    )
+    return result
+
+
+@router.post("/import", response_model=DataImportResponse)
+def import_local_data(payload: DataImportRequest, request: Request) -> DataImportResponse:
+    if not payload.dry_run and not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set confirm to true before importing local data",
+        )
+
+    result = data_management_service.import_data(payload)
+    audit_log_store.record(
+        action="data_imported" if not payload.dry_run else "data_import_dry_run",
+        entity_type="data",
+        request=request,
+        metadata={
+            "dry_run": payload.dry_run,
+            "reset_existing": payload.reset_existing,
+            "include_bills": payload.include_bills,
+            "include_tasks": payload.include_tasks,
+            "include_attachments": payload.include_attachments,
+            "include_candidates": payload.include_candidates,
+            "import_privacy_settings": payload.import_privacy_settings,
+            "imported_bill_count": result.imported_bill_count,
+            "imported_task_count": result.imported_task_count,
         },
     )
     return result

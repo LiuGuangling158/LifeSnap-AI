@@ -89,5 +89,10 @@ class InMemoryTaskCandidateStore:
         self._candidates.clear()
         return count
 
+    def upsert_many(self, candidates: list[ParseTaskResponse]) -> int:
+        for candidate in candidates:
+            self._candidates[candidate.candidate_id] = candidate
+        return len(candidates)
+
 
 task_candidate_store = InMemoryTaskCandidateStore()

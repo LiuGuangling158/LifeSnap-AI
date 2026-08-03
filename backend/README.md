@@ -131,6 +131,17 @@ Audit events are in-memory for the MVP backend and keep only operation metadata,
 resource IDs, route path, method, and request ID. Raw OCR text, request bodies,
 notes, and long free text are not stored in audit metadata.
 
+Data import:
+
+```text
+POST /data/import
+```
+
+Use the JSON returned by `GET /data/export` as `snapshot`. `dry_run=true`
+validates and counts records without changing local data. Real imports require
+`confirm=true`; `reset_existing=true` clears selected local datasets before
+restoring the snapshot.
+
 ## Idempotency
 
 Create and state-changing endpoints support an optional `Idempotency-Key` header

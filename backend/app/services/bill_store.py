@@ -161,6 +161,11 @@ class InMemoryBillStore:
         self._bills.clear()
         return count
 
+    def upsert_many(self, bills: list[BillRead]) -> int:
+        for bill in bills:
+            self._bills[bill.id] = bill
+        return len(bills)
+
     def check_duplicate(
         self,
         payload: BillCreate,

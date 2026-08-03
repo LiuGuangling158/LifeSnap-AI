@@ -189,6 +189,11 @@ class InMemoryTaskStore:
         self._tasks.clear()
         return count
 
+    def upsert_many(self, tasks: list[TaskRead]) -> int:
+        for task in tasks:
+            self._tasks[task.id] = task
+        return len(tasks)
+
     def today_tasks(self, now: datetime, limit: int = 10) -> list[TaskRead]:
         start_at = self._start_of_day(now)
         end_at = start_at + timedelta(days=1)

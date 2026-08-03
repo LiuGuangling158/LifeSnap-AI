@@ -15,6 +15,8 @@ from app.schemas.bill import BillCreate, BillRead, BillSource, TransactionType
 from app.schemas.settings import (
     DataClearRequest,
     DataClearResponse,
+    DataImportRequest,
+    DataImportResponse,
     DataExportResponse,
     DemoDataSeedRequest,
     DemoDataSeedResponse,
@@ -51,6 +53,82 @@ class DataManagementService:
             attachments=attachment_store.all(),
             bill_candidates=bill_candidate_store.all(),
             task_candidates=task_candidate_store.all(),
+        )
+
+    def import_data(self, payload: DataImportRequest) -> DataImportResponse:
+        before = self.summary()
+        imported_bill_count = len(payload.snapshot.bills) if payload.include_bills else 0
+        imported_task_count = len(payload.snapshot.tasks) if payload.include_tasks else 0
+        imported_attachment_count = (
+            len(payload.snapshot.attachments) if payload.include_attachments else 0
+        )
+        imported_bill_candidate_count = (
+            len(payload.snapshot.bill_candidates) if payload.include_candidates else 0
+        )
+        imported_task_candidate_count = (
+            len(payload.snapshot.task_candidates) if payload.include_candidates else 0
+        )
+
+        if payload.dry_run:
+            return DataImportResponse(
+                imported_at=datetime.now(timezone.utc),
+                dry_run=True,
+                reset_existing=payload.reset_existing,
+                before=before,
+                after=before,
+                imported_bill_count=imported_bill_count,
+                imported_task_count=imported_task_count,
+                imported_attachment_count=imported_attachment_count,
+                imported_bill_candidate_count=imported_bill_candidate_count,
+                imported_task_candidate_count=imported_task_candidate_count,
+                privacy_settings=settings_store.get_privacy_settings(),
+            )
+
+        if payload.reset_existing:
+            self.clear(
+                DataClearRequest(
+                    confirm=True,
+                    include_bills=payload.include_bills,
+                    include_tasks=payload.include_tasks,
+                    include_attachments=payload.include_attachments,
+                    include_candidates=payload.include_candidates,
+                    reset_privacy_settings=payload.import_privacy_settings,
+                )
+            )
+
+        if payload.include_bills:
+            bill_store.upsert_many(payload.snapshot.bills)
+        if payload.include_tasks:
+            task_store.upsert_many(payload.snapshot.tasks)
+        if payload.include_attachments:
+            attachment_store.upsert_many(payload.snapshot.attachments)
+        if payload.include_candidates:
+            bill_candidate_store.upsert_many(payload.snapshot.bill_candidates)
+            task_candidate_store.upsert_many(payload.snapshot.task_candidates)
+        if payload.import_privacy_settings:
+            settings_store.replace_privacy_settings(payload.snapshot.privacy_settings)
+
+        if (
+            payload.include_bills
+            or payload.include_tasks
+            or payload.include_attachments
+            or payload.include_candidates
+            or payload.import_privacy_settings
+        ):
+            idempotency_store.clear()
+
+        return DataImportResponse(
+            imported_at=datetime.now(timezone.utc),
+            dry_run=False,
+            reset_existing=payload.reset_existing,
+            before=before,
+            after=self.summary(),
+            imported_bill_count=imported_bill_count,
+            imported_task_count=imported_task_count,
+            imported_attachment_count=imported_attachment_count,
+            imported_bill_candidate_count=imported_bill_candidate_count,
+            imported_task_candidate_count=imported_task_candidate_count,
+            privacy_settings=settings_store.get_privacy_settings(),
         )
 
     def export_bills_csv(self) -> str:

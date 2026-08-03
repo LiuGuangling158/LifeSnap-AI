@@ -44,6 +44,32 @@ class DataExportResponse(BaseModel):
     task_candidates: list[ParseTaskResponse]
 
 
+class DataImportRequest(BaseModel):
+    confirm: bool = False
+    dry_run: bool = False
+    reset_existing: bool = False
+    include_bills: bool = True
+    include_tasks: bool = True
+    include_attachments: bool = True
+    include_candidates: bool = True
+    import_privacy_settings: bool = True
+    snapshot: DataExportResponse
+
+
+class DataImportResponse(BaseModel):
+    imported_at: datetime
+    dry_run: bool
+    reset_existing: bool
+    before: LocalDataSummary
+    after: LocalDataSummary
+    imported_bill_count: int
+    imported_task_count: int
+    imported_attachment_count: int
+    imported_bill_candidate_count: int
+    imported_task_candidate_count: int
+    privacy_settings: PrivacySettings
+
+
 class DataClearRequest(BaseModel):
     confirm: bool = False
     include_bills: bool = True

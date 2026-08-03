@@ -135,6 +135,13 @@ class InMemoryAttachmentStore:
         self._original_files.clear()
         return count
 
+    def upsert_many(self, attachments: list[AttachmentRead]) -> int:
+        for attachment in attachments:
+            self._attachments[attachment.id] = attachment
+            if not attachment.original_saved:
+                self._original_files.pop(attachment.id, None)
+        return len(attachments)
+
     def _find_by_checksum(self, checksum: str) -> list[AttachmentRead]:
         matches = [
             attachment

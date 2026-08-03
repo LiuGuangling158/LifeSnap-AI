@@ -130,6 +130,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_attachment_duplicate_detection(client)
     _check_ocr_fallback_flow(client)
     _check_audit_log_and_request_id(client)
+    _check_data_import_restore(client)
     _check_dashboard_summary(client)
     _check_data_export_and_clear(client)
 
@@ -989,6 +990,77 @@ def _check_audit_log_and_request_id(client: ApiClient) -> None:
         "ocr_text_length" in metadata and "ocr_text" not in metadata,
         "Audit OCR event should store length instead of raw OCR text",
     )
+
+
+def _check_data_import_restore(client: ApiClient) -> None:
+    status, snapshot = client.request("GET", "/data/export")
+    _assert(status == 200, "Data import setup export should return 200")
+    _assert(snapshot["bills"], "Data import setup should have bills")
+    _assert(snapshot["tasks"], "Data import setup should have tasks")
+    first_bill_id = snapshot["bills"][0]["id"]
+    first_task_id = snapshot["tasks"][0]["id"]
+
+    status, cleared = client.request("POST", "/data/clear", {"confirm": True})
+    _assert(status == 200, "Data import setup clear should return 200")
+    _assert(cleared["after"]["bill_count"] == 0, "Data import setup should clear bills")
+    _assert(cleared["after"]["task_count"] == 0, "Data import setup should clear tasks")
+
+    dry_run_payload = {
+        "dry_run": True,
+        "reset_existing": True,
+        "snapshot": snapshot,
+    }
+    status, dry_run = client.request("POST", "/data/import", dry_run_payload)
+    _assert(status == 200, "Data import dry run should return 200")
+    _assert(dry_run["dry_run"], "Data import dry run should mark dry_run")
+    _assert(
+        dry_run["imported_bill_count"] == len(snapshot["bills"]),
+        "Data import dry run should count bills",
+    )
+
+    status, summary = client.request("GET", "/data/summary")
+    _assert(status == 200, "Data import dry run summary should return 200")
+    _assert(summary["bill_count"] == 0, "Data import dry run should not change bills")
+    _assert(summary["task_count"] == 0, "Data import dry run should not change tasks")
+
+    status, body = client.request("POST", "/data/import", {"snapshot": snapshot})
+    _assert(status == 400, "Data import should require confirmation unless dry run")
+    _assert(
+        body["detail"] == "Set confirm to true before importing local data",
+        "Data import confirmation guard message changed",
+    )
+
+    import_payload = {
+        "confirm": True,
+        "reset_existing": True,
+        "snapshot": snapshot,
+    }
+    status, imported = client.request("POST", "/data/import", import_payload)
+    _assert(status == 200, "Confirmed data import should return 200")
+    _assert(not imported["dry_run"], "Confirmed data import should not mark dry_run")
+    _assert(
+        imported["after"]["bill_count"] == len(snapshot["bills"]),
+        "Confirmed data import should restore bill count",
+    )
+    _assert(
+        imported["after"]["task_count"] == len(snapshot["tasks"]),
+        "Confirmed data import should restore task count",
+    )
+
+    status, bill = client.request("GET", f"/bills/{first_bill_id}")
+    _assert(status == 200, "Confirmed data import should restore bill ids")
+    _assert(bill["id"] == first_bill_id, "Confirmed data import should preserve bill id")
+
+    status, task = client.request("GET", f"/tasks/{first_task_id}")
+    _assert(status == 200, "Confirmed data import should restore task ids")
+    _assert(task["id"] == first_task_id, "Confirmed data import should preserve task id")
+
+    status, import_events = client.request(
+        "GET",
+        "/audit/events?action=data_imported&entity_type=data&page_size=5",
+    )
+    _assert(status == 200, "Audit data import event list should return 200")
+    _assert(import_events["total"] >= 1, "Audit log should include data import events")
 
 
 def _check_dashboard_summary(client: ApiClient) -> None:

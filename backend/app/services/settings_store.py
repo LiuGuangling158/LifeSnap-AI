@@ -30,6 +30,10 @@ class InMemorySettingsStore:
         self._privacy_settings = self._default_privacy_settings()
         return self._privacy_settings
 
+    def replace_privacy_settings(self, payload: PrivacySettings) -> PrivacySettings:
+        self._privacy_settings = payload
+        return self._privacy_settings
+
     def _default_privacy_settings(self) -> PrivacySettings:
         return PrivacySettings(
             local_only_mode=True,
