@@ -49,3 +49,17 @@ class ChatConfirmActionResponse(BaseModel):
     created_bill: BillRead | None = None
     created_task: TaskRead | None = None
     warnings: list[str] = []
+
+
+class ChatDiscardActionRequest(BaseModel):
+    action_type: ChatActionType
+    candidate_id: UUID
+
+
+class ChatDiscardActionResponse(BaseModel):
+    message_id: UUID
+    reply: str
+    action_type: ChatActionType
+    candidate_id: UUID
+    discarded: bool = True
+    warnings: list[str] = []

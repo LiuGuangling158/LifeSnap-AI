@@ -66,6 +66,7 @@ Currently covered endpoints:
 - `POST /agent/bill-candidates/{candidate_id}/confirm`
 - `POST /agent/task-candidates/{candidate_id}/confirm`
 - `POST /chat/confirm-action`
+- `POST /chat/discard-action`
 
 ## Agent
 
@@ -236,6 +237,7 @@ Example unsupported input:
 Chat responses do not create formal bills or tasks directly. If the response
 contains `candidate_id`, the user still needs to confirm it through the related
 candidate confirmation endpoint, or through the unified chat action endpoint.
+The user can also discard an unwanted candidate from the same chat flow.
 
 Confirm the candidate returned by `POST /chat/messages`:
 
@@ -253,6 +255,22 @@ Content-Type: application/json
 Supported `action_type` values are `bill_candidate` and `task_candidate`. The
 response includes `created_bill` or `created_task` when the candidate is saved.
 Candidates with incomplete required fields still need to be edited first.
+
+Discard the candidate returned by `POST /chat/messages`:
+
+```http
+POST /chat/discard-action
+Idempotency-Key: chat-discard-001
+Content-Type: application/json
+
+{
+  "action_type": "bill_candidate",
+  "candidate_id": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+The discard action removes the pending candidate only. It does not delete any
+formal bill or task that has already been confirmed.
 
 ## Settings
 

@@ -7,11 +7,13 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+LOCAL_TZ = timezone(timedelta(hours=8))
 
 
 class ApiClient:
@@ -86,6 +88,9 @@ def main() -> int:
             "127.0.0.1",
             "--port",
             str(port),
+            "--no-access-log",
+            "--log-level",
+            "warning",
         ],
         cwd=BACKEND_DIR,
         stdout=subprocess.PIPE,
@@ -145,6 +150,46 @@ def _check_candidate_discard_flow(client: ApiClient) -> None:
     status, _ = client.request("GET", f"/agent/bill-candidates/{bill_candidate_id}")
     _assert(status == 404, "Discarded bill candidate should not be readable")
 
+    status, chat_bill_candidate = client.request(
+        "POST",
+        "/agent/parse-bill",
+        {
+            "text": "\u9762\u5305\u5e97\n\u5b9e\u4ed8 12 \u5143",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Chat discard bill candidate should be parsed")
+    chat_bill_candidate_id = chat_bill_candidate["candidate_id"]
+    headers = {"Idempotency-Key": "smoke-chat-discard-bill-001"}
+    discard_payload = {
+        "action_type": "bill_candidate",
+        "candidate_id": chat_bill_candidate_id,
+    }
+    status, first_discard = client.request(
+        "POST",
+        "/chat/discard-action",
+        discard_payload,
+        headers=headers,
+    )
+    status_again, second_discard = client.request(
+        "POST",
+        "/chat/discard-action",
+        discard_payload,
+        headers=headers,
+    )
+    _assert(
+        status == 200 and status_again == 200,
+        "Repeated chat bill discard should return 200",
+    )
+    _assert(
+        first_discard["candidate_id"] == second_discard["candidate_id"],
+        "Repeated chat bill discard should return the first discard result",
+    )
+    _assert(first_discard["discarded"], "Chat bill discard should mark discarded")
+
+    status, _ = client.request("GET", f"/agent/bill-candidates/{chat_bill_candidate_id}")
+    _assert(status == 404, "Chat-discarded bill candidate should not be readable")
+
     status, task_candidate = client.request(
         "POST",
         "/agent/parse-task",
@@ -161,6 +206,30 @@ def _check_candidate_discard_flow(client: ApiClient) -> None:
 
     status, _ = client.request("GET", f"/agent/task-candidates/{task_candidate_id}")
     _assert(status == 404, "Discarded task candidate should not be readable")
+
+    status, chat_task_candidate = client.request(
+        "POST",
+        "/agent/parse-task",
+        {
+            "text": "\u660e\u5929 10 \u70b9\u63d0\u9192\u6211\u4e70\u725b\u5976",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Chat discard task candidate should be parsed")
+    chat_task_candidate_id = chat_task_candidate["candidate_id"]
+    status, discarded_task = client.request(
+        "POST",
+        "/chat/discard-action",
+        {
+            "action_type": "task_candidate",
+            "candidate_id": chat_task_candidate_id,
+        },
+    )
+    _assert(status == 200, "Chat task discard should return 200")
+    _assert(discarded_task["discarded"], "Chat task discard should mark discarded")
+
+    status, _ = client.request("GET", f"/agent/task-candidates/{chat_task_candidate_id}")
+    _assert(status == 404, "Chat-discarded task candidate should not be readable")
 
 
 def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
@@ -318,11 +387,16 @@ def _check_bill_candidate_duplicate_detection(client: ApiClient) -> None:
 
 
 def _check_task_snooze_idempotency(client: ApiClient) -> None:
+    remind_at = (datetime.now(LOCAL_TZ) + timedelta(days=1)).replace(
+        second=0,
+        microsecond=0,
+    )
+    expected_remind_at = (remind_at + timedelta(minutes=30)).isoformat()
     payload = {
         "title": "\u533b\u9662\u590d\u8bca",
         "category": "\u533b\u7597",
         "task_type": "reminder",
-        "remind_at": "2026-08-02T15:00:00+08:00",
+        "remind_at": remind_at.isoformat(),
         "source": "manual",
     }
     status, task = client.request(
@@ -348,7 +422,7 @@ def _check_task_snooze_idempotency(client: ApiClient) -> None:
     )
     _assert(status == 200 and status_again == 200, "Repeated snooze should return 200")
     _assert(
-        first["remind_at"] == second["remind_at"] == "2026-08-02T15:30:00+08:00",
+        first["remind_at"] == second["remind_at"] == expected_remind_at,
         "Repeated snooze should not move the reminder twice",
     )
 

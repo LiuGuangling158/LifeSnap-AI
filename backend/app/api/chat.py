@@ -7,6 +7,8 @@ from app.schemas.chat import (
     ChatActionType,
     ChatConfirmActionRequest,
     ChatConfirmActionResponse,
+    ChatDiscardActionRequest,
+    ChatDiscardActionResponse,
     ChatMessageRequest,
     ChatMessageResponse,
 )
@@ -40,6 +42,22 @@ def confirm_action(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
+@router.post("/discard-action", response_model=ChatDiscardActionResponse)
+def discard_action(
+    payload: ChatDiscardActionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> ChatDiscardActionResponse:
+    try:
+        return idempotency_store.run(
+            scope="POST /chat/discard-action",
+            key=idempotency_key,
+            fingerprint=payload.model_dump(mode="json"),
+            factory=lambda: _discard_candidate(payload),
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+
 def _confirm_candidate(payload: ChatConfirmActionRequest) -> ChatConfirmActionResponse:
     if payload.action_type == ChatActionType.bill_candidate:
         return _confirm_bill_candidate(payload.candidate_id)
@@ -49,6 +67,18 @@ def _confirm_candidate(payload: ChatConfirmActionRequest) -> ChatConfirmActionRe
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Chat action type is not confirmable",
+    )
+
+
+def _discard_candidate(payload: ChatDiscardActionRequest) -> ChatDiscardActionResponse:
+    if payload.action_type == ChatActionType.bill_candidate:
+        return _discard_bill_candidate(payload.candidate_id)
+    if payload.action_type == ChatActionType.task_candidate:
+        return _discard_task_candidate(payload.candidate_id)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Chat action type is not discardable",
     )
 
 
@@ -107,4 +137,36 @@ def _confirm_task_candidate(candidate_id: UUID) -> ChatConfirmActionResponse:
         action_type=ChatActionType.task_candidate,
         candidate_id=candidate_id,
         created_task=task,
+    )
+
+
+def _discard_bill_candidate(candidate_id: UUID) -> ChatDiscardActionResponse:
+    deleted = bill_candidate_store.delete(candidate_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bill candidate not found",
+        )
+
+    return ChatDiscardActionResponse(
+        message_id=uuid4(),
+        reply="Bill candidate discarded.",
+        action_type=ChatActionType.bill_candidate,
+        candidate_id=candidate_id,
+    )
+
+
+def _discard_task_candidate(candidate_id: UUID) -> ChatDiscardActionResponse:
+    deleted = task_candidate_store.delete(candidate_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task candidate not found",
+        )
+
+    return ChatDiscardActionResponse(
+        message_id=uuid4(),
+        reply="Task candidate discarded.",
+        action_type=ChatActionType.task_candidate,
+        candidate_id=candidate_id,
     )
