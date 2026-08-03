@@ -1,12 +1,15 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Header, HTTPException, Response, status
 
 from app.schemas.settings import (
     DataClearRequest,
     DataClearResponse,
     DataExportResponse,
+    DemoDataSeedRequest,
+    DemoDataSeedResponse,
     LocalDataSummary,
 )
 from app.services.data_management_service import data_management_service
+from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 
 router = APIRouter(prefix="/data", tags=["data"])
 
@@ -69,6 +72,28 @@ def clear_local_data(payload: DataClearRequest) -> DataClearResponse:
             detail="Set confirm to true before clearing local data",
         )
     return data_management_service.clear(payload)
+
+
+@router.post("/seed-demo", response_model=DemoDataSeedResponse)
+def seed_demo_data(
+    payload: DemoDataSeedRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> DemoDataSeedResponse:
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set confirm to true before seeding demo data",
+        )
+
+    try:
+        return idempotency_store.run(
+            scope="POST /data/seed-demo",
+            key=idempotency_key,
+            fingerprint=payload.model_dump(mode="json"),
+            factory=lambda: data_management_service.seed_demo_data(payload),
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 def _csv_response(content: str, filename: str) -> Response:

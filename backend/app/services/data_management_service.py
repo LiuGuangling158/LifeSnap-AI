@@ -1,13 +1,26 @@
 import csv
+from decimal import Decimal
 from io import StringIO
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
+from app.schemas.agent import (
+    BillCandidateData,
+    ParseBillResponse,
+    ParseTaskResponse,
+    TaskCandidateData,
+)
+from app.schemas.attachment import AttachmentRead, AttachmentSource
+from app.schemas.bill import BillCreate, BillRead, BillSource, TransactionType
 from app.schemas.settings import (
     DataClearRequest,
     DataClearResponse,
     DataExportResponse,
+    DemoDataSeedRequest,
+    DemoDataSeedResponse,
     LocalDataSummary,
 )
+from app.schemas.task import TaskCreate, TaskPriority, TaskRead, TaskSource, TaskType
 from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
@@ -247,6 +260,42 @@ class DataManagementService:
             ],
         )
 
+    def seed_demo_data(self, payload: DemoDataSeedRequest) -> DemoDataSeedResponse:
+        before = self.summary()
+        if payload.reset_existing:
+            self.clear(
+                DataClearRequest(
+                    confirm=True,
+                    include_bills=True,
+                    include_tasks=True,
+                    include_attachments=True,
+                    include_candidates=True,
+                    reset_privacy_settings=False,
+                )
+            )
+            before = self.summary()
+
+        now = datetime.now(timezone.utc)
+        created_bills = self._seed_demo_bills(now)
+        created_tasks = self._seed_demo_tasks(now)
+        created_attachment = self._seed_demo_attachment() if payload.include_attachment else None
+        created_bill_candidates: list[ParseBillResponse] = []
+        created_task_candidates: list[ParseTaskResponse] = []
+        if payload.include_candidates:
+            created_bill_candidates = self._seed_demo_bill_candidates(now)
+            created_task_candidates = self._seed_demo_task_candidates(now)
+
+        return DemoDataSeedResponse(
+            seeded_at=datetime.now(timezone.utc),
+            before=before,
+            after=self.summary(),
+            created_bills=created_bills,
+            created_tasks=created_tasks,
+            created_attachment=created_attachment,
+            created_bill_candidates=created_bill_candidates,
+            created_task_candidates=created_task_candidates,
+        )
+
     def clear(self, payload: DataClearRequest) -> DataClearResponse:
         before = self.summary()
 
@@ -300,6 +349,130 @@ class DataManagementService:
         if hasattr(value, "value"):
             return str(value.value)
         return str(value)
+
+    def _seed_demo_bills(self, now: datetime) -> list[BillRead]:
+        demo_bills = [
+            BillCreate(
+                amount=Decimal("18.50"),
+                merchant="Demo Cafe",
+                category="Dining",
+                payment_method="WeChat Pay",
+                transaction_type=TransactionType.expense,
+                paid_at=now - timedelta(hours=2),
+                note="Demo breakfast bill",
+                source=BillSource.manual,
+            ),
+            BillCreate(
+                amount=Decimal("6.00"),
+                merchant="City Metro",
+                category="Transport",
+                payment_method="Alipay",
+                transaction_type=TransactionType.expense,
+                paid_at=now - timedelta(days=1),
+                note="Demo commute bill",
+                source=BillSource.manual,
+            ),
+            BillCreate(
+                amount=Decimal("42.30"),
+                merchant="Demo Pharmacy",
+                category="Medical",
+                payment_method="Bank Card",
+                transaction_type=TransactionType.expense,
+                paid_at=now - timedelta(days=2),
+                note="Demo medicine bill",
+                source=BillSource.manual,
+            ),
+        ]
+        return [bill_store.create(payload) for payload in demo_bills]
+
+    def _seed_demo_tasks(self, now: datetime) -> list[TaskRead]:
+        demo_tasks = [
+            TaskCreate(
+                title="Review AI bill candidate",
+                description="Check amount, merchant, and category before saving.",
+                category="Finance",
+                task_type=TaskType.todo,
+                due_at=now + timedelta(hours=3),
+                priority=TaskPriority.high,
+                source=TaskSource.manual,
+            ),
+            TaskCreate(
+                title="Doctor appointment reminder",
+                description="Bring insurance card and previous report.",
+                category="Medical",
+                task_type=TaskType.reminder,
+                remind_at=now + timedelta(days=1, hours=2),
+                priority=TaskPriority.medium,
+                source=TaskSource.manual,
+            ),
+        ]
+        return [task_store.create(payload) for payload in demo_tasks]
+
+    def _seed_demo_attachment(self) -> AttachmentRead:
+        attachment = attachment_store.create(
+            filename="demo-receipt.png",
+            content_type="image/png",
+            content=b"demo-receipt-image",
+            source=AttachmentSource.album,
+            save_original=False,
+        )
+        updated = attachment_store.update_ocr_text(
+            attachment.id,
+            "Demo Cafe\nWeChat Pay\nPaid 18.50 CNY",
+        )
+        return updated or attachment
+
+    def _seed_demo_bill_candidates(self, now: datetime) -> list[ParseBillResponse]:
+        candidate = ParseBillResponse(
+            candidate_id=uuid4(),
+            confidence=0.88,
+            data=BillCandidateData(
+                amount=Decimal("28.00"),
+                merchant="Demo Bakery",
+                category="Dining",
+                payment_method="WeChat Pay",
+                paid_at=now,
+                transaction_type=TransactionType.expense,
+                note="Demo pending bill candidate",
+                source=BillSource.ai_chat,
+            ),
+            field_confidence={
+                "amount": 0.95,
+                "merchant": 0.85,
+                "category": 0.8,
+                "payment_method": 0.8,
+                "paid_at": 0.7,
+            },
+            warnings=[],
+            need_user_confirmation=True,
+        )
+        return [bill_candidate_store.save(candidate)]
+
+    def _seed_demo_task_candidates(self, now: datetime) -> list[ParseTaskResponse]:
+        candidate = ParseTaskResponse(
+            candidate_id=uuid4(),
+            confidence=0.86,
+            data=TaskCandidateData(
+                title="Buy milk tomorrow morning",
+                description="Demo pending reminder generated from chat.",
+                category="Life",
+                task_type=TaskType.reminder,
+                remind_at=now + timedelta(days=1),
+                priority=TaskPriority.medium,
+                source=TaskSource.ai_chat,
+            ),
+            field_confidence={
+                "title": 0.9,
+                "category": 0.75,
+                "task_type": 0.85,
+                "due_at": 0.0,
+                "remind_at": 0.85,
+                "priority": 0.55,
+            },
+            warnings=[],
+            need_user_confirmation=True,
+        )
+        return [task_candidate_store.save(candidate)]
 
 
 data_management_service = DataManagementService()

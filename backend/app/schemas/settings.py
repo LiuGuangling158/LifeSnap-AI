@@ -56,3 +56,21 @@ class DataClearResponse(BaseModel):
     before: LocalDataSummary
     after: LocalDataSummary
     privacy_settings: PrivacySettings
+
+
+class DemoDataSeedRequest(BaseModel):
+    confirm: bool = False
+    reset_existing: bool = False
+    include_attachment: bool = True
+    include_candidates: bool = True
+
+
+class DemoDataSeedResponse(BaseModel):
+    seeded_at: datetime
+    before: LocalDataSummary
+    after: LocalDataSummary
+    created_bills: list[BillRead]
+    created_tasks: list[TaskRead]
+    created_attachment: AttachmentRead | None = None
+    created_bill_candidates: list[ParseBillResponse]
+    created_task_candidates: list[ParseTaskResponse]

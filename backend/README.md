@@ -308,6 +308,25 @@ Get local data summary:
 GET /data/summary
 ```
 
+Seed demo data for frontend integration:
+
+```http
+POST /data/seed-demo
+Idempotency-Key: seed-demo-001
+Content-Type: application/json
+
+{
+  "confirm": true,
+  "reset_existing": true,
+  "include_attachment": true,
+  "include_candidates": true
+}
+```
+
+This creates demo bills, tasks, one attachment with OCR text, and pending bill
+and task candidates. Use `reset_existing: true` when you want a clean demo
+workspace before frontend testing.
+
 Export local data as JSON:
 
 ```text

@@ -115,6 +115,7 @@ def main() -> int:
 
 def _run_checks(client: ApiClient) -> None:
     _check_health(client)
+    _check_demo_data_seed(client)
     _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_bill_idempotency(client)
@@ -131,6 +132,48 @@ def _check_health(client: ApiClient) -> None:
     status, body = client.request("GET", "/health")
     _assert(status == 200, "GET /health should return 200")
     _assert(body["status"] == "ok", "GET /health should return ok")
+
+
+def _check_demo_data_seed(client: ApiClient) -> None:
+    payload = {
+        "confirm": True,
+        "reset_existing": True,
+        "include_attachment": True,
+        "include_candidates": True,
+    }
+    headers = {"Idempotency-Key": "smoke-seed-demo-001"}
+    status, first = client.request(
+        "POST",
+        "/data/seed-demo",
+        payload,
+        headers=headers,
+    )
+    status_again, second = client.request(
+        "POST",
+        "/data/seed-demo",
+        payload,
+        headers=headers,
+    )
+    _assert(status == 200 and status_again == 200, "Demo seed should be repeatable")
+    _assert(first["after"]["bill_count"] == 3, "Demo seed should create demo bills")
+    _assert(first["after"]["task_count"] == 2, "Demo seed should create demo tasks")
+    _assert(first["after"]["attachment_count"] == 1, "Demo seed should create an attachment")
+    _assert(
+        first["after"]["bill_candidate_count"] == 1
+        and first["after"]["task_candidate_count"] == 1,
+        "Demo seed should create pending candidates",
+    )
+    _assert(
+        first["created_bills"][0]["id"] == second["created_bills"][0]["id"],
+        "Repeated demo seed should return the first result",
+    )
+
+    status, summary = client.request("GET", "/data/summary")
+    _assert(status == 200, "Data summary after demo seed should return 200")
+    _assert(
+        summary["bill_count"] == first["after"]["bill_count"],
+        "Demo seed idempotency should not duplicate bills",
+    )
 
 
 def _check_candidate_discard_flow(client: ApiClient) -> None:
