@@ -320,10 +320,13 @@ Export local data as CSV:
 GET /data/export/bills.csv
 GET /data/export/tasks.csv
 GET /data/export/attachments.csv
+GET /data/export/bill-candidates.csv
+GET /data/export/task-candidates.csv
 ```
 
 CSV exports include structured records only. Attachment CSV exports metadata and
-OCR presence, not original file bytes.
+OCR presence, not original file bytes. Candidate CSV exports include pending
+candidate fields, warnings, and field confidence values.
 
 Clear local data:
 

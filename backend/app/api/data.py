@@ -45,6 +45,22 @@ def export_attachments_csv() -> Response:
     )
 
 
+@router.get("/export/bill-candidates.csv")
+def export_bill_candidates_csv() -> Response:
+    return _csv_response(
+        data_management_service.export_bill_candidates_csv(),
+        filename="lifesnap-bill-candidates.csv",
+    )
+
+
+@router.get("/export/task-candidates.csv")
+def export_task_candidates_csv() -> Response:
+    return _csv_response(
+        data_management_service.export_task_candidates_csv(),
+        filename="lifesnap-task-candidates.csv",
+    )
+
+
 @router.post("/clear", response_model=DataClearResponse)
 def clear_local_data(payload: DataClearRequest) -> DataClearResponse:
     if not payload.confirm:

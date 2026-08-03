@@ -493,10 +493,22 @@ def _check_ocr_fallback_flow(client: ApiClient) -> None:
 
 
 def _check_data_export_and_clear(client: ApiClient) -> None:
+    status, task_candidate = client.request(
+        "POST",
+        "/agent/parse-task",
+        {
+            "text": "\u660e\u5929 11 \u70b9\u63d0\u9192\u6211\u6253\u7535\u8bdd\u9884\u7ea6\u4f53\u68c0",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Data export setup task candidate should be parsed")
+
     status, body = client.request("GET", "/data/export")
     _assert(status == 200, "GET /data/export should return 200")
     _assert(body["bills"], "Data export should include created bills")
     _assert(body["tasks"], "Data export should include created tasks")
+    _assert(body["bill_candidates"], "Data export should include bill candidates")
+    _assert(body["task_candidates"], "Data export should include task candidates")
 
     status, bills_csv = client.request("GET", "/data/export/bills.csv")
     _assert(status == 200, "GET /data/export/bills.csv should return 200")
@@ -511,6 +523,27 @@ def _check_data_export_and_clear(client: ApiClient) -> None:
     _assert(
         "checksum" in attachments_csv and "receipt.png" in attachments_csv,
         "Attachments CSV should include attachment metadata",
+    )
+
+    status, bill_candidates_csv = client.request(
+        "GET",
+        "/data/export/bill-candidates.csv",
+    )
+    _assert(status == 200, "GET /data/export/bill-candidates.csv should return 200")
+    _assert(
+        "candidate_id" in bill_candidates_csv and "\u5496\u5561\u5e97" in bill_candidates_csv,
+        "Bill candidates CSV should include pending bill candidate rows",
+    )
+
+    status, task_candidates_csv = client.request(
+        "GET",
+        "/data/export/task-candidates.csv",
+    )
+    _assert(status == 200, "GET /data/export/task-candidates.csv should return 200")
+    _assert(
+        "candidate_id" in task_candidates_csv
+        and task_candidate["candidate_id"] in task_candidates_csv,
+        "Task candidates CSV should include pending task candidate rows",
     )
 
     status, body = client.request("POST", "/data/clear", {"include_bills": True})

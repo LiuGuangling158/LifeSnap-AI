@@ -147,6 +147,106 @@ class DataManagementService:
             ],
         )
 
+    def export_bill_candidates_csv(self) -> str:
+        return self._write_csv(
+            [
+                "candidate_id",
+                "intent",
+                "confidence",
+                "amount",
+                "currency",
+                "merchant",
+                "category",
+                "payment_method",
+                "paid_at",
+                "transaction_type",
+                "note",
+                "source",
+                "amount_confidence",
+                "merchant_confidence",
+                "category_confidence",
+                "payment_method_confidence",
+                "paid_at_confidence",
+                "warnings",
+                "need_user_confirmation",
+            ],
+            [
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "intent": candidate.intent,
+                    "confidence": candidate.confidence,
+                    "amount": candidate.data.amount,
+                    "currency": candidate.data.currency,
+                    "merchant": candidate.data.merchant,
+                    "category": candidate.data.category,
+                    "payment_method": candidate.data.payment_method,
+                    "paid_at": candidate.data.paid_at,
+                    "transaction_type": candidate.data.transaction_type,
+                    "note": candidate.data.note,
+                    "source": candidate.data.source,
+                    "amount_confidence": candidate.field_confidence.get("amount"),
+                    "merchant_confidence": candidate.field_confidence.get("merchant"),
+                    "category_confidence": candidate.field_confidence.get("category"),
+                    "payment_method_confidence": candidate.field_confidence.get(
+                        "payment_method"
+                    ),
+                    "paid_at_confidence": candidate.field_confidence.get("paid_at"),
+                    "warnings": candidate.warnings,
+                    "need_user_confirmation": candidate.need_user_confirmation,
+                }
+                for candidate in bill_candidate_store.all()
+            ],
+        )
+
+    def export_task_candidates_csv(self) -> str:
+        return self._write_csv(
+            [
+                "candidate_id",
+                "intent",
+                "confidence",
+                "title",
+                "description",
+                "category",
+                "task_type",
+                "due_at",
+                "remind_at",
+                "priority",
+                "source",
+                "title_confidence",
+                "category_confidence",
+                "task_type_confidence",
+                "due_at_confidence",
+                "remind_at_confidence",
+                "priority_confidence",
+                "warnings",
+                "need_user_confirmation",
+            ],
+            [
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "intent": candidate.intent,
+                    "confidence": candidate.confidence,
+                    "title": candidate.data.title,
+                    "description": candidate.data.description,
+                    "category": candidate.data.category,
+                    "task_type": candidate.data.task_type,
+                    "due_at": candidate.data.due_at,
+                    "remind_at": candidate.data.remind_at,
+                    "priority": candidate.data.priority,
+                    "source": candidate.data.source,
+                    "title_confidence": candidate.field_confidence.get("title"),
+                    "category_confidence": candidate.field_confidence.get("category"),
+                    "task_type_confidence": candidate.field_confidence.get("task_type"),
+                    "due_at_confidence": candidate.field_confidence.get("due_at"),
+                    "remind_at_confidence": candidate.field_confidence.get("remind_at"),
+                    "priority_confidence": candidate.field_confidence.get("priority"),
+                    "warnings": candidate.warnings,
+                    "need_user_confirmation": candidate.need_user_confirmation,
+                }
+                for candidate in task_candidate_store.all()
+            ],
+        )
+
     def clear(self, payload: DataClearRequest) -> DataClearResponse:
         before = self.summary()
 
@@ -195,6 +295,8 @@ class DataManagementService:
             return ""
         if isinstance(value, datetime):
             return value.isoformat()
+        if isinstance(value, list):
+            return ";".join(str(item) for item in value)
         if hasattr(value, "value"):
             return str(value.value)
         return str(value)
