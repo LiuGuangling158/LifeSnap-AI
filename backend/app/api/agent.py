@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 
 from app.schemas.bill import BillRead, DuplicateBillCheckResponse
 from app.schemas.agent import (
@@ -15,6 +15,7 @@ from app.schemas.agent import (
     TaskCandidateListResponse,
 )
 from app.schemas.task import TaskRead
+from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
 from app.services.bill_store import bill_store
@@ -27,14 +28,22 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 
 @router.post("/parse-bill", response_model=ParseBillResponse)
-def parse_bill(payload: ParseBillRequest) -> ParseBillResponse:
+def parse_bill(payload: ParseBillRequest, request: Request) -> ParseBillResponse:
     if not settings_store.get_privacy_settings().allow_ai_text_processing:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="AI text processing is disabled in privacy settings",
         )
     candidate = bill_parser.parse_bill(payload)
-    return bill_candidate_store.save(candidate)
+    saved_candidate = bill_candidate_store.save(candidate)
+    audit_log_store.record(
+        action="bill_candidate_created",
+        entity_type="bill_candidate",
+        entity_id=saved_candidate.candidate_id,
+        request=request,
+        metadata={"source": payload.source, "confidence": saved_candidate.confidence},
+    )
+    return saved_candidate
 
 
 @router.get("/candidates", response_model=CandidateListResponse)
@@ -93,6 +102,7 @@ def get_bill_candidate(candidate_id: UUID) -> ParseBillResponse:
 def update_bill_candidate(
     candidate_id: UUID,
     payload: BillCandidateUpdate,
+    request: Request,
 ) -> ParseBillResponse:
     candidate = bill_candidate_store.update(candidate_id, payload)
     if candidate is None:
@@ -100,17 +110,30 @@ def update_bill_candidate(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Bill candidate not found",
         )
+    audit_log_store.record(
+        action="bill_candidate_updated",
+        entity_type="bill_candidate",
+        entity_id=candidate_id,
+        request=request,
+        metadata={"updated_fields": payload.model_dump(exclude_none=True, exclude_unset=True)},
+    )
     return candidate
 
 
 @router.delete("/bill-candidates/{candidate_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_bill_candidate(candidate_id: UUID) -> None:
+def delete_bill_candidate(candidate_id: UUID, request: Request) -> None:
     deleted = bill_candidate_store.delete(candidate_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Bill candidate not found",
         )
+    audit_log_store.record(
+        action="bill_candidate_deleted",
+        entity_type="bill_candidate",
+        entity_id=candidate_id,
+        request=request,
+    )
 
 
 @router.post(
@@ -143,6 +166,7 @@ def check_bill_candidate_duplicate(
 @router.post("/bill-candidates/{candidate_id}/confirm", response_model=BillRead)
 def confirm_bill_candidate(
     candidate_id: UUID,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> BillRead:
     def confirm() -> BillRead:
@@ -167,25 +191,41 @@ def confirm_bill_candidate(
         return bill
 
     try:
-        return idempotency_store.run(
+        bill = idempotency_store.run(
             scope="POST /agent/bill-candidates/confirm",
             key=idempotency_key,
             fingerprint={"candidate_id": str(candidate_id)},
             factory=confirm,
         )
+        audit_log_store.record(
+            action="bill_candidate_confirmed",
+            entity_type="bill",
+            entity_id=bill.id,
+            request=request,
+            metadata={"candidate_id": candidate_id},
+        )
+        return bill
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.post("/parse-task", response_model=ParseTaskResponse)
-def parse_task(payload: ParseTaskRequest) -> ParseTaskResponse:
+def parse_task(payload: ParseTaskRequest, request: Request) -> ParseTaskResponse:
     if not settings_store.get_privacy_settings().allow_ai_text_processing:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="AI text processing is disabled in privacy settings",
         )
     candidate = task_parser.parse_task(payload)
-    return task_candidate_store.save(candidate)
+    saved_candidate = task_candidate_store.save(candidate)
+    audit_log_store.record(
+        action="task_candidate_created",
+        entity_type="task_candidate",
+        entity_id=saved_candidate.candidate_id,
+        request=request,
+        metadata={"source": payload.source, "confidence": saved_candidate.confidence},
+    )
+    return saved_candidate
 
 
 @router.get("/task-candidates", response_model=TaskCandidateListResponse)
@@ -217,6 +257,7 @@ def get_task_candidate(candidate_id: UUID) -> ParseTaskResponse:
 def update_task_candidate(
     candidate_id: UUID,
     payload: TaskCandidateUpdate,
+    request: Request,
 ) -> ParseTaskResponse:
     candidate = task_candidate_store.update(candidate_id, payload)
     if candidate is None:
@@ -224,22 +265,36 @@ def update_task_candidate(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Task candidate not found",
         )
+    audit_log_store.record(
+        action="task_candidate_updated",
+        entity_type="task_candidate",
+        entity_id=candidate_id,
+        request=request,
+        metadata={"updated_fields": payload.model_dump(exclude_none=True, exclude_unset=True)},
+    )
     return candidate
 
 
 @router.delete("/task-candidates/{candidate_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_task_candidate(candidate_id: UUID) -> None:
+def delete_task_candidate(candidate_id: UUID, request: Request) -> None:
     deleted = task_candidate_store.delete(candidate_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Task candidate not found",
         )
+    audit_log_store.record(
+        action="task_candidate_deleted",
+        entity_type="task_candidate",
+        entity_id=candidate_id,
+        request=request,
+    )
 
 
 @router.post("/task-candidates/{candidate_id}/confirm", response_model=TaskRead)
 def confirm_task_candidate(
     candidate_id: UUID,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TaskRead:
     def confirm() -> TaskRead:
@@ -264,11 +319,19 @@ def confirm_task_candidate(
         return task
 
     try:
-        return idempotency_store.run(
+        task = idempotency_store.run(
             scope="POST /agent/task-candidates/confirm",
             key=idempotency_key,
             fingerprint={"candidate_id": str(candidate_id)},
             factory=confirm,
         )
+        audit_log_store.record(
+            action="task_candidate_confirmed",
+            entity_type="task",
+            entity_id=task.id,
+            request=request,
+            metadata={"candidate_id": candidate_id},
+        )
+        return task
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))

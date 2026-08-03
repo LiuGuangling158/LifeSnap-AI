@@ -110,6 +110,27 @@ today count, upcoming reminder count, unscheduled pending count, status/type/
 priority/category breakdowns, and limited lists for overdue tasks, today tasks,
 and upcoming reminders.
 
+Request tracing:
+
+```text
+X-Request-ID: optional-client-request-id
+```
+
+Every response includes `X-Request-ID`. Standard error responses also include
+`error.request_id` so frontend logs can match backend diagnostics.
+
+Audit log:
+
+```text
+GET /audit/events
+GET /audit/events?action=data_exported
+GET /audit/events?entity_type=bill&page=1&page_size=20
+```
+
+Audit events are in-memory for the MVP backend and keep only operation metadata,
+resource IDs, route path, method, and request ID. Raw OCR text, request bodies,
+notes, and long free text are not stored in audit metadata.
+
 ## Idempotency
 
 Create and state-changing endpoints support an optional `Idempotency-Key` header

@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from app.schemas.bill import BillRead
 from app.schemas.chat import (
@@ -13,6 +13,7 @@ from app.schemas.chat import (
     ChatMessageResponse,
 )
 from app.schemas.task import TaskRead
+from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.chat_service import chat_service
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
@@ -29,15 +30,28 @@ def send_message(payload: ChatMessageRequest) -> ChatMessageResponse:
 @router.post("/confirm-action", response_model=ChatConfirmActionResponse)
 def confirm_action(
     payload: ChatConfirmActionRequest,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ChatConfirmActionResponse:
     try:
-        return idempotency_store.run(
+        response = idempotency_store.run(
             scope="POST /chat/confirm-action",
             key=idempotency_key,
             fingerprint=payload.model_dump(mode="json"),
             factory=lambda: _confirm_candidate(payload),
         )
+        audit_log_store.record(
+            action="chat_action_confirmed",
+            entity_type="chat_action",
+            entity_id=payload.candidate_id,
+            request=request,
+            metadata={
+                "action_type": payload.action_type,
+                "created_bill_id": response.created_bill.id if response.created_bill else None,
+                "created_task_id": response.created_task.id if response.created_task else None,
+            },
+        )
+        return response
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
@@ -45,15 +59,24 @@ def confirm_action(
 @router.post("/discard-action", response_model=ChatDiscardActionResponse)
 def discard_action(
     payload: ChatDiscardActionRequest,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ChatDiscardActionResponse:
     try:
-        return idempotency_store.run(
+        response = idempotency_store.run(
             scope="POST /chat/discard-action",
             key=idempotency_key,
             fingerprint=payload.model_dump(mode="json"),
             factory=lambda: _discard_candidate(payload),
         )
+        audit_log_store.record(
+            action="chat_action_discarded",
+            entity_type="chat_action",
+            entity_id=payload.candidate_id,
+            request=request,
+            metadata={"action_type": payload.action_type},
+        )
+        return response
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 

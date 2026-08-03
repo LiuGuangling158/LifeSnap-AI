@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 
 from app.schemas.agent import ParseBillRequest, ParseBillResponse
 from app.schemas.attachment import (
@@ -13,6 +13,7 @@ from app.schemas.attachment import (
 )
 from app.schemas.bill import BillSource
 from app.schemas.ocr import OcrRecognitionStatus
+from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
 from app.services.attachment_store import (
@@ -28,6 +29,7 @@ router = APIRouter(prefix="/attachments", tags=["attachments"])
 
 @router.post("/upload", response_model=AttachmentRead, status_code=status.HTTP_201_CREATED)
 async def upload_attachment(
+    request: Request,
     file: UploadFile = File(...),
     source: AttachmentSource = Form(default=AttachmentSource.upload),
     save_original: bool | None = Form(default=None),
@@ -39,13 +41,27 @@ async def upload_attachment(
         else settings_store.get_privacy_settings().save_original_attachments_by_default
     )
     try:
-        return attachment_store.create(
+        attachment = attachment_store.create(
             filename=file.filename or "attachment",
             content_type=file.content_type or "application/octet-stream",
             content=content,
             source=source,
             save_original=should_save_original,
         )
+        audit_log_store.record(
+            action="attachment_uploaded",
+            entity_type="attachment",
+            entity_id=attachment.id,
+            request=request,
+            metadata={
+                "content_type": attachment.content_type,
+                "file_size": attachment.file_size,
+                "source": attachment.source,
+                "duplicate_of": attachment.duplicate_of,
+                "original_saved": attachment.original_saved,
+            },
+        )
+        return attachment
     except AttachmentTooLargeError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc))
     except UnsupportedAttachmentTypeError as exc:
@@ -78,6 +94,7 @@ def get_attachment_duplicates(attachment_id: UUID) -> AttachmentDuplicateRespons
 def update_attachment_ocr_text(
     attachment_id: UUID,
     payload: AttachmentOcrTextUpdate,
+    request: Request,
 ) -> AttachmentRead:
     attachment = attachment_store.update_ocr_text(attachment_id, payload.ocr_text)
     if attachment is None:
@@ -85,11 +102,18 @@ def update_attachment_ocr_text(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Attachment not found",
         )
+    audit_log_store.record(
+        action="attachment_ocr_text_updated",
+        entity_type="attachment",
+        entity_id=attachment_id,
+        request=request,
+        metadata={"ocr_text_length": len(payload.ocr_text)},
+    )
     return attachment
 
 
 @router.post("/{attachment_id}/parse-bill", response_model=ParseBillResponse)
-def parse_attachment_bill(attachment_id: UUID) -> ParseBillResponse:
+def parse_attachment_bill(attachment_id: UUID, request: Request) -> ParseBillResponse:
     privacy_settings = settings_store.get_privacy_settings()
     if not privacy_settings.allow_ai_text_processing:
         raise HTTPException(
@@ -118,6 +142,13 @@ def parse_attachment_bill(attachment_id: UUID) -> ParseBillResponse:
     saved_candidate = bill_candidate_store.save(candidate)
     if not privacy_settings.keep_ocr_text:
         attachment_store.clear_ocr_text(attachment_id)
+    audit_log_store.record(
+        action="attachment_bill_candidate_created",
+        entity_type="bill_candidate",
+        entity_id=saved_candidate.candidate_id,
+        request=request,
+        metadata={"attachment_id": attachment_id, "source": attachment.source},
+    )
     return saved_candidate
 
 
@@ -125,7 +156,10 @@ def parse_attachment_bill(attachment_id: UUID) -> ParseBillResponse:
     "/{attachment_id}/recognize-and-parse-bill",
     response_model=AttachmentBillParseResponse,
 )
-def recognize_and_parse_attachment_bill(attachment_id: UUID) -> AttachmentBillParseResponse:
+def recognize_and_parse_attachment_bill(
+    attachment_id: UUID,
+    request: Request,
+) -> AttachmentBillParseResponse:
     privacy_settings = settings_store.get_privacy_settings()
     if not privacy_settings.allow_ai_text_processing:
         raise HTTPException(
@@ -147,6 +181,13 @@ def recognize_and_parse_attachment_bill(attachment_id: UUID) -> AttachmentBillPa
             detail="Attachment not found",
         )
     if ocr_result.status != OcrRecognitionStatus.recognized or not ocr_result.text:
+        audit_log_store.record(
+            action="attachment_recognition_manual_required",
+            entity_type="attachment",
+            entity_id=attachment_id,
+            request=request,
+            metadata={"ocr_status": ocr_result.status, "warning_count": len(ocr_result.warnings)},
+        )
         return AttachmentBillParseResponse(
             attachment_id=attachment_id,
             status=AttachmentBillParseStatus.manual_required,
@@ -166,6 +207,13 @@ def recognize_and_parse_attachment_bill(attachment_id: UUID) -> AttachmentBillPa
     if not privacy_settings.keep_ocr_text:
         attachment_store.clear_ocr_text(attachment_id)
 
+    audit_log_store.record(
+        action="attachment_recognized_and_bill_candidate_created",
+        entity_type="bill_candidate",
+        entity_id=saved_candidate.candidate_id,
+        request=request,
+        metadata={"attachment_id": attachment_id, "source": attachment.source},
+    )
     return AttachmentBillParseResponse(
         attachment_id=attachment_id,
         status=AttachmentBillParseStatus.candidate_created,
@@ -177,13 +225,19 @@ def recognize_and_parse_attachment_bill(attachment_id: UUID) -> AttachmentBillPa
 
 
 @router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_attachment(attachment_id: UUID) -> None:
+def delete_attachment(attachment_id: UUID, request: Request) -> None:
     deleted = attachment_store.delete(attachment_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Attachment not found",
         )
+    audit_log_store.record(
+        action="attachment_deleted",
+        entity_type="attachment",
+        entity_id=attachment_id,
+        request=request,
+    )
 
 
 def _bill_source_from_attachment(source: AttachmentSource) -> BillSource:

@@ -21,6 +21,7 @@ def _http_exception_handler(request: Request, exc: StarletteHTTPException) -> JS
         message=_message_for_detail(detail, exc.status_code),
         path=request.url.path,
         detail=detail,
+        request_id=getattr(request.state, "request_id", None),
     )
     return JSONResponse(
         status_code=exc.status_code,
@@ -40,6 +41,7 @@ def _validation_exception_handler(
         message="Request validation failed",
         path=request.url.path,
         detail=errors,
+        request_id=getattr(request.state, "request_id", None),
         issues=errors,
     )
     return JSONResponse(
@@ -55,6 +57,7 @@ def _error_content(
     message: str,
     path: str,
     detail: Any,
+    request_id: str | None,
     issues: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     error: dict[str, Any] = {
@@ -62,6 +65,7 @@ def _error_content(
         "message": message,
         "status_code": status_code,
         "path": path,
+        "request_id": request_id,
     }
     if issues is not None:
         error["issues"] = issues

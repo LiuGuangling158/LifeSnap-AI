@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 
 from app.schemas.task import (
     TaskCreate,
@@ -13,6 +13,7 @@ from app.schemas.task import (
     TaskType,
     TaskUpdate,
 )
+from app.services.audit_log_store import audit_log_store
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 from app.services.task_store import task_store
 
@@ -22,15 +23,29 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 @router.post("", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
 def create_task(
     payload: TaskCreate,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TaskRead:
     try:
-        return idempotency_store.run(
+        task = idempotency_store.run(
             scope="POST /tasks",
             key=idempotency_key,
             fingerprint=payload.model_dump(mode="json"),
             factory=lambda: task_store.create(payload),
         )
+        audit_log_store.record(
+            action="task_created",
+            entity_type="task",
+            entity_id=task.id,
+            request=request,
+            metadata={
+                "source": task.source,
+                "task_type": task.task_type,
+                "category": task.category,
+                "priority": task.priority,
+            },
+        )
+        return task
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
@@ -83,16 +98,24 @@ def get_task(
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
-def update_task(task_id: UUID, payload: TaskUpdate) -> TaskRead:
+def update_task(task_id: UUID, payload: TaskUpdate, request: Request) -> TaskRead:
     task = task_store.update(task_id, payload)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    audit_log_store.record(
+        action="task_updated",
+        entity_type="task",
+        entity_id=task_id,
+        request=request,
+        metadata={"updated_fields": payload.model_dump(exclude_none=True, exclude_unset=True)},
+    )
     return task
 
 
 @router.post("/{task_id}/complete", response_model=TaskRead)
 def complete_task(
     task_id: UUID,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TaskRead:
     def complete() -> TaskRead:
@@ -102,12 +125,19 @@ def complete_task(
         return task
 
     try:
-        return idempotency_store.run(
+        task = idempotency_store.run(
             scope="POST /tasks/complete",
             key=idempotency_key,
             fingerprint={"task_id": str(task_id)},
             factory=complete,
         )
+        audit_log_store.record(
+            action="task_completed",
+            entity_type="task",
+            entity_id=task_id,
+            request=request,
+        )
+        return task
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
@@ -116,6 +146,7 @@ def complete_task(
 def snooze_task(
     task_id: UUID,
     payload: TaskSnoozeRequest,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TaskRead:
     def snooze() -> TaskRead:
@@ -148,7 +179,7 @@ def snooze_task(
         return task
 
     try:
-        return idempotency_store.run(
+        task = idempotency_store.run(
             scope="POST /tasks/snooze",
             key=idempotency_key,
             fingerprint={
@@ -157,6 +188,14 @@ def snooze_task(
             },
             factory=snooze,
         )
+        audit_log_store.record(
+            action="task_snoozed",
+            entity_type="task",
+            entity_id=task_id,
+            request=request,
+            metadata={"minutes": payload.minutes, "snooze_until": payload.snooze_until},
+        )
+        return task
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
@@ -164,6 +203,7 @@ def snooze_task(
 @router.post("/{task_id}/restore", response_model=TaskRead)
 def restore_task(
     task_id: UUID,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TaskRead:
     def restore() -> TaskRead:
@@ -173,18 +213,31 @@ def restore_task(
         return task
 
     try:
-        return idempotency_store.run(
+        task = idempotency_store.run(
             scope="POST /tasks/restore",
             key=idempotency_key,
             fingerprint={"task_id": str(task_id)},
             factory=restore,
         )
+        audit_log_store.record(
+            action="task_restored",
+            entity_type="task",
+            entity_id=task_id,
+            request=request,
+        )
+        return task
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_task(task_id: UUID) -> None:
+def delete_task(task_id: UUID, request: Request) -> None:
     deleted = task_store.delete(task_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    audit_log_store.record(
+        action="task_deleted",
+        entity_type="task",
+        entity_id=task_id,
+        request=request,
+    )

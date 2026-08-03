@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 
 from app.schemas.bill import (
     BillStatisticsOverview,
@@ -14,6 +14,7 @@ from app.schemas.bill import (
     MonthlyBillStatistics,
     TransactionType,
 )
+from app.services.audit_log_store import audit_log_store
 from app.services.bill_store import bill_store
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 
@@ -23,15 +24,28 @@ router = APIRouter(prefix="/bills", tags=["bills"])
 @router.post("", response_model=BillRead, status_code=status.HTTP_201_CREATED)
 def create_bill(
     payload: BillCreate,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> BillRead:
     try:
-        return idempotency_store.run(
+        bill = idempotency_store.run(
             scope="POST /bills",
             key=idempotency_key,
             fingerprint=payload.model_dump(mode="json"),
             factory=lambda: bill_store.create(payload),
         )
+        audit_log_store.record(
+            action="bill_created",
+            entity_type="bill",
+            entity_id=bill.id,
+            request=request,
+            metadata={
+                "source": bill.source,
+                "transaction_type": bill.transaction_type,
+                "category": bill.category,
+            },
+        )
+        return bill
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
@@ -117,16 +131,24 @@ def get_bill(
 
 
 @router.patch("/{bill_id}", response_model=BillRead)
-def update_bill(bill_id: UUID, payload: BillUpdate) -> BillRead:
+def update_bill(bill_id: UUID, payload: BillUpdate, request: Request) -> BillRead:
     bill = bill_store.update(bill_id, payload)
     if bill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
+    audit_log_store.record(
+        action="bill_updated",
+        entity_type="bill",
+        entity_id=bill_id,
+        request=request,
+        metadata={"updated_fields": payload.model_dump(exclude_none=True, exclude_unset=True)},
+    )
     return bill
 
 
 @router.post("/{bill_id}/restore", response_model=BillRead)
 def restore_bill(
     bill_id: UUID,
+    request: Request,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> BillRead:
     def restore() -> BillRead:
@@ -136,18 +158,31 @@ def restore_bill(
         return bill
 
     try:
-        return idempotency_store.run(
+        bill = idempotency_store.run(
             scope="POST /bills/restore",
             key=idempotency_key,
             fingerprint={"bill_id": str(bill_id)},
             factory=restore,
         )
+        audit_log_store.record(
+            action="bill_restored",
+            entity_type="bill",
+            entity_id=bill_id,
+            request=request,
+        )
+        return bill
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.delete("/{bill_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_bill(bill_id: UUID) -> None:
+def delete_bill(bill_id: UUID, request: Request) -> None:
     deleted = bill_store.delete(bill_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
+    audit_log_store.record(
+        action="bill_deleted",
+        entity_type="bill",
+        entity_id=bill_id,
+        request=request,
+    )

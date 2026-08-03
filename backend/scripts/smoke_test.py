@@ -129,6 +129,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_privacy_switch(client)
     _check_attachment_duplicate_detection(client)
     _check_ocr_fallback_flow(client)
+    _check_audit_log_and_request_id(client)
     _check_dashboard_summary(client)
     _check_data_export_and_clear(client)
 
@@ -150,6 +151,18 @@ def _check_standard_error_responses(client: ApiClient) -> None:
     _assert(
         body["error"]["path"].endswith("/bills/00000000-0000-0000-0000-000000000000"),
         "Standard 404 should include request path",
+    )
+    _assert(body["error"]["request_id"], "Standard 404 should include request id")
+
+    status, body = client.request(
+        "GET",
+        "/bills/00000000-0000-0000-0000-000000000000",
+        headers={"X-Request-ID": "smoke-request-id-001"},
+    )
+    _assert(status == 404, "Custom request id setup should return 404")
+    _assert(
+        body["error"]["request_id"] == "smoke-request-id-001",
+        "Error response should echo custom request id",
     )
 
     status, body = client.request("POST", "/data/clear", {"include_bills": True})
@@ -953,6 +966,31 @@ def _check_ocr_fallback_flow(client: ApiClient) -> None:
     )
 
 
+def _check_audit_log_and_request_id(client: ApiClient) -> None:
+    status, bill_events = client.request(
+        "GET",
+        "/audit/events?action=bill_created&entity_type=bill&page_size=5",
+    )
+    _assert(status == 200, "Audit bill event list should return 200")
+    _assert(bill_events["total"] >= 1, "Audit log should include bill creation events")
+    _assert(
+        bill_events["items"][0]["request_id"],
+        "Audit events should include request id",
+    )
+
+    status, ocr_events = client.request(
+        "GET",
+        "/audit/events?action=attachment_ocr_text_updated&entity_type=attachment&page_size=5",
+    )
+    _assert(status == 200, "Audit OCR event list should return 200")
+    _assert(ocr_events["total"] >= 1, "Audit log should include OCR text update events")
+    metadata = ocr_events["items"][0]["metadata"]
+    _assert(
+        "ocr_text_length" in metadata and "ocr_text" not in metadata,
+        "Audit OCR event should store length instead of raw OCR text",
+    )
+
+
 def _check_dashboard_summary(client: ApiClient) -> None:
     status, dashboard = client.request(
         "GET",
@@ -1031,6 +1069,13 @@ def _check_data_export_and_clear(client: ApiClient) -> None:
         and task_candidate["candidate_id"] in task_candidates_csv,
         "Task candidates CSV should include pending task candidate rows",
     )
+
+    status, data_export_events = client.request(
+        "GET",
+        "/audit/events?action=data_exported&entity_type=data&page_size=5",
+    )
+    _assert(status == 200, "Audit data export event list should return 200")
+    _assert(data_export_events["total"] >= 1, "Audit log should include data export events")
 
     status, body = client.request("POST", "/data/clear", {"include_bills": True})
     _assert(status == 400, "Data clear should require explicit confirmation")
