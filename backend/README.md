@@ -404,6 +404,18 @@ POST /attachments/{attachment_id}/parse-bill
 
 This currently uses stored OCR text and the rule-based bill parser. It does not run a real OCR engine yet.
 
+Recognize an attachment and parse it into a bill candidate when text is
+available:
+
+```text
+POST /attachments/{attachment_id}/recognize-and-parse-bill
+```
+
+If the attachment has no OCR text yet, this returns `manual_required` instead of
+failing the flow. After the user provides OCR text through
+`PATCH /attachments/{attachment_id}/ocr-text`, the same endpoint can create a
+pending bill candidate.
+
 Delete an attachment:
 
 ```text
@@ -445,6 +457,14 @@ POST /ocr/recognize
 POST /attachments/{attachment_id}/parse-bill
 ```
 
+For frontend flows that prefer fewer steps, use:
+
+```text
+POST /attachments/{attachment_id}/recognize-and-parse-bill
+PATCH /attachments/{attachment_id}/ocr-text
+POST /attachments/{attachment_id}/recognize-and-parse-bill
+```
+
 ## Dashboard
 
 Get homepage summary:
@@ -452,13 +472,17 @@ Get homepage summary:
 ```text
 GET /dashboard/summary
 GET /dashboard/summary?year=2026&month=7&upcoming_days=7
+GET /dashboard/summary?recent_bill_limit=5&candidate_limit=5
 ```
 
 The dashboard summary includes:
 
+- local data counts
 - monthly bill statistics
+- recent bills
 - today's pending todo items
 - upcoming reminders
+- pending bill and task candidates
 
 ## Bills
 

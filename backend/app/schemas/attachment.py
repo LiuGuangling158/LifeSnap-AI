@@ -4,6 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.agent import ParseBillResponse
+from app.schemas.ocr import OcrRecognizeResponse
+
 
 class AttachmentSource(str, Enum):
     screenshot = "screenshot"
@@ -43,3 +46,17 @@ class AttachmentDuplicateResponse(BaseModel):
     duplicate_of: UUID | None = None
     duplicate_count: int
     matches: list[AttachmentRead]
+
+
+class AttachmentBillParseStatus(str, Enum):
+    candidate_created = "candidate_created"
+    manual_required = "manual_required"
+
+
+class AttachmentBillParseResponse(BaseModel):
+    attachment_id: UUID
+    status: AttachmentBillParseStatus
+    ocr: OcrRecognizeResponse
+    candidate: ParseBillResponse | None = None
+    warnings: list[str] = []
+    manual_entry_required: bool

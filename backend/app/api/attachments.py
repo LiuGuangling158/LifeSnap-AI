@@ -4,12 +4,15 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.schemas.agent import ParseBillRequest, ParseBillResponse
 from app.schemas.attachment import (
+    AttachmentBillParseResponse,
+    AttachmentBillParseStatus,
     AttachmentDuplicateResponse,
     AttachmentOcrTextUpdate,
     AttachmentRead,
     AttachmentSource,
 )
 from app.schemas.bill import BillSource
+from app.schemas.ocr import OcrRecognitionStatus
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
 from app.services.attachment_store import (
@@ -17,6 +20,7 @@ from app.services.attachment_store import (
     UnsupportedAttachmentTypeError,
     attachment_store,
 )
+from app.services.ocr_service import ocr_service
 from app.services.settings_store import settings_store
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
@@ -115,6 +119,61 @@ def parse_attachment_bill(attachment_id: UUID) -> ParseBillResponse:
     if not privacy_settings.keep_ocr_text:
         attachment_store.clear_ocr_text(attachment_id)
     return saved_candidate
+
+
+@router.post(
+    "/{attachment_id}/recognize-and-parse-bill",
+    response_model=AttachmentBillParseResponse,
+)
+def recognize_and_parse_attachment_bill(attachment_id: UUID) -> AttachmentBillParseResponse:
+    privacy_settings = settings_store.get_privacy_settings()
+    if not privacy_settings.allow_ai_text_processing:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI text processing is disabled in privacy settings",
+        )
+
+    attachment = attachment_store.get(attachment_id)
+    if attachment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found",
+        )
+
+    ocr_result = ocr_service.recognize(attachment_id)
+    if ocr_result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment not found",
+        )
+    if ocr_result.status != OcrRecognitionStatus.recognized or not ocr_result.text:
+        return AttachmentBillParseResponse(
+            attachment_id=attachment_id,
+            status=AttachmentBillParseStatus.manual_required,
+            ocr=ocr_result,
+            candidate=None,
+            warnings=ocr_result.warnings,
+            manual_entry_required=True,
+        )
+
+    candidate = bill_parser.parse_bill(
+        ParseBillRequest(
+            text=ocr_result.text,
+            source=_bill_source_from_attachment(attachment.source),
+        )
+    )
+    saved_candidate = bill_candidate_store.save(candidate)
+    if not privacy_settings.keep_ocr_text:
+        attachment_store.clear_ocr_text(attachment_id)
+
+    return AttachmentBillParseResponse(
+        attachment_id=attachment_id,
+        status=AttachmentBillParseStatus.candidate_created,
+        ocr=ocr_result,
+        candidate=saved_candidate,
+        warnings=saved_candidate.warnings,
+        manual_entry_required=False,
+    )
 
 
 @router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -123,6 +123,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_privacy_switch(client)
     _check_attachment_duplicate_detection(client)
     _check_ocr_fallback_flow(client)
+    _check_dashboard_summary(client)
     _check_data_export_and_clear(client)
 
 
@@ -479,6 +480,16 @@ def _check_ocr_fallback_flow(client: ApiClient) -> None:
     _assert(status == 200, "OCR fallback should return 200")
     _assert(body["status"] == "manual_required", "Missing OCR text should require manual entry")
 
+    status, flow = client.request(
+        "POST",
+        f"/attachments/{attachment_id}/recognize-and-parse-bill",
+    )
+    _assert(status == 200, "Attachment recognize-and-parse fallback should return 200")
+    _assert(
+        flow["status"] == "manual_required" and flow["manual_entry_required"],
+        "Attachment recognize-and-parse should request manual entry when OCR is missing",
+    )
+
     ocr_text = "\u745e\u5e78\u5496\u5561\n\u5fae\u4fe1\u652f\u4ed8\n\u5b9e\u4ed8 18.50 \u5143"
     status, _ = client.request(
         "PATCH",
@@ -490,6 +501,45 @@ def _check_ocr_fallback_flow(client: ApiClient) -> None:
     status, body = client.request("POST", "/ocr/recognize", {"attachment_id": attachment_id})
     _assert(status == 200, "Stored OCR recognize should return 200")
     _assert(body["status"] == "recognized", "Stored OCR text should be recognized")
+
+    status, flow = client.request(
+        "POST",
+        f"/attachments/{attachment_id}/recognize-and-parse-bill",
+    )
+    _assert(status == 200, "Attachment recognize-and-parse should return 200")
+    _assert(
+        flow["status"] == "candidate_created",
+        "Attachment recognize-and-parse should create a bill candidate from stored OCR text",
+    )
+    _assert(
+        flow["candidate"]["data"]["merchant"] == "\u745e\u5e78\u5496\u5561",
+        "Attachment recognize-and-parse should include parsed bill candidate data",
+    )
+
+
+def _check_dashboard_summary(client: ApiClient) -> None:
+    status, dashboard = client.request(
+        "GET",
+        "/dashboard/summary?recent_bill_limit=3&candidate_limit=3",
+    )
+    _assert(status == 200, "GET /dashboard/summary should return 200")
+    _assert(
+        dashboard["data_summary"]["bill_count"] >= 1,
+        "Dashboard summary should include local data counts",
+    )
+    _assert(
+        dashboard["monthly_statistics"]["bill_count"] >= 1,
+        "Dashboard summary should include monthly bill statistics",
+    )
+    _assert(dashboard["recent_bills"], "Dashboard summary should include recent bills")
+    _assert(
+        dashboard["pending_bill_candidates"],
+        "Dashboard summary should include pending bill candidates",
+    )
+    _assert(
+        dashboard["recent_bill_count"] == len(dashboard["recent_bills"]),
+        "Dashboard recent bill count should match returned rows",
+    )
 
 
 def _check_data_export_and_clear(client: ApiClient) -> None:
