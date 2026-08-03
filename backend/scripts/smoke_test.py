@@ -131,6 +131,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_ocr_fallback_flow(client)
     _check_audit_log_and_request_id(client)
     _check_data_import_restore(client)
+    _check_data_quality_diagnostics(client)
     _check_dashboard_summary(client)
     _check_data_export_and_clear(client)
 
@@ -1061,6 +1062,92 @@ def _check_data_import_restore(client: ApiClient) -> None:
     )
     _assert(status == 200, "Audit data import event list should return 200")
     _assert(import_events["total"] >= 1, "Audit log should include data import events")
+
+
+def _check_data_quality_diagnostics(client: ApiClient) -> None:
+    duplicate_bill_payload = {
+        "amount": 88.8,
+        "merchant": "Diagnostics Duplicate Merchant",
+        "category": "QA",
+        "transaction_type": "expense",
+        "paid_at": "2026-08-01T09:00:00+08:00",
+        "source": "manual",
+    }
+    status, _ = client.request(
+        "POST",
+        "/bills",
+        duplicate_bill_payload,
+        headers={"Idempotency-Key": "smoke-diagnostics-duplicate-bill-1"},
+    )
+    _assert(status == 201, "Diagnostics duplicate setup first bill should be created")
+    status, _ = client.request(
+        "POST",
+        "/bills",
+        duplicate_bill_payload | {"paid_at": "2026-08-01T09:05:00+08:00"},
+        headers={"Idempotency-Key": "smoke-diagnostics-duplicate-bill-2"},
+    )
+    _assert(status == 201, "Diagnostics duplicate setup second bill should be created")
+
+    status, _ = client.request(
+        "POST",
+        "/tasks",
+        {
+            "title": "Diagnostics Overdue Task",
+            "category": "QA",
+            "task_type": "todo",
+            "due_at": (datetime.now(LOCAL_TZ) - timedelta(hours=2)).isoformat(),
+            "priority": "high",
+            "source": "manual",
+        },
+        headers={"Idempotency-Key": "smoke-diagnostics-overdue-task"},
+    )
+    _assert(status == 201, "Diagnostics overdue setup task should be created")
+    status, _ = client.request(
+        "POST",
+        "/tasks",
+        {
+            "title": "Diagnostics Unscheduled Task",
+            "category": "QA",
+            "task_type": "todo",
+            "priority": "medium",
+            "source": "manual",
+        },
+        headers={"Idempotency-Key": "smoke-diagnostics-unscheduled-task"},
+    )
+    _assert(status == 201, "Diagnostics unscheduled setup task should be created")
+
+    status, _ = client.upload_png()
+    _assert(status == 201, "Diagnostics attachment setup should upload an attachment")
+
+    status, diagnostics = client.request(
+        "GET",
+        "/diagnostics/data-quality?duplicate_time_window_minutes=10&issue_limit=100",
+    )
+    _assert(status == 200, "GET /diagnostics/data-quality should return 200")
+    _assert(
+        diagnostics["status"] == "action_required",
+        "Data quality diagnostics should surface action_required status",
+    )
+    codes = {issue["code"] for issue in diagnostics["issues"]}
+    _assert(
+        "possible_duplicate_bill" in codes,
+        "Data quality diagnostics should find duplicate bills",
+    )
+    _assert("overdue_task" in codes, "Data quality diagnostics should find overdue tasks")
+    _assert(
+        "unscheduled_pending_task" in codes,
+        "Data quality diagnostics should find unscheduled pending tasks",
+    )
+    _assert(
+        "attachment_missing_ocr_text" in codes,
+        "Data quality diagnostics should find attachments missing OCR text",
+    )
+    _assert(
+        diagnostics["action_required_count"] >= 1
+        and diagnostics["warning_count"] >= 1
+        and diagnostics["info_count"] >= 1,
+        "Data quality diagnostics should include severity counts",
+    )
 
 
 def _check_dashboard_summary(client: ApiClient) -> None:

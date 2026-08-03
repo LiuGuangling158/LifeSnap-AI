@@ -142,6 +142,17 @@ validates and counts records without changing local data. Real imports require
 `confirm=true`; `reset_existing=true` clears selected local datasets before
 restoring the snapshot.
 
+Diagnostics:
+
+```text
+GET /diagnostics/data-quality
+GET /diagnostics/data-quality?duplicate_time_window_minutes=10&issue_limit=50
+```
+
+Data-quality diagnostics surface frontend-friendly issues such as possible
+duplicate bills, missing OCR text, pending candidates, overdue tasks,
+unscheduled pending tasks, recycle-bin counts, and privacy setting warnings.
+
 ## Idempotency
 
 Create and state-changing endpoints support an optional `Idempotency-Key` header
