@@ -115,7 +115,9 @@ def main() -> int:
 
 def _run_checks(client: ApiClient) -> None:
     _check_health(client)
+    _check_standard_error_responses(client)
     _check_demo_data_seed(client)
+    _check_app_bootstrap(client)
     _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_bill_idempotency(client)
@@ -132,6 +134,46 @@ def _check_health(client: ApiClient) -> None:
     status, body = client.request("GET", "/health")
     _assert(status == 200, "GET /health should return 200")
     _assert(body["status"] == "ok", "GET /health should return ok")
+
+
+def _check_standard_error_responses(client: ApiClient) -> None:
+    status, body = client.request(
+        "GET",
+        "/bills/00000000-0000-0000-0000-000000000000",
+    )
+    _assert(status == 404, "Standard 404 setup should return 404")
+    _assert(body["detail"] == "Bill not found", "Standard 404 should preserve detail")
+    _assert(body["error"]["code"] == "not_found", "Standard 404 should include error code")
+    _assert(
+        body["error"]["path"].endswith("/bills/00000000-0000-0000-0000-000000000000"),
+        "Standard 404 should include request path",
+    )
+
+    status, body = client.request("POST", "/data/clear", {"include_bills": True})
+    _assert(status == 400, "Standard 400 setup should return 400")
+    _assert(
+        body["detail"] == "Set confirm to true before clearing local data",
+        "Standard 400 should preserve detail",
+    )
+    _assert(body["error"]["code"] == "bad_request", "Standard 400 should include error code")
+
+    status, body = client.request(
+        "POST",
+        "/bills",
+        {
+            "amount": -1,
+            "merchant": "Invalid",
+            "category": "Demo",
+            "transaction_type": "expense",
+            "source": "manual",
+        },
+    )
+    _assert(status == 422, "Standard validation setup should return 422")
+    _assert(
+        body["error"]["code"] == "validation_error",
+        "Standard validation response should include validation error code",
+    )
+    _assert(body["error"]["issues"], "Standard validation response should include issues")
 
 
 def _check_demo_data_seed(client: ApiClient) -> None:
@@ -173,6 +215,46 @@ def _check_demo_data_seed(client: ApiClient) -> None:
     _assert(
         summary["bill_count"] == first["after"]["bill_count"],
         "Demo seed idempotency should not duplicate bills",
+    )
+
+
+def _check_app_bootstrap(client: ApiClient) -> None:
+    status, capabilities = client.request("GET", "/app/capabilities")
+    _assert(status == 200, "GET /app/capabilities should return 200")
+    _assert(capabilities["api_status"] == "ok", "App capabilities should report ok")
+    _assert(
+        "image/png" in capabilities["supported_attachment_content_types"],
+        "App capabilities should expose supported attachment types",
+    )
+    _assert(
+        capabilities["feature_flags"]["demo_data_seed"],
+        "App capabilities should expose demo seed feature flag",
+    )
+    _assert(
+        not capabilities["feature_flags"]["real_ocr_engine"],
+        "App capabilities should expose unavailable real OCR feature",
+    )
+
+    status, bootstrap = client.request(
+        "GET",
+        "/app/bootstrap?recent_bill_limit=2&candidate_limit=2",
+    )
+    _assert(status == 200, "GET /app/bootstrap should return 200")
+    _assert(
+        bootstrap["privacy_settings"]["local_only_mode"],
+        "App bootstrap should include privacy settings",
+    )
+    _assert(
+        bootstrap["data_summary"]["bill_count"] >= 1,
+        "App bootstrap should include data summary",
+    )
+    _assert(
+        bootstrap["dashboard"]["recent_bill_count"] <= 2,
+        "App bootstrap should pass dashboard recent bill limit",
+    )
+    _assert(
+        bootstrap["capabilities"]["app_version"] == capabilities["app_version"],
+        "App bootstrap should include the same capabilities version",
     )
 
 

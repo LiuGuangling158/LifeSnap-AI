@@ -24,6 +24,19 @@ Health check:
 GET /health
 ```
 
+Frontend bootstrap:
+
+```text
+GET /app/capabilities
+GET /app/bootstrap
+GET /app/bootstrap?recent_bill_limit=5&candidate_limit=5
+```
+
+`/app/capabilities` exposes MVP feature flags, supported attachment types,
+attachment size limits, parser providers, storage backend, and known
+limitations. `/app/bootstrap` combines capabilities, privacy settings, local
+data counts, and dashboard summary for frontend startup.
+
 Run backend smoke test:
 
 ```powershell
@@ -33,6 +46,26 @@ cd ..
 
 The smoke test starts a temporary backend server, verifies the core API flow, and
 then shuts the temporary server down. It does not use the existing `8000` server.
+
+## Error Responses
+
+HTTP errors keep FastAPI's familiar `detail` field and add a stable `error`
+object for frontend handling:
+
+```json
+{
+  "detail": "Bill not found",
+  "error": {
+    "code": "not_found",
+    "message": "Bill not found",
+    "status_code": 404,
+    "path": "/bills/00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+Validation errors return `error.code: "validation_error"` and include
+`error.issues` with field-level details.
 
 ## Idempotency
 
