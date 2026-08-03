@@ -8,6 +8,7 @@ from app.schemas.task import (
     TaskListResponse,
     TaskRead,
     TaskSnoozeRequest,
+    TaskStatisticsOverview,
     TaskStatus,
     TaskType,
     TaskUpdate,
@@ -56,6 +57,17 @@ def list_tasks(
         deleted_only=deleted_only,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/statistics/overview", response_model=TaskStatisticsOverview)
+def get_task_statistics_overview(
+    upcoming_days: int = Query(default=7, ge=1, le=90),
+    item_limit: int = Query(default=10, ge=1, le=50),
+) -> TaskStatisticsOverview:
+    return task_store.statistics_overview(
+        upcoming_days=upcoming_days,
+        item_limit=item_limit,
     )
 
 

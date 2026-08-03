@@ -98,6 +98,18 @@ POST /tasks/{id}/restore
 `GET /data/summary` includes `deleted_bill_count` and `deleted_task_count` for
 frontend recycle-bin indicators.
 
+Task statistics:
+
+```text
+GET /tasks/statistics/overview
+GET /tasks/statistics/overview?upcoming_days=7&item_limit=10
+```
+
+The task overview returns pending/done/cancelled counts, overdue count, due
+today count, upcoming reminder count, unscheduled pending count, status/type/
+priority/category breakdowns, and limited lists for overdue tasks, today tasks,
+and upcoming reminders.
+
 ## Idempotency
 
 Create and state-changing endpoints support an optional `Idempotency-Key` header

@@ -70,3 +70,42 @@ class TaskListResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class TaskStatusBreakdown(BaseModel):
+    status: TaskStatus
+    count: int
+
+
+class TaskTypeBreakdown(BaseModel):
+    task_type: TaskType
+    count: int
+
+
+class TaskPriorityBreakdown(BaseModel):
+    priority: TaskPriority
+    count: int
+
+
+class TaskCategoryBreakdown(BaseModel):
+    category: str
+    count: int
+
+
+class TaskStatisticsOverview(BaseModel):
+    generated_at: datetime
+    upcoming_days: int
+    pending_count: int
+    done_count: int
+    cancelled_count: int
+    overdue_count: int
+    due_today_count: int
+    upcoming_reminder_count: int
+    unscheduled_pending_count: int
+    status_breakdown: list[TaskStatusBreakdown]
+    type_breakdown: list[TaskTypeBreakdown]
+    priority_breakdown: list[TaskPriorityBreakdown]
+    category_breakdown: list[TaskCategoryBreakdown]
+    overdue_tasks: list[TaskRead]
+    today_tasks: list[TaskRead]
+    upcoming_reminders: list[TaskRead]

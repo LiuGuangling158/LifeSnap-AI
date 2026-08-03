@@ -119,6 +119,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_demo_data_seed(client)
     _check_app_bootstrap(client)
     _check_bill_statistics_overview(client)
+    _check_task_statistics_overview(client)
     _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_bill_idempotency(client)
@@ -339,6 +340,117 @@ def _check_bill_statistics_overview(client: ApiClient) -> None:
         if item["category"] == "Dining"
     )
     _assert(float(dining["percentage"]) > 0, "Category breakdown should include percentage")
+
+
+def _check_task_statistics_overview(client: ApiClient) -> None:
+    now = datetime.now(LOCAL_TZ).replace(second=0, microsecond=0)
+    today_noon = now.replace(hour=12, minute=0)
+    task_payloads = [
+        {
+            "title": "Task Stats Overdue",
+            "category": "Task Stats QA",
+            "task_type": "todo",
+            "due_at": (now - timedelta(hours=2)).isoformat(),
+            "priority": "high",
+            "source": "manual",
+        },
+        {
+            "title": "Task Stats Today",
+            "category": "Task Stats QA",
+            "task_type": "todo",
+            "due_at": today_noon.isoformat(),
+            "priority": "medium",
+            "source": "manual",
+        },
+        {
+            "title": "Task Stats Reminder",
+            "category": "Task Stats QA",
+            "task_type": "reminder",
+            "remind_at": (now + timedelta(days=1)).isoformat(),
+            "priority": "low",
+            "source": "manual",
+        },
+        {
+            "title": "Task Stats Unscheduled",
+            "category": "Task Stats QA",
+            "task_type": "todo",
+            "priority": "medium",
+            "source": "manual",
+        },
+        {
+            "title": "Task Stats Done",
+            "category": "Task Stats QA",
+            "task_type": "todo",
+            "priority": "medium",
+            "source": "manual",
+        },
+        {
+            "title": "Task Stats Cancelled",
+            "category": "Task Stats QA",
+            "task_type": "todo",
+            "priority": "medium",
+            "source": "manual",
+        },
+    ]
+    created_tasks: list[dict[str, Any]] = []
+    for index, payload in enumerate(task_payloads, start=1):
+        status, task = client.request(
+            "POST",
+            "/tasks",
+            payload,
+            headers={"Idempotency-Key": f"smoke-statistics-task-{index}"},
+        )
+        _assert(status == 201, "Task statistics setup tasks should be created")
+        created_tasks.append(task)
+
+    status, _ = client.request(
+        "POST",
+        f"/tasks/{created_tasks[4]['id']}/complete",
+        headers={"Idempotency-Key": "smoke-statistics-task-complete"},
+    )
+    _assert(status == 200, "Task statistics done setup should complete a task")
+
+    status, _ = client.request(
+        "PATCH",
+        f"/tasks/{created_tasks[5]['id']}",
+        {"status": "cancelled"},
+    )
+    _assert(status == 200, "Task statistics cancelled setup should cancel a task")
+
+    status, overview = client.request(
+        "GET",
+        "/tasks/statistics/overview?upcoming_days=3&item_limit=5",
+    )
+    _assert(status == 200, "GET /tasks/statistics/overview should return 200")
+    _assert(overview["pending_count"] >= 4, "Task overview should count pending tasks")
+    _assert(overview["done_count"] >= 1, "Task overview should count done tasks")
+    _assert(overview["cancelled_count"] >= 1, "Task overview should count cancelled tasks")
+    _assert(overview["overdue_count"] >= 1, "Task overview should count overdue tasks")
+    _assert(overview["due_today_count"] >= 1, "Task overview should count due-today tasks")
+    _assert(
+        overview["upcoming_reminder_count"] >= 1,
+        "Task overview should count upcoming reminders",
+    )
+    _assert(
+        overview["unscheduled_pending_count"] >= 1,
+        "Task overview should count unscheduled pending tasks",
+    )
+    _assert(
+        any(task["title"] == "Task Stats Overdue" for task in overview["overdue_tasks"]),
+        "Task overview should include overdue task rows",
+    )
+    _assert(
+        any(task["title"] == "Task Stats Today" for task in overview["today_tasks"]),
+        "Task overview should include today task rows",
+    )
+    _assert(
+        any(task["title"] == "Task Stats Reminder" for task in overview["upcoming_reminders"]),
+        "Task overview should include upcoming reminder rows",
+    )
+    _assert(
+        any(item["category"] == "Task Stats QA" for item in overview["category_breakdown"]),
+        "Task overview should include category breakdown",
+    )
 
 
 def _check_candidate_discard_flow(client: ApiClient) -> None:

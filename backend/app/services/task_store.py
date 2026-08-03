@@ -5,11 +5,17 @@ from math import ceil
 from uuid import UUID, uuid4
 
 from app.schemas.task import (
+    TaskCategoryBreakdown,
     TaskCreate,
     TaskListResponse,
+    TaskPriority,
+    TaskPriorityBreakdown,
     TaskRead,
+    TaskStatisticsOverview,
     TaskStatus,
+    TaskStatusBreakdown,
     TaskType,
+    TaskTypeBreakdown,
     TaskUpdate,
 )
 
@@ -213,6 +219,130 @@ class InMemoryTaskStore:
             and start_at <= self._as_utc(task.remind_at) <= end_at
         ]
         return sorted(reminders, key=self._sort_key)[:limit]
+
+    def statistics_overview(
+        self,
+        now: datetime | None = None,
+        upcoming_days: int = 7,
+        item_limit: int = 10,
+    ) -> TaskStatisticsOverview:
+        current_at = self._as_utc(now or datetime.now(timezone.utc))
+        tasks = self.all()
+        pending_tasks = [task for task in tasks if task.status == TaskStatus.pending]
+        overdue_tasks = self._overdue_tasks(current_at, pending_tasks, item_limit)
+        today_tasks = self.today_tasks(current_at, limit=item_limit)
+        upcoming_reminders = self.upcoming_reminders(
+            current_at,
+            days=upcoming_days,
+            limit=item_limit,
+        )
+
+        return TaskStatisticsOverview(
+            generated_at=current_at,
+            upcoming_days=upcoming_days,
+            pending_count=self._count_status(tasks, TaskStatus.pending),
+            done_count=self._count_status(tasks, TaskStatus.done),
+            cancelled_count=self._count_status(tasks, TaskStatus.cancelled),
+            overdue_count=len(self._overdue_tasks(current_at, pending_tasks)),
+            due_today_count=len(self._due_today_tasks(current_at, pending_tasks)),
+            upcoming_reminder_count=len(
+                self._upcoming_reminder_tasks(current_at, upcoming_days, pending_tasks)
+            ),
+            unscheduled_pending_count=len(
+                [task for task in pending_tasks if self._target_at(task) is None]
+            ),
+            status_breakdown=self._status_breakdown(tasks),
+            type_breakdown=self._type_breakdown(tasks),
+            priority_breakdown=self._priority_breakdown(tasks),
+            category_breakdown=self._category_breakdown(tasks),
+            overdue_tasks=overdue_tasks,
+            today_tasks=today_tasks,
+            upcoming_reminders=upcoming_reminders,
+        )
+
+    def _overdue_tasks(
+        self,
+        now: datetime,
+        tasks: list[TaskRead],
+        limit: int | None = None,
+    ) -> list[TaskRead]:
+        overdue = [
+            task
+            for task in tasks
+            if self._target_at(task) is not None
+            and self._as_utc(self._target_at(task)) < now
+        ]
+        sorted_tasks = sorted(overdue, key=self._sort_key)
+        return sorted_tasks if limit is None else sorted_tasks[:limit]
+
+    def _due_today_tasks(
+        self,
+        now: datetime,
+        tasks: list[TaskRead],
+    ) -> list[TaskRead]:
+        start_at = self._start_of_day(now)
+        end_at = start_at + timedelta(days=1)
+        return [
+            task
+            for task in tasks
+            if self._target_at(task) is not None
+            and start_at <= self._as_utc(self._target_at(task)) < end_at
+        ]
+
+    def _upcoming_reminder_tasks(
+        self,
+        now: datetime,
+        days: int,
+        tasks: list[TaskRead],
+    ) -> list[TaskRead]:
+        start_at = self._as_utc(now)
+        end_at = start_at + timedelta(days=days)
+        return [
+            task
+            for task in tasks
+            if task.task_type == TaskType.reminder
+            and task.remind_at is not None
+            and start_at <= self._as_utc(task.remind_at) <= end_at
+        ]
+
+    def _status_breakdown(self, tasks: list[TaskRead]) -> list[TaskStatusBreakdown]:
+        return [
+            TaskStatusBreakdown(status=status, count=self._count_status(tasks, status))
+            for status in TaskStatus
+        ]
+
+    def _type_breakdown(self, tasks: list[TaskRead]) -> list[TaskTypeBreakdown]:
+        return [
+            TaskTypeBreakdown(
+                task_type=task_type,
+                count=len([task for task in tasks if task.task_type == task_type]),
+            )
+            for task_type in TaskType
+        ]
+
+    def _priority_breakdown(self, tasks: list[TaskRead]) -> list[TaskPriorityBreakdown]:
+        return [
+            TaskPriorityBreakdown(
+                priority=priority,
+                count=len([task for task in tasks if task.priority == priority]),
+            )
+            for priority in TaskPriority
+        ]
+
+    def _category_breakdown(self, tasks: list[TaskRead]) -> list[TaskCategoryBreakdown]:
+        category_counts: dict[str, int] = {}
+        for task in tasks:
+            category_counts[task.category] = category_counts.get(task.category, 0) + 1
+
+        breakdown = [
+            TaskCategoryBreakdown(category=category, count=count)
+            for category, count in category_counts.items()
+        ]
+        breakdown.sort(key=lambda item: (-item.count, item.category))
+        return breakdown
+
+    def _count_status(self, tasks: list[TaskRead], status: TaskStatus) -> int:
+        return len([task for task in tasks if task.status == status])
 
     def _sort_key(self, task: TaskRead) -> tuple[int, datetime]:
         target_at = self._target_at(task)
