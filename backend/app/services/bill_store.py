@@ -29,6 +29,7 @@ class InMemoryBillStore:
             id=uuid4(),
             created_at=now,
             updated_at=now,
+            deleted_at=None,
             paid_at=payload.paid_at or now,
             **payload.model_dump(exclude={"paid_at"}),
         )
@@ -43,10 +44,15 @@ class InMemoryBillStore:
         transaction_type: TransactionType | None = None,
         source: BillSource | None = None,
         keyword: str | None = None,
+        include_deleted: bool = False,
+        deleted_only: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> BillListResponse:
-        bills = list(self._bills.values())
+        bills = self.all(
+            include_deleted=include_deleted,
+            deleted_only=deleted_only,
+        )
         if year is not None:
             bills = [bill for bill in bills if bill.paid_at.year == year]
         if month is not None:
@@ -83,11 +89,28 @@ class InMemoryBillStore:
         ]
         return any(keyword in field.casefold() for field in fields)
 
-    def get(self, bill_id: UUID) -> BillRead | None:
-        return self._bills.get(bill_id)
+    def get(self, bill_id: UUID, include_deleted: bool = False) -> BillRead | None:
+        bill = self._bills.get(bill_id)
+        if bill is None:
+            return None
+        if bill.deleted_at is not None and not include_deleted:
+            return None
+        return bill
 
-    def all(self) -> list[BillRead]:
-        return list(self._bills.values())
+    def all(
+        self,
+        include_deleted: bool = False,
+        deleted_only: bool = False,
+    ) -> list[BillRead]:
+        bills = list(self._bills.values())
+        if deleted_only:
+            return [bill for bill in bills if bill.deleted_at is not None]
+        if include_deleted:
+            return bills
+        return [bill for bill in bills if bill.deleted_at is None]
+
+    def deleted_count(self) -> int:
+        return len(self.all(deleted_only=True))
 
     def update(self, bill_id: UUID, payload: BillUpdate) -> BillRead | None:
         existing = self.get(bill_id)
@@ -103,11 +126,31 @@ class InMemoryBillStore:
         return updated
 
     def delete(self, bill_id: UUID) -> bool:
-        if bill_id not in self._bills:
+        existing = self._bills.get(bill_id)
+        if existing is None:
             return False
 
-        del self._bills[bill_id]
+        if existing.deleted_at is None:
+            now = datetime.now(timezone.utc)
+            data = existing.model_dump()
+            data["updated_at"] = now
+            data["deleted_at"] = now
+            self._bills[bill_id] = BillRead(**data)
         return True
+
+    def restore(self, bill_id: UUID) -> BillRead | None:
+        existing = self._bills.get(bill_id)
+        if existing is None:
+            return None
+        if existing.deleted_at is None:
+            return existing
+
+        data = existing.model_dump()
+        data["updated_at"] = datetime.now(timezone.utc)
+        data["deleted_at"] = None
+        restored = BillRead(**data)
+        self._bills[bill_id] = restored
+        return restored
 
     def clear(self) -> int:
         count = len(self._bills)
@@ -123,7 +166,7 @@ class InMemoryBillStore:
         time_window = timedelta(minutes=time_window_minutes)
         matches: list[DuplicateBillMatch] = []
 
-        for bill in self._bills.values():
+        for bill in self.all():
             if bill.amount != payload.amount:
                 continue
             if bill.transaction_type != payload.transaction_type:
@@ -149,7 +192,7 @@ class InMemoryBillStore:
     def monthly_statistics(self, year: int, month: int) -> MonthlyBillStatistics:
         monthly_bills = [
             bill
-            for bill in self._bills.values()
+            for bill in self.all()
             if bill.paid_at.year == year and bill.paid_at.month == month
         ]
 

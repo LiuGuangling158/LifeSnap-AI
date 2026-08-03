@@ -121,6 +121,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_bill_idempotency(client)
+    _check_soft_delete_and_restore(client)
     _check_bill_candidate_duplicate_detection(client)
     _check_task_snooze_idempotency(client)
     _check_privacy_switch(client)
@@ -444,6 +445,122 @@ def _check_bill_idempotency(client: ApiClient) -> None:
     conflict_payload = payload | {"amount": 19}
     conflict_status, _ = client.request("POST", "/bills", conflict_payload, headers=headers)
     _assert(conflict_status == 409, "Same Idempotency-Key with different payload should conflict")
+
+
+def _check_soft_delete_and_restore(client: ApiClient) -> None:
+    bill_payload = {
+        "amount": 35,
+        "merchant": "Soft Delete Demo Merchant",
+        "category": "QA",
+        "transaction_type": "expense",
+        "source": "manual",
+    }
+    status, bill = client.request(
+        "POST",
+        "/bills",
+        bill_payload,
+        headers={"Idempotency-Key": "smoke-soft-delete-bill-create"},
+    )
+    _assert(status == 201, "Soft delete setup bill should be created")
+    bill_id = bill["id"]
+
+    task_payload = {
+        "title": "Soft Delete Demo Task",
+        "category": "QA",
+        "task_type": "todo",
+        "source": "manual",
+    }
+    status, task = client.request(
+        "POST",
+        "/tasks",
+        task_payload,
+        headers={"Idempotency-Key": "smoke-soft-delete-task-create"},
+    )
+    _assert(status == 201, "Soft delete setup task should be created")
+    task_id = task["id"]
+
+    status, _ = client.request("DELETE", f"/bills/{bill_id}")
+    _assert(status == 204, "Soft bill delete should return 204")
+    status, _ = client.request("DELETE", f"/tasks/{task_id}")
+    _assert(status == 204, "Soft task delete should return 204")
+
+    status, _ = client.request("GET", f"/bills/{bill_id}")
+    _assert(status == 404, "Soft-deleted bill should be hidden by default")
+    status, deleted_bill = client.request("GET", f"/bills/{bill_id}?include_deleted=true")
+    _assert(status == 200, "Soft-deleted bill should be readable when requested")
+    _assert(deleted_bill["deleted_at"], "Soft-deleted bill should expose deleted_at")
+
+    status, bills = client.request("GET", "/bills?deleted_only=true&page_size=100")
+    _assert(status == 200, "Deleted bill list should return 200")
+    _assert(
+        any(item["id"] == bill_id for item in bills["items"]),
+        "Deleted bill list should include the soft-deleted bill",
+    )
+    status, active_bills = client.request(
+        "GET",
+        "/bills?q=Soft%20Delete%20Demo%20Merchant",
+    )
+    _assert(status == 200, "Default bill list should return 200 after soft delete")
+    _assert(active_bills["total"] == 0, "Default bill list should hide soft-deleted bills")
+
+    status, _ = client.request("GET", f"/tasks/{task_id}")
+    _assert(status == 404, "Soft-deleted task should be hidden by default")
+    status, deleted_task = client.request("GET", f"/tasks/{task_id}?include_deleted=true")
+    _assert(status == 200, "Soft-deleted task should be readable when requested")
+    _assert(deleted_task["deleted_at"], "Soft-deleted task should expose deleted_at")
+
+    status, tasks = client.request("GET", "/tasks?deleted_only=true&page_size=100")
+    _assert(status == 200, "Deleted task list should return 200")
+    _assert(
+        any(item["id"] == task_id for item in tasks["items"]),
+        "Deleted task list should include the soft-deleted task",
+    )
+    status, active_tasks = client.request("GET", "/tasks?category=QA")
+    _assert(status == 200, "Default task list should return 200 after soft delete")
+    _assert(
+        all(item["id"] != task_id for item in active_tasks["items"]),
+        "Default task list should hide soft-deleted tasks",
+    )
+
+    status, summary = client.request("GET", "/data/summary")
+    _assert(status == 200, "Data summary should return 200 after soft delete")
+    _assert(summary["deleted_bill_count"] >= 1, "Data summary should count deleted bills")
+    _assert(summary["deleted_task_count"] >= 1, "Data summary should count deleted tasks")
+
+    restore_bill_headers = {"Idempotency-Key": "smoke-soft-delete-bill-restore"}
+    status, restored_bill = client.request(
+        "POST",
+        f"/bills/{bill_id}/restore",
+        headers=restore_bill_headers,
+    )
+    status_again, restored_bill_again = client.request(
+        "POST",
+        f"/bills/{bill_id}/restore",
+        headers=restore_bill_headers,
+    )
+    _assert(status == 200 and status_again == 200, "Repeated bill restore should return 200")
+    _assert(restored_bill["id"] == restored_bill_again["id"], "Repeated bill restore should be stable")
+    _assert(restored_bill["deleted_at"] is None, "Restored bill should clear deleted_at")
+
+    restore_task_headers = {"Idempotency-Key": "smoke-soft-delete-task-restore"}
+    status, restored_task = client.request(
+        "POST",
+        f"/tasks/{task_id}/restore",
+        headers=restore_task_headers,
+    )
+    status_again, restored_task_again = client.request(
+        "POST",
+        f"/tasks/{task_id}/restore",
+        headers=restore_task_headers,
+    )
+    _assert(status == 200 and status_again == 200, "Repeated task restore should return 200")
+    _assert(restored_task["id"] == restored_task_again["id"], "Repeated task restore should be stable")
+    _assert(restored_task["deleted_at"] is None, "Restored task should clear deleted_at")
+
+    status, bill = client.request("GET", f"/bills/{bill_id}")
+    _assert(status == 200 and bill["deleted_at"] is None, "Restored bill should be active")
+    status, task = client.request("GET", f"/tasks/{task_id}")
+    _assert(status == 200 and task["deleted_at"] is None, "Restored task should be active")
 
 
 def _check_bill_candidate_duplicate_detection(client: ApiClient) -> None:

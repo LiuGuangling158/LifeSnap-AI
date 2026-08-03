@@ -61,6 +61,7 @@ class TaskRead(TaskCreate):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+    deleted_at: datetime | None = None
 
 
 class TaskListResponse(BaseModel):

@@ -26,6 +26,7 @@ class InMemoryTaskStore:
             created_at=now,
             updated_at=now,
             completed_at=None,
+            deleted_at=None,
             **payload.model_dump(),
         )
         self._tasks[task.id] = task
@@ -38,10 +39,15 @@ class InMemoryTaskStore:
         category: str | None = None,
         due_from: datetime | None = None,
         due_to: datetime | None = None,
+        include_deleted: bool = False,
+        deleted_only: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> TaskListResponse:
-        tasks = list(self._tasks.values())
+        tasks = self.all(
+            include_deleted=include_deleted,
+            deleted_only=deleted_only,
+        )
         if status is not None:
             tasks = [task for task in tasks if task.status == status]
         if task_type is not None:
@@ -78,11 +84,28 @@ class InMemoryTaskStore:
             total_pages=ceil(total / page_size) if total else 0,
         )
 
-    def get(self, task_id: UUID) -> TaskRead | None:
-        return self._tasks.get(task_id)
+    def get(self, task_id: UUID, include_deleted: bool = False) -> TaskRead | None:
+        task = self._tasks.get(task_id)
+        if task is None:
+            return None
+        if task.deleted_at is not None and not include_deleted:
+            return None
+        return task
 
-    def all(self) -> list[TaskRead]:
-        return list(self._tasks.values())
+    def all(
+        self,
+        include_deleted: bool = False,
+        deleted_only: bool = False,
+    ) -> list[TaskRead]:
+        tasks = list(self._tasks.values())
+        if deleted_only:
+            return [task for task in tasks if task.deleted_at is not None]
+        if include_deleted:
+            return tasks
+        return [task for task in tasks if task.deleted_at is None]
+
+    def deleted_count(self) -> int:
+        return len(self.all(deleted_only=True))
 
     def update(self, task_id: UUID, payload: TaskUpdate) -> TaskRead | None:
         existing = self.get(task_id)
@@ -129,11 +152,31 @@ class InMemoryTaskStore:
         return self.update(task_id, TaskUpdate(due_at=target_at))
 
     def delete(self, task_id: UUID) -> bool:
-        if task_id not in self._tasks:
+        existing = self._tasks.get(task_id)
+        if existing is None:
             return False
 
-        del self._tasks[task_id]
+        if existing.deleted_at is None:
+            now = datetime.now(timezone.utc)
+            data = existing.model_dump()
+            data["updated_at"] = now
+            data["deleted_at"] = now
+            self._tasks[task_id] = TaskRead(**data)
         return True
+
+    def restore(self, task_id: UUID) -> TaskRead | None:
+        existing = self._tasks.get(task_id)
+        if existing is None:
+            return None
+        if existing.deleted_at is None:
+            return existing
+
+        data = existing.model_dump()
+        data["updated_at"] = datetime.now(timezone.utc)
+        data["deleted_at"] = None
+        restored = TaskRead(**data)
+        self._tasks[task_id] = restored
+        return restored
 
     def clear(self) -> int:
         count = len(self._tasks)
@@ -145,7 +188,7 @@ class InMemoryTaskStore:
         end_at = start_at + timedelta(days=1)
         tasks = [
             task
-            for task in self._tasks.values()
+            for task in self.all()
             if task.status == TaskStatus.pending
             and task.task_type == TaskType.todo
             and task.due_at is not None
@@ -163,7 +206,7 @@ class InMemoryTaskStore:
         end_at = start_at + timedelta(days=days)
         reminders = [
             task
-            for task in self._tasks.values()
+            for task in self.all()
             if task.status == TaskStatus.pending
             and task.task_type == TaskType.reminder
             and task.remind_at is not None

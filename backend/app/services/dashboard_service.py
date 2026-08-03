@@ -52,6 +52,8 @@ class DashboardService:
                 attachment_count=len(attachment_store.all()),
                 bill_candidate_count=len(bill_candidate_store.all()),
                 task_candidate_count=len(task_candidate_store.all()),
+                deleted_bill_count=bill_store.deleted_count(),
+                deleted_task_count=task_store.deleted_count(),
             ),
             monthly_statistics=monthly_statistics,
             recent_bills=recent_bills,

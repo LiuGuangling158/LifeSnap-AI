@@ -43,6 +43,8 @@ def list_bills(
     transaction_type: TransactionType | None = Query(default=None),
     source: BillSource | None = Query(default=None),
     q: str | None = Query(default=None, min_length=1, max_length=80),
+    include_deleted: bool = Query(default=False),
+    deleted_only: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> BillListResponse:
@@ -55,6 +57,8 @@ def list_bills(
         transaction_type=transaction_type,
         source=source,
         keyword=q,
+        include_deleted=include_deleted,
+        deleted_only=deleted_only,
         page=page,
         page_size=page_size,
     )
@@ -83,8 +87,11 @@ def check_duplicate_bill(
 
 
 @router.get("/{bill_id}", response_model=BillRead)
-def get_bill(bill_id: UUID) -> BillRead:
-    bill = bill_store.get(bill_id)
+def get_bill(
+    bill_id: UUID,
+    include_deleted: bool = Query(default=False),
+) -> BillRead:
+    bill = bill_store.get(bill_id, include_deleted=include_deleted)
     if bill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
     return bill
@@ -96,6 +103,28 @@ def update_bill(bill_id: UUID, payload: BillUpdate) -> BillRead:
     if bill is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
     return bill
+
+
+@router.post("/{bill_id}/restore", response_model=BillRead)
+def restore_bill(
+    bill_id: UUID,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> BillRead:
+    def restore() -> BillRead:
+        bill = bill_store.restore(bill_id)
+        if bill is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bill not found")
+        return bill
+
+    try:
+        return idempotency_store.run(
+            scope="POST /bills/restore",
+            key=idempotency_key,
+            fingerprint={"bill_id": str(bill_id)},
+            factory=restore,
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.delete("/{bill_id}", status_code=status.HTTP_204_NO_CONTENT)

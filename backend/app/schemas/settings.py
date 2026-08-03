@@ -30,6 +30,8 @@ class LocalDataSummary(BaseModel):
     attachment_count: int
     bill_candidate_count: int
     task_candidate_count: int
+    deleted_bill_count: int = 0
+    deleted_task_count: int = 0
 
 
 class DataExportResponse(BaseModel):

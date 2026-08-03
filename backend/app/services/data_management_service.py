@@ -38,6 +38,8 @@ class DataManagementService:
             attachment_count=len(attachment_store.all()),
             bill_candidate_count=len(bill_candidate_store.all()),
             task_candidate_count=len(task_candidate_store.all()),
+            deleted_bill_count=bill_store.deleted_count(),
+            deleted_task_count=task_store.deleted_count(),
         )
 
     def export(self) -> DataExportResponse:
@@ -66,6 +68,7 @@ class DataManagementService:
                 "source",
                 "created_at",
                 "updated_at",
+                "deleted_at",
             ],
             [
                 {
@@ -81,6 +84,7 @@ class DataManagementService:
                     "source": bill.source,
                     "created_at": bill.created_at,
                     "updated_at": bill.updated_at,
+                    "deleted_at": bill.deleted_at,
                 }
                 for bill in bill_store.all()
             ],
@@ -102,6 +106,7 @@ class DataManagementService:
                 "created_at",
                 "updated_at",
                 "completed_at",
+                "deleted_at",
             ],
             [
                 {
@@ -118,6 +123,7 @@ class DataManagementService:
                     "created_at": task.created_at,
                     "updated_at": task.updated_at,
                     "completed_at": task.completed_at,
+                    "deleted_at": task.deleted_at,
                 }
                 for task in task_store.all()
             ],

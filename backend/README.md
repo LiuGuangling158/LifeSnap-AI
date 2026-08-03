@@ -67,6 +67,25 @@ object for frontend handling:
 Validation errors return `error.code: "validation_error"` and include
 `error.issues` with field-level details.
 
+## Soft Delete
+
+Bills and tasks use soft delete. `DELETE /bills/{id}` and `DELETE /tasks/{id}`
+hide records from default detail, list, dashboard, statistics, and export views,
+but keep them recoverable.
+
+```text
+GET /bills?deleted_only=true
+GET /bills/{id}?include_deleted=true
+POST /bills/{id}/restore
+
+GET /tasks?deleted_only=true
+GET /tasks/{id}?include_deleted=true
+POST /tasks/{id}/restore
+```
+
+`GET /data/summary` includes `deleted_bill_count` and `deleted_task_count` for
+frontend recycle-bin indicators.
+
 ## Idempotency
 
 Create and state-changing endpoints support an optional `Idempotency-Key` header

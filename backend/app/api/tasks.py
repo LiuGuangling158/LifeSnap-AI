@@ -41,6 +41,8 @@ def list_tasks(
     category: str | None = Query(default=None, min_length=1, max_length=40),
     due_from: datetime | None = Query(default=None),
     due_to: datetime | None = Query(default=None),
+    include_deleted: bool = Query(default=False),
+    deleted_only: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> TaskListResponse:
@@ -50,14 +52,19 @@ def list_tasks(
         category=category,
         due_from=due_from,
         due_to=due_to,
+        include_deleted=include_deleted,
+        deleted_only=deleted_only,
         page=page,
         page_size=page_size,
     )
 
 
 @router.get("/{task_id}", response_model=TaskRead)
-def get_task(task_id: UUID) -> TaskRead:
-    task = task_store.get(task_id)
+def get_task(
+    task_id: UUID,
+    include_deleted: bool = Query(default=False),
+) -> TaskRead:
+    task = task_store.get(task_id, include_deleted=include_deleted)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
@@ -137,6 +144,28 @@ def snooze_task(
                 "payload": payload.model_dump(mode="json"),
             },
             factory=snooze,
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+
+@router.post("/{task_id}/restore", response_model=TaskRead)
+def restore_task(
+    task_id: UUID,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TaskRead:
+    def restore() -> TaskRead:
+        task = task_store.restore(task_id)
+        if task is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        return task
+
+    try:
+        return idempotency_store.run(
+            scope="POST /tasks/restore",
+            key=idempotency_key,
+            fingerprint={"task_id": str(task_id)},
+            factory=restore,
         )
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
