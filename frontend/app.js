@@ -593,21 +593,7 @@ function render() {
     <div class="app-shell">
       ${renderSidebar()}
       <main class="main">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">${route.eyebrow}</p>
-            <h1 class="page-title">${route.title}</h1>
-            <p class="page-subtitle">${route.subtitle}</p>
-          </div>
-          <div class="action-row">
-            <button class="button primary" type="button" ${primaryAction.modalAttribute}>
-              ${icon("plus")}${primaryAction.label}
-            </button>
-            <button class="button ghost" type="button" data-refresh>
-              ${icon("refresh")}刷新
-            </button>
-          </div>
-        </header>
+        ${state.route === "dashboard" ? "" : renderTopbar(route, primaryAction)}
         ${renderPage()}
       </main>
       ${state.modalOpen ? renderBillModal() : ""}
@@ -617,6 +603,26 @@ function render() {
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""}
     </div>
+  `;
+}
+
+function renderTopbar(route, primaryAction) {
+  return `
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">${route.eyebrow}</p>
+        <h1 class="page-title">${route.title}</h1>
+        <p class="page-subtitle">${route.subtitle}</p>
+      </div>
+      <div class="action-row">
+        <button class="button primary" type="button" ${primaryAction.modalAttribute}>
+          ${icon("plus")}${primaryAction.label}
+        </button>
+        <button class="button ghost" type="button" data-refresh>
+          ${icon("refresh")}刷新
+        </button>
+      </div>
+    </header>
   `;
 }
 
@@ -685,44 +691,103 @@ function renderDashboard() {
   const dashboard = state.bootstrap?.dashboard ?? {};
   const monthly = dashboard.monthly_statistics ?? {};
   const dataSummary = state.bootstrap?.data_summary ?? {};
+  const expense = Number(monthly.total_expense ?? 0);
+  const income = Number(monthly.total_income ?? 0);
+  const netAmount = Number(monthly.net_amount ?? income - expense);
+  const progress = financeProgress(monthly);
+  const homeTasks = [
+    ...(dashboard.today_tasks ?? []),
+    ...(dashboard.upcoming_reminders ?? []),
+  ].slice(0, 3);
 
   return `
-    <div class="stack">
-      <section class="surface">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">本月概览</h2>
-            <p class="section-note">用于前端联调的真实接口数据，新增账单后会刷新。</p>
-          </div>
-          <span class="pill">${state.bootstrap?.capabilities?.storage_backend ?? "local"}</span>
+    <div class="home-page">
+      <section class="home-hero">
+        <div class="home-hero-copy">
+          <p class="eyebrow">早安</p>
+          <h1 class="home-title">今天也要<span>轻松管理生活</span></h1>
+          <p class="home-subtitle">每一笔记录、每一个提醒，都帮你把小事慢慢理顺。</p>
         </div>
-        <div class="metrics">
-          ${metric("本月支出", money(monthly.total_expense), "expense")}
-          ${metric("本月收入", money(monthly.total_income), "income")}
-          ${metric("今日待办", dashboard.today_task_count ?? 0, "small")}
-          ${metric("候选记录", pendingCandidateCount(dashboard), "small")}
+        <div class="home-illustration" aria-hidden="true">
+          <div class="home-window">
+            <span class="home-sun"></span>
+          </div>
+          <div class="home-plant plant-left"></div>
+          <div class="home-plant plant-right"></div>
+          <div class="home-mascot"></div>
         </div>
       </section>
-      <div class="content-grid">
-        <section class="surface">
-          <div class="section-header">
+
+      <section class="surface finance-overview">
+        <div class="finance-header">
+          <div class="finance-title">
+            <span class="panel-icon">${icon("wallet")}</span>
             <div>
-              <h2 class="section-title">本月每日支出</h2>
-              <p class="section-note">悬停柱形查看日期和金额。</p>
+              <h2 class="section-title">本月财务概览</h2>
+              <p class="section-note">支出图表支持悬停查看每日金额。</p>
             </div>
           </div>
-          ${renderDailyChart(state.billOverview?.daily_breakdown ?? [])}
+          <button class="button ghost" type="button" data-route="bills">查看全部</button>
+        </div>
+        <div class="finance-body">
+          <div class="finance-main">
+            <div class="home-metrics">
+              ${homeMetric("本月支出", money(expense), "expense")}
+              ${homeMetric("本月收入", money(income), "income")}
+              ${homeMetric("本月结余", money(netAmount), netAmount >= 0 ? "income" : "expense")}
+            </div>
+            ${renderDailyChart(state.billOverview?.daily_breakdown ?? [], "home-chart")}
+          </div>
+          <div class="finance-ring-wrap">
+            ${renderProgressRing(progress)}
+            <p class="ring-label">支出占收入</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="surface assistant-strip">
+        <div>
+          <div class="finance-title">
+            <span class="panel-icon blue">${icon("spark")}</span>
+            <h2 class="section-title">AI 助手</h2>
+          </div>
+          <p class="assistant-copy">说一句话，后续可以帮你生成待确认账单、待办和提醒。</p>
+        </div>
+        <div class="assistant-status">
+          <span class="assistant-mic">${icon("mic")}</span>
+          <span>${pendingCandidateCount(dashboard)} 条候选待确认</span>
+        </div>
+      </section>
+
+      <div class="home-split">
+        <section class="surface home-task-panel">
+          <div class="section-header">
+            <div class="finance-title">
+              <span class="panel-icon">${icon("check")}</span>
+              <h2 class="section-title">待办提醒</h2>
+            </div>
+            <button class="button ghost" type="button" data-route="tasks">查看全部</button>
+          </div>
+          ${renderHomeTasks(homeTasks)}
         </section>
-        <section class="surface">
+        <section class="surface home-record-panel">
           <div class="section-header">
-            <div>
-              <h2 class="section-title">最近账单</h2>
-              <p class="section-note">${dataSummary.bill_count ?? 0} 条活跃账单</p>
+            <div class="finance-title">
+              <span class="panel-icon">${icon("receipt")}</span>
+              <h2 class="section-title">最近记录</h2>
             </div>
+            <span class="pill">${dataSummary.bill_count ?? 0} 条</span>
           </div>
-          ${renderBillList(dashboard.recent_bills ?? state.bills)}
+          ${renderBillList((dashboard.recent_bills ?? state.bills).slice(0, 3))}
         </section>
       </div>
+
+      <section class="quick-dock" aria-label="快捷操作">
+        ${quickAction("edit", "记一笔", "快速记账", "data-open-bill-modal")}
+        ${quickAction("check-circle", "添加待办", "新建任务", "data-open-task-modal")}
+        ${quickAction("receipt", "查账单", "列表统计", 'data-route="bills"')}
+        ${quickAction("save", "备份数据", "快照导出", 'data-route="settings"')}
+      </section>
     </div>
   `;
 }
@@ -828,14 +893,89 @@ function renderSettingsPage() {
   `;
 }
 
-function renderDailyChart(items) {
+function homeMetric(label, value, tone) {
+  return `
+    <div class="home-metric">
+      <span>${label}</span>
+      <strong class="${tone}">${value}</strong>
+    </div>
+  `;
+}
+
+function financeProgress(monthly) {
+  const expense = Number(monthly.total_expense ?? 0);
+  const income = Number(monthly.total_income ?? 0);
+  if (income <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.round((expense / income) * 100));
+}
+
+function renderProgressRing(percent) {
+  const radius = 44;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (percent / 100) * circumference;
+  return `
+    <div class="progress-figure" aria-label="支出占收入 ${percent}%">
+      <svg class="progress-ring" viewBox="0 0 112 112" aria-hidden="true">
+        <circle class="ring-track" cx="56" cy="56" r="${radius}"></circle>
+        <circle class="ring-value" cx="56" cy="56" r="${radius}"
+          stroke-dasharray="${circumference.toFixed(2)}"
+          stroke-dashoffset="${offset.toFixed(2)}"></circle>
+      </svg>
+      <strong>${percent}%</strong>
+    </div>
+  `;
+}
+
+function renderHomeTasks(tasks) {
+  if (!tasks.length) {
+    return empty("今天还没有待办提醒。");
+  }
+  return `
+    <div class="home-task-list">
+      ${tasks
+        .map(
+          (task) => `
+            <div class="home-task-item">
+              <span class="panel-icon soft">${icon(task.task_type === "reminder" ? "clock" : "check")}</span>
+              <div>
+                <p class="item-title">${escapeHtml(task.title)}</p>
+                <p class="item-meta">${taskTargetText(task)} · ${labelTaskPriority(task.priority)}</p>
+              </div>
+              <button class="icon-button" type="button" data-complete-task="${task.id}"
+                aria-label="完成 ${escapeHtml(task.title)}"
+                ${task.status !== "pending" || state.saving ? "disabled" : ""}>
+                ${icon("check-circle")}
+              </button>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function quickAction(iconName, title, subtitle, attribute) {
+  return `
+    <button class="quick-action" type="button" ${attribute}>
+      <span class="quick-icon">${icon(iconName)}</span>
+      <span>
+        <strong>${title}</strong>
+        <small>${subtitle}</small>
+      </span>
+    </button>
+  `;
+}
+
+function renderDailyChart(items, extraClass = "") {
   if (!items.length) {
     return empty("暂无统计数据。");
   }
   const values = items.map((item) => Number(item.total_expense ?? 0));
   const max = Math.max(...values, 1);
   return `
-    <div class="chart" role="list" aria-label="本月每日支出">
+    <div class="chart ${extraClass}" role="list" aria-label="本月每日支出">
       ${items
         .map((item, index) => {
           const value = Number(item.total_expense ?? 0);
@@ -1385,6 +1525,8 @@ function icon(name) {
     search: '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path>',
     reset: '<path d="M4 7h11a5 5 0 1 1-3.5 8.5"></path><path d="M4 7l4-4"></path><path d="M4 7l4 4"></path>',
     edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="M13.5 6.5l4 4"></path>',
+    wallet: '<path d="M4 7h14a2 2 0 0 1 2 2v10H4V7z"></path><path d="M4 7V5a2 2 0 0 1 2-2h10v4"></path><path d="M16 13h4"></path>',
+    mic: '<path d="M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"></path><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path>',
     trash: '<path d="M4 7h16"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M6 7l1 14h10l1-14"></path><path d="M9 7V4h6v3"></path>',
     "check-circle": '<circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path>',
     clock: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
