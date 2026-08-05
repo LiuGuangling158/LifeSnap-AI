@@ -1,8 +1,8 @@
 const routes = [
   {
     id: "dashboard",
-    label: "首页看板",
-    icon: "layout",
+    label: "首页",
+    icon: "home",
     eyebrow: "本地体验",
     title: "今天先把账记顺",
     subtitle: "查看本月支出、最近账单和待办提醒；数据来自当前 FastAPI 后端。",
@@ -22,6 +22,14 @@ const routes = [
     eyebrow: "提醒辅助",
     title: "待办提醒",
     subtitle: "展示后端已有待办数据；新增和编辑会在后续增量接入。",
+  },
+  {
+    id: "diary",
+    label: "日记",
+    icon: "book",
+    eyebrow: "生活记录",
+    title: "日记",
+    subtitle: "记录生活点滴的入口先占位，后续接入真实日记数据。",
   },
   {
     id: "settings",
@@ -94,6 +102,16 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-snapshot-save]")) {
     saveSnapshot();
+    return;
+  }
+
+  if (event.target.closest("[data-diary-placeholder]")) {
+    showToast("日记功能会在下一步接入，当前先保留入口。");
+    return;
+  }
+
+  if (event.target.closest("[data-voice-placeholder]")) {
+    showToast("语音操作会在后续接入 AI 对话和识别流程。");
     return;
   }
 
@@ -581,6 +599,17 @@ async function api(path, options = {}) {
   return body;
 }
 
+function showToast(message) {
+  state.toast = message;
+  render();
+  window.setTimeout(() => {
+    if (state.toast === message) {
+      state.toast = "";
+      render();
+    }
+  }, 2600);
+}
+
 function getRoute() {
   const id = window.location.hash.replace("#", "");
   return routes.some((route) => route.id === id) ? id : "dashboard";
@@ -590,11 +619,11 @@ function render() {
   const route = routes.find((item) => item.id === state.route) ?? routes[0];
   const primaryAction = getPrimaryAction();
   app.innerHTML = `
-    <div class="app-shell">
-      ${renderSidebar()}
-      <main class="main">
+    <div class="app-shell mobile-shell">
+      <main class="main mobile-main">
         ${state.route === "dashboard" ? "" : renderTopbar(route, primaryAction)}
         ${renderPage()}
+        ${renderMobileTabbar()}
       </main>
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
@@ -629,6 +658,9 @@ function renderTopbar(route, primaryAction) {
 function getPrimaryAction() {
   if (state.route === "tasks") {
     return { label: "新增待办", modalAttribute: "data-open-task-modal" };
+  }
+  if (state.route === "diary") {
+    return { label: "写日记", modalAttribute: "data-diary-placeholder" };
   }
   if (state.route === "settings") {
     return { label: "保存快照", modalAttribute: "data-snapshot-save" };
@@ -683,6 +715,7 @@ function renderPage() {
 
   if (state.route === "bills") return renderBillsPage();
   if (state.route === "tasks") return renderTasksPage();
+  if (state.route === "diary") return renderDiaryPage();
   if (state.route === "settings") return renderSettingsPage();
   return renderDashboard();
 }
@@ -690,11 +723,12 @@ function renderPage() {
 function renderDashboard() {
   const dashboard = state.bootstrap?.dashboard ?? {};
   const monthly = dashboard.monthly_statistics ?? {};
-  const dataSummary = state.bootstrap?.data_summary ?? {};
   const expense = Number(monthly.total_expense ?? 0);
   const income = Number(monthly.total_income ?? 0);
   const netAmount = Number(monthly.net_amount ?? income - expense);
+  const budgetRemaining = Math.max(0, netAmount);
   const progress = financeProgress(monthly);
+  const remainingPercent = Math.max(0, 100 - progress);
   const homeTasks = [
     ...(dashboard.today_tasks ?? []),
     ...(dashboard.upcoming_reminders ?? []),
@@ -704,14 +738,14 @@ function renderDashboard() {
     <div class="home-page">
       <section class="home-hero">
         <div class="home-hero-copy">
-          <p class="eyebrow">早安</p>
-          <h1 class="home-title">今天也要<span>轻松管理生活</span></h1>
-          <p class="home-subtitle">每一笔记录、每一个提醒，都帮你把小事慢慢理顺。</p>
+          <h1 class="home-title">早安，<br />今天也要<span>轻松管理生活</span></h1>
+          <p class="home-subtitle">每一个小习惯，成就更好的自己</p>
         </div>
         <div class="home-illustration" aria-hidden="true">
           <div class="home-window">
             <span class="home-sun"></span>
           </div>
+          <div class="home-cup"></div>
           <div class="home-plant plant-left"></div>
           <div class="home-plant plant-right"></div>
           <div class="home-mascot"></div>
@@ -724,7 +758,6 @@ function renderDashboard() {
             <span class="panel-icon">${icon("wallet")}</span>
             <div>
               <h2 class="section-title">本月财务概览</h2>
-              <p class="section-note">支出图表支持悬停查看每日金额。</p>
             </div>
           </div>
           <button class="button ghost" type="button" data-route="bills">查看全部</button>
@@ -732,30 +765,45 @@ function renderDashboard() {
         <div class="finance-body">
           <div class="finance-main">
             <div class="home-metrics">
-              ${homeMetric("本月支出", money(expense), "expense")}
-              ${homeMetric("本月收入", money(income), "income")}
-              ${homeMetric("本月结余", money(netAmount), netAmount >= 0 ? "income" : "expense")}
+              ${homeMetric("本月支出", money(expense), "expense", `支出占收入 ${progress}%`)}
+              ${homeMetric("本月收入", money(income), "income", `净额 ${money(netAmount)}`)}
+              ${homeMetric("预算剩余", money(budgetRemaining), "income", `剩余 ${remainingPercent}%`)}
             </div>
-            ${renderDailyChart(state.billOverview?.daily_breakdown ?? [], "home-chart")}
+            <div class="home-chart-wrap">
+              ${renderDailyChart(state.billOverview?.daily_breakdown ?? [], "home-chart")}
+              <div class="chart-axis" aria-hidden="true">
+                <span>1日</span>
+                <span>10日</span>
+                <span>20日</span>
+                <span>30日</span>
+              </div>
+            </div>
           </div>
           <div class="finance-ring-wrap">
             ${renderProgressRing(progress)}
-            <p class="ring-label">支出占收入</p>
+            <p class="ring-label">预算进度</p>
           </div>
         </div>
       </section>
 
       <section class="surface assistant-strip">
-        <div>
+        <div class="assistant-copy">
           <div class="finance-title">
             <span class="panel-icon blue">${icon("spark")}</span>
             <h2 class="section-title">AI 助手</h2>
           </div>
-          <p class="assistant-copy">说一句话，后续可以帮你生成待确认账单、待办和提醒。</p>
+          <span class="voice-pill">${icon("mic")}可语音输入</span>
+          <p class="assistant-title">说一句话，我来帮你</p>
+          <p class="assistant-note">记账、提醒、整理日程</p>
         </div>
-        <div class="assistant-status">
-          <span class="assistant-mic">${icon("mic")}</span>
-          <span>${pendingCandidateCount(dashboard)} 条候选待确认</span>
+        <button class="assistant-mic" type="button" data-voice-placeholder aria-label="语音操作">
+          ${icon("mic")}
+        </button>
+        <div class="assistant-bot" aria-hidden="true">
+          <span class="bot-ear left"></span>
+          <span class="bot-ear right"></span>
+          <span class="bot-head"><span></span></span>
+          <span class="bot-body"></span>
         </div>
       </section>
 
@@ -769,24 +817,34 @@ function renderDashboard() {
             <button class="button ghost" type="button" data-route="tasks">查看全部</button>
           </div>
           ${renderHomeTasks(homeTasks)}
+          <button class="text-action" type="button" data-open-task-modal>${icon("plus")}添加待办</button>
         </section>
-        <section class="surface home-record-panel">
+        <section class="surface home-diary-panel">
           <div class="section-header">
             <div class="finance-title">
-              <span class="panel-icon">${icon("receipt")}</span>
-              <h2 class="section-title">最近记录</h2>
+              <span class="panel-icon">${icon("book")}</span>
+              <h2 class="section-title">日记</h2>
             </div>
-            <span class="pill">${dataSummary.bill_count ?? 0} 条</span>
+            <button class="button ghost" type="button" data-route="diary">查看全部</button>
           </div>
-          ${renderBillList((dashboard.recent_bills ?? state.bills).slice(0, 3))}
+          <div class="diary-preview">
+            <p>记录生活点滴，<br />留住每一个美好瞬间</p>
+            <div class="diary-book-art" aria-hidden="true">
+              <span class="book-cover"></span>
+              <span class="book-pen"></span>
+            </div>
+            <button class="button primary diary-button" type="button" data-diary-placeholder>
+              ${icon("edit")}记录今天的心情
+            </button>
+          </div>
         </section>
       </div>
 
       <section class="quick-dock" aria-label="快捷操作">
         ${quickAction("edit", "记一笔", "快速记账", "data-open-bill-modal")}
         ${quickAction("check-circle", "添加待办", "新建任务", "data-open-task-modal")}
-        ${quickAction("receipt", "查账单", "列表统计", 'data-route="bills"')}
-        ${quickAction("save", "备份数据", "快照导出", 'data-route="settings"')}
+        ${quickAction("book", "写日记", "记录心情", "data-diary-placeholder")}
+        ${quickAction("mic", "语音操作", "动口不动手", "data-voice-placeholder")}
       </section>
     </div>
   `;
@@ -794,17 +852,17 @@ function renderDashboard() {
 
 function renderBillsPage() {
   return `
-    <section class="surface">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">账单记录</h2>
-          <p class="section-note">支持按月份、分类、交易类型和关键词筛选；删除会进入软删除。</p>
-        </div>
-        <span class="pill">${state.billListMeta.total} 条</span>
-      </div>
+    <div class="mobile-page bills-mobile-page">
+      <section class="mobile-page-head">
+        <p class="eyebrow">账单</p>
+        <h1 class="mobile-page-title">每一笔都清楚</h1>
+        <p class="mobile-page-subtitle">${state.billListMeta.total} 条记录，支持按月份、分类和关键词筛选。</p>
+      </section>
       ${renderBillFilters()}
-      ${state.bills.length ? renderBillsTable(state.bills) : empty("还没有账单，可以先新增一条手动记录。")}
-    </section>
+      <section class="surface bill-feed-panel">
+        ${state.bills.length ? renderBillFeed(state.bills) : empty("还没有账单，可以先新增一条手动记录。")}
+      </section>
+    </div>
   `;
 }
 
@@ -820,6 +878,31 @@ function renderTasksPage() {
       </div>
       ${state.tasks.length ? renderTaskList(state.tasks) : empty("还没有待办。")}
     </section>
+  `;
+}
+
+function renderDiaryPage() {
+  return `
+    <div class="mobile-page diary-mobile-page">
+      <section class="surface diary-placeholder-panel">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">日记</h2>
+            <p class="section-note">先放入口和页面占位，后续增量接入日记列表、心情记录和本地存储。</p>
+          </div>
+          <button class="button primary" type="button" data-diary-placeholder>
+            ${icon("edit")}写日记
+          </button>
+        </div>
+        <div class="diary-placeholder-body">
+          <div class="diary-book-art large" aria-hidden="true">
+            <span class="book-cover"></span>
+            <span class="book-pen"></span>
+          </div>
+          <p>今天先把首页入口做完整，日记正文能力会按你的增量节奏继续补。</p>
+        </div>
+      </section>
+    </div>
   `;
 }
 
@@ -893,11 +976,12 @@ function renderSettingsPage() {
   `;
 }
 
-function homeMetric(label, value, tone) {
+function homeMetric(label, value, tone, hint = "") {
   return `
     <div class="home-metric">
       <span>${label}</span>
       <strong class="${tone}">${value}</strong>
+      ${hint ? `<small>${hint}</small>` : ""}
     </div>
   `;
 }
@@ -968,18 +1052,45 @@ function quickAction(iconName, title, subtitle, attribute) {
   `;
 }
 
+function renderMobileTabbar() {
+  const tabs = [
+    ["dashboard", "首页", "home"],
+    ["bills", "记账", "wallet"],
+    ["tasks", "提醒", "bell"],
+    ["diary", "日记", "book"],
+    ["settings", "我的", "user"],
+  ];
+  return `
+    <nav class="mobile-tabbar" aria-label="底部导航">
+      ${tabs
+        .map(
+          ([route, label, iconName]) => `
+            <button class="tab-button ${state.route === route ? "is-active" : ""}"
+              type="button"
+              data-route="${route}">
+              ${icon(iconName)}
+              <span>${label}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </nav>
+  `;
+}
+
 function renderDailyChart(items, extraClass = "") {
   if (!items.length) {
     return empty("暂无统计数据。");
   }
   const values = items.map((item) => Number(item.total_expense ?? 0));
   const max = Math.max(...values, 1);
+  const maxHeight = extraClass.includes("home-chart") ? 54 : 170;
   return `
     <div class="chart ${extraClass}" role="list" aria-label="本月每日支出">
       ${items
         .map((item, index) => {
           const value = Number(item.total_expense ?? 0);
-          const height = Math.max(8, Math.round((value / max) * 170));
+          const height = Math.max(8, Math.round((value / max) * maxHeight));
           const date = item.date ?? `第 ${index + 1} 天`;
           return `
             <button class="chart-bar" type="button" role="listitem" aria-label="${date} 支出 ${money(value)}">
@@ -1023,7 +1134,7 @@ function renderBillList(bills) {
 function renderBillFilters() {
   const filters = state.billFilters;
   return `
-    <form class="filter-form" data-bill-filter>
+    <form class="mobile-filter-form" data-bill-filter>
       <div class="field">
         <label for="filter_year">年份</label>
         <input id="filter_year" name="year" type="number" min="1970" max="2100" placeholder="全部"
@@ -1057,7 +1168,7 @@ function renderBillFilters() {
           value="${escapeHtml(filters.q)}" />
       </div>
       <div class="filter-actions">
-        <button class="button" type="submit">${icon("search")}筛选</button>
+        <button class="button primary" type="submit">${icon("search")}筛选</button>
         <button class="button ghost" type="button" data-reset-bill-filters>${icon("reset")}清空</button>
       </div>
     </form>
@@ -1104,6 +1215,44 @@ function renderBillsTable(bills) {
             .join("")}
         </tbody>
       </table>
+    </div>
+  `;
+}
+
+function renderBillFeed(bills) {
+  return `
+    <div class="bill-feed">
+      ${bills
+        .map(
+          (bill) => `
+            <article class="bill-feed-item">
+              <span class="bill-feed-icon">${icon(iconForBill(bill))}</span>
+              <div class="bill-feed-main">
+                <div class="bill-feed-topline">
+                  <h2>${escapeHtml(bill.merchant)}</h2>
+                  <span class="amount ${bill.transaction_type}">${money(bill.amount)}</span>
+                </div>
+                <p class="item-meta">
+                  ${escapeHtml(bill.category)}
+                  · ${labelTransaction(bill.transaction_type)}
+                  · ${formatDate(bill.paid_at)}
+                </p>
+                ${bill.note ? `<p class="bill-note">${escapeHtml(bill.note)}</p>` : ""}
+              </div>
+              <div class="bill-feed-actions">
+                <button class="icon-button" type="button" data-edit-bill="${bill.id}"
+                  aria-label="编辑 ${escapeHtml(bill.merchant)}" title="编辑">
+                  ${icon("edit")}
+                </button>
+                <button class="icon-button danger" type="button" data-delete-bill="${bill.id}"
+                  aria-label="删除 ${escapeHtml(bill.merchant)}" title="删除">
+                  ${icon("trash")}
+                </button>
+              </div>
+            </article>
+          `,
+        )
+        .join("")}
     </div>
   `;
 }
@@ -1413,11 +1562,6 @@ function empty(message) {
   return `<p class="empty">${escapeHtml(message)}</p>`;
 }
 
-function pendingCandidateCount(dashboard) {
-  return Number(dashboard.pending_bill_candidate_count ?? 0)
-    + Number(dashboard.pending_task_candidate_count ?? 0);
-}
-
 function money(value) {
   const number = Number(value ?? 0);
   return new Intl.NumberFormat("zh-CN", {
@@ -1457,6 +1601,17 @@ function labelTransaction(value) {
     transfer: "转账",
     top_up: "充值",
   }[value] ?? value;
+}
+
+function iconForBill(bill) {
+  if (bill.transaction_type === "income") return "income";
+  if (bill.transaction_type === "refund") return "refresh";
+  const category = String(bill.category ?? "").toLowerCase();
+  if (category.includes("餐") || category.includes("饮") || category.includes("food")) return "utensils";
+  if (category.includes("交通") || category.includes("transport")) return "transport";
+  if (category.includes("购物") || category.includes("shop")) return "shopping";
+  if (category.includes("医疗") || category.includes("medical")) return "medical";
+  return "wallet";
 }
 
 function transactionOptions(selectedValue = "") {
@@ -1516,6 +1671,7 @@ function taskTargetText(task) {
 
 function icon(name) {
   const paths = {
+    home: '<path d="M4 11.5 12 5l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-8.5z"></path>',
     layout: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="3" y="14" width="18" height="7"></rect>',
     receipt: '<path d="M6 3h12v18l-2-1.2-2 1.2-2-1.2-2 1.2-2-1.2L6 21V3z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h4"></path>',
     check: '<path d="M4 12l5 5L20 6"></path>',
@@ -1526,10 +1682,18 @@ function icon(name) {
     reset: '<path d="M4 7h11a5 5 0 1 1-3.5 8.5"></path><path d="M4 7l4-4"></path><path d="M4 7l4 4"></path>',
     edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="M13.5 6.5l4 4"></path>',
     wallet: '<path d="M4 7h14a2 2 0 0 1 2 2v10H4V7z"></path><path d="M4 7V5a2 2 0 0 1 2-2h10v4"></path><path d="M16 13h4"></path>',
+    income: '<path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path><path d="M5 21h14"></path>',
+    utensils: '<path d="M4 3v8"></path><path d="M8 3v8"></path><path d="M4 7h4"></path><path d="M6 11v10"></path><path d="M15 3v18"></path><path d="M15 3c3 2 4 5 2 8"></path>',
+    transport: '<path d="M6 17h12l2-7H4l2 7z"></path><path d="M8 17v2"></path><path d="M16 17v2"></path><path d="M7 10l1.5-4h7L17 10"></path>',
+    shopping: '<path d="M6 8h14l-2 11H8L6 8z"></path><path d="M6 8 5 4H3"></path><path d="M9 12h7"></path>',
+    medical: '<path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6V4z"></path>',
     mic: '<path d="M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"></path><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path>',
     trash: '<path d="M4 7h16"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M6 7l1 14h10l1-14"></path><path d="M9 7V4h6v3"></path>',
     "check-circle": '<circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path>',
     clock: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
+    bell: '<path d="M6 10a6 6 0 0 1 12 0c0 4 2 5 2 7H4c0-2 2-3 2-7z"></path><path d="M10 21h4"></path>',
+    book: '<path d="M5 4h8a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3V4z"></path><path d="M16 7h3v13h-3"></path><path d="M8 8h4"></path><path d="M8 12h4"></path>',
+    user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
     download: '<path d="M12 3v12"></path><path d="M7 10l5 5 5-5"></path><path d="M5 21h14"></path>',
     upload: '<path d="M12 21V9"></path><path d="M7 14l5-5 5 5"></path><path d="M5 3h14"></path>',
     close: '<path d="M6 6l12 12"></path><path d="M18 6L6 18"></path>',
