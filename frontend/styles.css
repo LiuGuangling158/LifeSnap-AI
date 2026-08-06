@@ -1042,6 +1042,746 @@ button {
   min-height: 110px;
 }
 
+.diary-page {
+  gap: 12px;
+}
+
+.diary-page .surface {
+  border-color: #e1ece6;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 14px rgba(31, 39, 35, 0.06);
+}
+
+.diary-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 192px;
+  align-items: center;
+  min-height: 192px;
+  overflow: hidden;
+  padding: 15px 2px 3px;
+}
+
+.diary-title {
+  margin: 0;
+  color: #17243a;
+  font-size: 39px;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.diary-subtitle {
+  margin: 15px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.diary-hero-art {
+  position: relative;
+  min-height: 168px;
+}
+
+.diary-window-art {
+  position: absolute;
+  right: 76px;
+  top: 4px;
+  width: 86px;
+  height: 80px;
+  border: 4px solid #e8f4ef;
+  border-radius: 44px 44px 8px 8px;
+  background: #fbfffd;
+  opacity: 0.9;
+}
+
+.diary-window-art::before {
+  position: absolute;
+  inset: 0;
+  border-right: 3px solid #d9eee7;
+  border-bottom: 3px solid #d9eee7;
+  content: "";
+}
+
+.diary-window-art::after {
+  position: absolute;
+  right: 20px;
+  top: 24px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #f7c85f;
+  content: "";
+}
+
+.diary-plant {
+  position: absolute;
+  bottom: 29px;
+  width: 27px;
+  height: 82px;
+}
+
+.diary-plant::before,
+.diary-plant::after {
+  position: absolute;
+  width: 19px;
+  height: 38px;
+  border-radius: 999px 999px 4px 999px;
+  background: #86d8b6;
+  content: "";
+}
+
+.diary-plant::before {
+  top: 2px;
+  left: 0;
+  transform: rotate(-30deg);
+}
+
+.diary-plant::after {
+  top: 35px;
+  left: 11px;
+  transform: rotate(33deg);
+}
+
+.diary-plant-left {
+  right: 164px;
+}
+
+.diary-plant-right {
+  right: 0;
+  transform: scaleX(-1);
+}
+
+.diary-cup-art {
+  position: absolute;
+  right: 144px;
+  bottom: 18px;
+  width: 37px;
+  height: 34px;
+  border: 2px solid #39b98f;
+  border-radius: 4px 4px 12px 12px;
+  background: #54cfa9;
+}
+
+.diary-cup-art::before {
+  position: absolute;
+  top: 8px;
+  right: -13px;
+  width: 13px;
+  height: 15px;
+  border: 3px solid #39b98f;
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  content: "";
+}
+
+.diary-mascot-art {
+  position: absolute;
+  right: 82px;
+  bottom: 12px;
+  width: 67px;
+  height: 58px;
+  border: 1px solid #d7eee4;
+  border-radius: 40px 40px 22px 22px;
+  background: #fffefa;
+  box-shadow: var(--shadow-soft);
+}
+
+.diary-mascot-art::before {
+  position: absolute;
+  top: 26px;
+  left: 22px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #23302a;
+  box-shadow: 22px 0 #23302a;
+  content: "";
+}
+
+.diary-mascot-art::after {
+  position: absolute;
+  left: 31px;
+  top: 38px;
+  width: 12px;
+  height: 6px;
+  border-bottom: 2px solid #23302a;
+  border-radius: 0 0 12px 12px;
+  content: "";
+}
+
+.diary-book-art-hero {
+  position: absolute;
+  right: 28px;
+  bottom: 29px;
+  width: 58px;
+  height: 62px;
+  border: 2px solid #67c9ad;
+  border-radius: var(--radius);
+  background: #58cead;
+  transform: rotate(8deg);
+}
+
+.diary-book-art-hero::before {
+  position: absolute;
+  top: 18px;
+  left: 12px;
+  width: 32px;
+  height: 2px;
+  background: #dff8ee;
+  content: "";
+  box-shadow: 0 11px 0 #dff8ee, 0 22px 0 #dff8ee;
+}
+
+.diary-pencil-art {
+  position: absolute;
+  right: 2px;
+  bottom: 14px;
+  width: 8px;
+  height: 72px;
+  border-radius: 999px;
+  background: #31a88d;
+  transform: rotate(34deg);
+}
+
+.diary-period-panel {
+  padding: 12px;
+}
+
+.diary-period-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  border-radius: var(--radius);
+  background: #f4f5f4;
+  padding: 3px;
+}
+
+.diary-period-tab {
+  min-height: 39px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: #33413b;
+  font-weight: 760;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion),
+    transform var(--motion),
+    box-shadow var(--motion);
+}
+
+.diary-period-tab:hover {
+  border-color: #c4cec5;
+  background: #f7faf7;
+  transform: translateY(-1px);
+}
+
+.diary-period-tab.is-active {
+  border-color: #10a37f;
+  background: #10b98f;
+  color: white;
+  box-shadow: 0 2px 8px rgba(16, 163, 127, 0.16);
+}
+
+.diary-mood-section,
+.diary-entry-section,
+.diary-gallery-section {
+  padding: 15px;
+}
+
+.diary-section-header,
+.diary-entry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diary-section-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.diary-section-title .section-title {
+  min-width: 0;
+}
+
+.diary-icon-button,
+.diary-more {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: #f6f7f6;
+  color: #52615b;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.diary-icon-button:hover,
+.diary-more:hover {
+  border-color: #c4cec5;
+  background: #f7faf7;
+  transform: translateY(-1px);
+}
+
+.diary-mood-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) 72px 72px 78px;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.diary-mood-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  border-radius: var(--radius);
+  background: #eef9f5;
+  padding: 17px 14px;
+}
+
+.diary-face {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #f6cc63;
+}
+
+.diary-face::before {
+  position: absolute;
+  top: 21px;
+  left: 17px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #23302a;
+  box-shadow: 17px 0 #23302a;
+  content: "";
+}
+
+.diary-face::after {
+  position: absolute;
+  left: 18px;
+  top: 34px;
+  width: 22px;
+  height: 10px;
+  border-bottom: 3px solid #23302a;
+  border-radius: 0 0 20px 20px;
+  content: "";
+}
+
+.diary-face.calm {
+  background: #aee3d2;
+}
+
+.diary-face.tired {
+  background: #dce5df;
+}
+
+.diary-mood-copy {
+  min-width: 0;
+}
+
+.diary-mood-copy div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diary-mood-copy strong {
+  color: #17243a;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.diary-quality-pill {
+  border-radius: var(--radius);
+  background: #dff8ee;
+  color: #10a37f;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.diary-mood-copy p {
+  margin: 9px 0 0;
+  color: #52615b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diary-mini-stat,
+.diary-index {
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  text-align: center;
+}
+
+.diary-mini-stat span,
+.diary-index span {
+  color: #53625d;
+  font-size: 12px;
+}
+
+.diary-mini-stat strong {
+  margin-top: 8px;
+  color: #17243a;
+  font-size: 30px;
+  line-height: 1.05;
+}
+
+.diary-mini-stat small,
+.diary-index small {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.diary-ring {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  margin-top: 6px;
+}
+
+.diary-ring svg {
+  width: 68px;
+  height: 68px;
+}
+
+.diary-ring .ring-track,
+.diary-ring .ring-value {
+  stroke-width: 10;
+}
+
+.diary-ring strong {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #17243a;
+  font-size: 17px;
+}
+
+.diary-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diary-entry-meta span {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  border-radius: var(--radius);
+  padding: 0 7px;
+}
+
+.diary-entry-meta .is-soft {
+  background: #e4f8f0;
+  color: #10a37f;
+  font-weight: 720;
+}
+
+.diary-entry-body {
+  margin-top: 13px;
+  color: #21304a;
+  font-size: 14px;
+  line-height: 1.82;
+}
+
+.diary-entry-body p {
+  margin: 0 0 5px;
+}
+
+.diary-gallery-section .button.ghost {
+  width: auto;
+  min-height: 32px;
+  padding: 0 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.diary-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 13px;
+}
+
+.diary-photo-card {
+  position: relative;
+  min-height: 96px;
+  overflow: hidden;
+  border: 1px solid #dfe9e3;
+  border-radius: var(--radius);
+  background: #edf7f2;
+  color: transparent;
+  padding: 0;
+  transition:
+    border-color var(--motion),
+    transform var(--motion),
+    box-shadow var(--motion);
+}
+
+.diary-photo-card:hover {
+  border-color: #c4d9cf;
+  box-shadow: var(--shadow-soft);
+  transform: translateY(-1px);
+}
+
+.diary-photo-card > span:last-child {
+  position: absolute;
+  left: 8px;
+  bottom: 7px;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.78);
+  color: #38554c;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.photo-scene {
+  position: absolute;
+  inset: 0;
+}
+
+.diary-photo-card.coffee .photo-scene::before {
+  position: absolute;
+  left: 20px;
+  bottom: 22px;
+  width: 58px;
+  height: 35px;
+  border: 4px solid #65c8ac;
+  border-radius: 0 0 28px 28px;
+  background: #f7fbf7;
+  content: "";
+}
+
+.diary-photo-card.coffee .photo-scene::after {
+  position: absolute;
+  left: 28px;
+  bottom: 55px;
+  width: 52px;
+  height: 12px;
+  border-radius: 50%;
+  background: #b8844a;
+  content: "";
+  box-shadow: 55px -28px 0 -8px #86d8b6;
+}
+
+.diary-photo-card.window {
+  background: #f5efe4;
+}
+
+.diary-photo-card.window .photo-scene::before {
+  position: absolute;
+  inset: 16px 34px 34px 34px;
+  border: 3px solid #f5c767;
+  border-radius: var(--radius);
+  background: #fff8e7;
+  content: "";
+}
+
+.diary-photo-card.window .photo-scene::after {
+  position: absolute;
+  right: 24px;
+  bottom: 22px;
+  width: 40px;
+  height: 40px;
+  border-radius: 22px 22px 14px 14px;
+  background: #fffefa;
+  content: "";
+  box-shadow: -58px -8px 0 -9px #8edfc7;
+}
+
+.diary-photo-card.desk {
+  background: #f1f5ed;
+}
+
+.diary-photo-card.desk .photo-scene::before {
+  position: absolute;
+  right: 26px;
+  top: 18px;
+  width: 45px;
+  height: 16px;
+  border-radius: 16px 16px 4px 4px;
+  background: #54cfa9;
+  content: "";
+  transform: rotate(-16deg);
+}
+
+.diary-photo-card.desk .photo-scene::after {
+  position: absolute;
+  left: 21px;
+  bottom: 24px;
+  width: 78px;
+  height: 13px;
+  border-radius: 4px;
+  background: #d7bc73;
+  content: "";
+  box-shadow: 5px -15px 0 #8a9d7a, 54px -38px 0 -16px #86d8b6;
+}
+
+.ai-diary-panel {
+  overflow: hidden;
+  border: 1px solid #d9e9fb;
+  border-radius: var(--radius);
+  background: #eef7ff;
+  box-shadow: 0 4px 14px rgba(31, 39, 35, 0.05);
+  padding: 14px;
+}
+
+.ai-diary-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.ai-diary-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 10px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.ai-diary-prompts {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-diary-prompt {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 35px;
+  border: 1px solid rgba(207, 224, 247, 0.72);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.78);
+  color: #24364f;
+  padding: 0 10px;
+  text-align: left;
+  transition:
+    border-color var(--motion),
+    background-color var(--motion),
+    transform var(--motion);
+}
+
+.ai-diary-prompt:hover {
+  border-color: #c4d8f4;
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.ai-diary-prompt span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-diary-prompt .icon:first-child {
+  color: #10a37f;
+}
+
+.ai-diary-bot {
+  position: relative;
+  width: 82px;
+  height: 84px;
+}
+
+.ai-diary-bot .bot-head {
+  top: 14px;
+}
+
+.ai-diary-bot .bot-ear {
+  top: 23px;
+}
+
+.ai-diary-bot .bot-body {
+  bottom: 4px;
+}
+
+.diary-action-dock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 136px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e0ebe5;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 14px rgba(31, 39, 35, 0.06);
+  padding: 10px;
+}
+
+.diary-dock-side,
+.diary-dock-main {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion),
+    transform var(--motion),
+    box-shadow var(--motion);
+}
+
+.diary-dock-side {
+  background: #edf7f4;
+  color: #10a37f;
+  font-weight: 720;
+}
+
+.diary-dock-main {
+  background: #10b98f;
+  color: white;
+  font-size: 18px;
+  font-weight: 780;
+  box-shadow: 0 4px 12px rgba(16, 163, 127, 0.18);
+}
+
+.diary-dock-side:hover,
+.diary-dock-main:hover {
+  transform: translateY(-1px);
+}
+
+.diary-dock-side:hover {
+  border-color: #c8e8db;
+  background: #e3f4ee;
+}
+
+.diary-dock-main:hover {
+  background: #0f9f7b;
+}
+
 .quick-dock {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2198,6 +2938,680 @@ button {
   background: #0f9f7b;
 }
 
+.reminder-page {
+  gap: 12px;
+}
+
+.reminder-page .surface {
+  border-color: #e1ece6;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 14px rgba(31, 39, 35, 0.06);
+}
+
+.reminder-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 188px;
+  align-items: center;
+  min-height: 190px;
+  overflow: hidden;
+  padding: 16px 2px 4px;
+}
+
+.reminder-title {
+  margin: 0;
+  color: #17243a;
+  font-size: 39px;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.reminder-subtitle {
+  margin: 15px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.reminder-hero-art {
+  position: relative;
+  min-height: 168px;
+}
+
+.reminder-calendar-art {
+  position: absolute;
+  right: 5px;
+  bottom: 20px;
+  width: 78px;
+  height: 76px;
+  border: 2px solid #bfe9dc;
+  border-radius: var(--radius);
+  background: #f8fffc;
+  transform: rotate(3deg);
+}
+
+.reminder-calendar-art::before {
+  position: absolute;
+  top: -12px;
+  left: 10px;
+  width: 54px;
+  height: 14px;
+  border: 5px solid #55c7a3;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  content: "";
+}
+
+.reminder-calendar-art::after {
+  position: absolute;
+  top: 24px;
+  left: 18px;
+  width: 37px;
+  height: 22px;
+  border-top: 3px solid #58cead;
+  border-bottom: 3px solid #58cead;
+  content: "";
+  box-shadow: 0 13px 0 -4px #58cead;
+}
+
+.reminder-bell-art {
+  position: absolute;
+  right: 108px;
+  bottom: 65px;
+  width: 48px;
+  height: 46px;
+  border-radius: 25px 25px 16px 16px;
+  background: #58cead;
+  box-shadow: 0 4px 10px rgba(31, 39, 35, 0.08);
+}
+
+.reminder-bell-art::before {
+  position: absolute;
+  top: -12px;
+  left: 17px;
+  width: 14px;
+  height: 14px;
+  border: 4px solid #58cead;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  content: "";
+}
+
+.reminder-bell-art::after {
+  position: absolute;
+  left: 16px;
+  bottom: -8px;
+  width: 18px;
+  height: 8px;
+  border-radius: 0 0 12px 12px;
+  background: #39b98f;
+  content: "";
+}
+
+.reminder-mascot {
+  position: absolute;
+  right: 70px;
+  bottom: 10px;
+  width: 68px;
+  height: 58px;
+  border: 1px solid #d7eee4;
+  border-radius: 40px 40px 22px 22px;
+  background: #fffefa;
+  box-shadow: var(--shadow-soft);
+}
+
+.reminder-mascot::before {
+  position: absolute;
+  top: 26px;
+  left: 22px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #23302a;
+  box-shadow: 22px 0 #23302a;
+  content: "";
+}
+
+.reminder-mascot::after {
+  position: absolute;
+  left: 31px;
+  top: 38px;
+  width: 12px;
+  height: 6px;
+  border-bottom: 2px solid #23302a;
+  border-radius: 0 0 12px 12px;
+  content: "";
+}
+
+.reminder-leaf {
+  position: absolute;
+  bottom: 30px;
+  width: 28px;
+  height: 78px;
+}
+
+.reminder-leaf::before,
+.reminder-leaf::after {
+  position: absolute;
+  width: 20px;
+  height: 37px;
+  border-radius: 999px 999px 4px 999px;
+  background: #86d8b6;
+  content: "";
+}
+
+.reminder-leaf::before {
+  top: 3px;
+  left: 0;
+  transform: rotate(-28deg);
+}
+
+.reminder-leaf::after {
+  top: 34px;
+  left: 11px;
+  transform: rotate(34deg);
+}
+
+.reminder-leaf-left {
+  left: 1px;
+}
+
+.reminder-leaf-right {
+  right: 0;
+  transform: scaleX(-1);
+}
+
+.reminder-overview-panel {
+  display: grid;
+  gap: 13px;
+  padding: 14px;
+}
+
+.reminder-view-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 44px;
+  gap: 8px;
+}
+
+.reminder-view-tab,
+.reminder-calendar-button,
+.reminder-category-tab,
+.reminder-sort-button,
+.reminder-more-button {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: #f6f7f6;
+  color: #33413b;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion),
+    transform var(--motion),
+    box-shadow var(--motion);
+}
+
+.reminder-view-tab {
+  min-height: 38px;
+  font-weight: 760;
+}
+
+.reminder-calendar-button {
+  display: grid;
+  min-height: 38px;
+  place-items: center;
+}
+
+.reminder-category-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.reminder-category-tab {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 720;
+}
+
+.reminder-view-tab:hover,
+.reminder-calendar-button:hover,
+.reminder-category-tab:hover,
+.reminder-sort-button:hover,
+.reminder-more-button:hover {
+  border-color: #c4cec5;
+  background: #f7faf7;
+  transform: translateY(-1px);
+}
+
+.reminder-view-tab.is-active,
+.reminder-category-tab.is-active {
+  border-color: #10a37f;
+  background: #10b98f;
+  color: white;
+  box-shadow: 0 2px 8px rgba(16, 163, 127, 0.16);
+}
+
+.reminder-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 112px;
+  align-items: center;
+  border: 1px solid #e1e8e3;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 16px 0;
+}
+
+.reminder-stat {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  padding: 0 13px;
+  text-align: center;
+}
+
+.reminder-stat span,
+.reminder-progress-summary span {
+  color: #53625d;
+  font-size: 12px;
+}
+
+.reminder-stat strong {
+  display: block;
+  margin-top: 9px;
+  color: #17243a;
+  font-size: 31px;
+  line-height: 1.05;
+}
+
+.reminder-stat.success strong {
+  color: #10a37f;
+}
+
+.reminder-stat.danger strong {
+  color: #d44848;
+}
+
+.reminder-stat small {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.reminder-progress-summary {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 8px;
+  text-align: center;
+}
+
+.reminder-progress-figure {
+  width: 78px;
+  height: 78px;
+}
+
+.reminder-progress-figure .progress-ring {
+  width: 78px;
+  height: 78px;
+}
+
+.reminder-progress-figure strong {
+  font-size: 18px;
+}
+
+.reminder-progress-summary > strong {
+  color: #10a37f;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reminder-list-panel {
+  overflow: hidden;
+  padding: 15px 14px 8px;
+}
+
+.reminder-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+
+.reminder-sort-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reminder-list {
+  display: grid;
+}
+
+.reminder-item {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto 34px;
+  gap: 10px;
+  align-items: center;
+  min-height: 76px;
+  border-top: 1px solid var(--line);
+  padding: 10px 0;
+  transition:
+    background-color var(--motion),
+    transform var(--motion);
+}
+
+.reminder-item:first-child {
+  border-top: 0;
+}
+
+.reminder-item:hover {
+  background: #fbfdfb;
+  transform: translateY(-1px);
+}
+
+.reminder-item-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+}
+
+.reminder-item-icon.life {
+  background: #fff4dc;
+  color: #b7791f;
+}
+
+.reminder-item-icon.work {
+  background: #e4f8f0;
+  color: #10a37f;
+}
+
+.reminder-item-icon.study {
+  background: #edf5ff;
+  color: #2f6fd6;
+}
+
+.reminder-item-icon.personal {
+  background: #eef3f1;
+  color: #596b63;
+}
+
+.reminder-item-main {
+  min-width: 0;
+}
+
+.reminder-item-title-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.reminder-item h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #17243a;
+  font-size: 15px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reminder-item p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reminder-badge,
+.reminder-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+
+.reminder-badge {
+  min-height: 22px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.reminder-badge.danger {
+  background: #fff0f0;
+  color: #d44848;
+}
+
+.reminder-tag {
+  min-height: 27px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.reminder-tag.life {
+  background: #fff4dc;
+  color: #9a6815;
+}
+
+.reminder-tag.work {
+  background: #e4f8f0;
+  color: #10a37f;
+}
+
+.reminder-tag.study {
+  background: #edf5ff;
+  color: #2f6fd6;
+}
+
+.reminder-tag.personal {
+  background: #eef3f1;
+  color: #596b63;
+}
+
+.reminder-tag.urgent {
+  background: #fff0f0;
+  color: #d44848;
+}
+
+.reminder-tag.done {
+  background: #edf7f4;
+  color: #10a37f;
+}
+
+.reminder-check {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #b8c1c6;
+  border-radius: 50%;
+  background: transparent;
+  color: white;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.reminder-check:hover {
+  border-color: #10a37f;
+  transform: translateY(-1px);
+}
+
+.reminder-check.is-done {
+  border-color: #10b98f;
+  background: #10b98f;
+}
+
+.reminder-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.reminder-empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+
+.reminder-empty .button {
+  min-height: 34px;
+}
+
+.reminder-more-button {
+  display: inline-flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 720;
+}
+
+.ai-reminder-panel {
+  overflow: hidden;
+  border: 1px solid #d9e9fb;
+  border-radius: var(--radius);
+  background: #eef7ff;
+  box-shadow: 0 4px 14px rgba(31, 39, 35, 0.05);
+  padding: 14px 14px 12px;
+}
+
+.ai-reminder-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.ai-reminder-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 10px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.ai-reminder-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-reminder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid rgba(207, 224, 247, 0.72);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.78);
+  color: #24364f;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-reminder-row .icon {
+  color: #2f6fd6;
+}
+
+.ai-reminder-bot {
+  position: relative;
+  width: 82px;
+  height: 84px;
+}
+
+.ai-reminder-bot .bot-head {
+  top: 14px;
+}
+
+.ai-reminder-bot .bot-ear {
+  top: 23px;
+}
+
+.ai-reminder-bot .bot-body {
+  bottom: 4px;
+}
+
+.reminder-action-dock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 136px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e0ebe5;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 14px rgba(31, 39, 35, 0.06);
+  padding: 10px;
+}
+
+.reminder-dock-side,
+.reminder-dock-main {
+  display: inline-flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    color var(--motion),
+    transform var(--motion),
+    box-shadow var(--motion);
+}
+
+.reminder-dock-side {
+  background: #edf7f4;
+  color: #10a37f;
+  font-weight: 720;
+}
+
+.reminder-dock-main {
+  background: #10b98f;
+  color: white;
+  font-size: 18px;
+  font-weight: 780;
+  box-shadow: 0 4px 12px rgba(16, 163, 127, 0.18);
+}
+
+.reminder-dock-side:hover,
+.reminder-dock-main:hover {
+  transform: translateY(-1px);
+}
+
+.reminder-dock-side:hover {
+  border-color: #c8e8db;
+  background: #e3f4ee;
+}
+
+.reminder-dock-main:hover {
+  background: #0f9f7b;
+}
+
 .task-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
@@ -2791,6 +4205,248 @@ button:focus-visible {
 
   .bill-dock-side,
   .bill-dock-main {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .reminder-hero {
+    grid-template-columns: minmax(0, 1fr) 146px;
+    min-height: 170px;
+    padding-top: 8px;
+  }
+
+  .reminder-title {
+    font-size: 36px;
+  }
+
+  .reminder-subtitle {
+    font-size: 14px;
+  }
+
+  .reminder-hero-art {
+    transform: scale(0.88);
+    transform-origin: right center;
+  }
+
+  .reminder-view-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 40px;
+    gap: 7px;
+  }
+
+  .reminder-view-tab,
+  .reminder-calendar-button {
+    min-height: 36px;
+  }
+
+  .reminder-category-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .reminder-category-tab {
+    gap: 4px;
+    font-size: 13px;
+  }
+
+  .reminder-category-tab .icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .reminder-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 92px;
+  }
+
+  .reminder-stat {
+    padding: 0 7px;
+  }
+
+  .reminder-stat strong {
+    font-size: 27px;
+  }
+
+  .reminder-stat small,
+  .reminder-progress-summary span,
+  .reminder-progress-summary > strong {
+    font-size: 11px;
+  }
+
+  .reminder-progress-figure,
+  .reminder-progress-figure .progress-ring {
+    width: 70px;
+    height: 70px;
+  }
+
+  .reminder-list-panel {
+    padding: 14px 13px 8px;
+  }
+
+  .reminder-item {
+    grid-template-columns: 44px minmax(0, 1fr) auto 32px;
+    gap: 8px;
+  }
+
+  .reminder-item-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .reminder-tag {
+    max-width: 74px;
+    overflow: hidden;
+    padding: 0 7px;
+    text-overflow: ellipsis;
+  }
+
+  .reminder-empty {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .reminder-empty .button {
+    grid-column: 1 / -1;
+    width: auto;
+    justify-self: start;
+  }
+
+  .ai-reminder-body {
+    grid-template-columns: minmax(0, 1fr) 70px;
+  }
+
+  .ai-reminder-bot {
+    transform: scale(0.82);
+    transform-origin: right bottom;
+  }
+
+  .reminder-action-dock {
+    grid-template-columns: minmax(0, 1fr) 116px minmax(0, 1fr);
+  }
+
+  .reminder-dock-side,
+  .reminder-dock-main {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .diary-hero {
+    grid-template-columns: minmax(0, 1fr) 146px;
+    min-height: 170px;
+    padding-top: 8px;
+  }
+
+  .diary-title {
+    font-size: 36px;
+  }
+
+  .diary-subtitle {
+    font-size: 14px;
+  }
+
+  .diary-hero-art {
+    transform: scale(0.86);
+    transform-origin: right center;
+  }
+
+  .diary-period-panel {
+    padding: 11px;
+  }
+
+  .diary-period-tab {
+    min-height: 37px;
+  }
+
+  .diary-mood-section,
+  .diary-entry-section,
+  .diary-gallery-section {
+    padding: 14px 13px;
+  }
+
+  .diary-mood-body {
+    grid-template-columns: minmax(0, 1.45fr) 58px 58px 72px;
+    gap: 7px;
+  }
+
+  .diary-mood-card {
+    gap: 10px;
+    padding: 13px 10px;
+  }
+
+  .diary-face {
+    width: 48px;
+    height: 48px;
+  }
+
+  .diary-face::before {
+    top: 18px;
+    left: 14px;
+  }
+
+  .diary-face::after {
+    left: 15px;
+    top: 29px;
+  }
+
+  .diary-mood-copy strong {
+    font-size: 23px;
+  }
+
+  .diary-quality-pill,
+  .diary-mood-copy p,
+  .diary-mini-stat span,
+  .diary-mini-stat small,
+  .diary-index span,
+  .diary-index small {
+    font-size: 11px;
+  }
+
+  .diary-mini-stat strong {
+    font-size: 24px;
+  }
+
+  .diary-ring,
+  .diary-ring svg {
+    width: 60px;
+    height: 60px;
+  }
+
+  .diary-ring strong {
+    font-size: 15px;
+  }
+
+  .diary-entry-header {
+    display: grid;
+  }
+
+  .diary-entry-meta {
+    justify-content: flex-start;
+  }
+
+  .diary-entry-body {
+    font-size: 13px;
+  }
+
+  .diary-photo-grid {
+    gap: 8px;
+  }
+
+  .diary-photo-card {
+    min-height: 86px;
+  }
+
+  .ai-diary-body {
+    grid-template-columns: minmax(0, 1fr) 70px;
+  }
+
+  .ai-diary-bot {
+    transform: scale(0.82);
+    transform-origin: right bottom;
+  }
+
+  .diary-action-dock {
+    grid-template-columns: minmax(0, 1fr) 116px minmax(0, 1fr);
+  }
+
+  .diary-dock-side,
+  .diary-dock-main {
     min-height: 44px;
     font-size: 13px;
   }

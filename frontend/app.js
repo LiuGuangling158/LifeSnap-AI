@@ -51,6 +51,7 @@ const state = {
   editingBill: null,
   deleteTarget: null,
   taskModalOpen: false,
+  diaryModalOpen: false,
   snoozeTarget: null,
   settingsConfirm: null,
   billFilters: {
@@ -64,6 +65,10 @@ const state = {
     view: "today",
     category: "",
   },
+  diaryFilters: {
+    period: "today",
+  },
+  diaryDraft: null,
   billListMeta: {
     total: 0,
     page: 1,
@@ -109,8 +114,9 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-diary-placeholder]")) {
-    showToast("日记功能会在下一步接入，当前先保留入口。");
+  if (event.target.closest("[data-diary-placeholder], [data-open-diary-modal]")) {
+    state.diaryModalOpen = true;
+    render();
     return;
   }
 
@@ -126,6 +132,43 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-bill-filter-panel]")) {
     showToast("更细的筛选面板会在下一步补齐。");
+    return;
+  }
+
+  const diaryPeriodButton = event.target.closest("[data-diary-period]");
+  if (diaryPeriodButton) {
+    state.diaryFilters.period = diaryPeriodButton.dataset.diaryPeriod || "today";
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-diary-calendar-placeholder]")) {
+    showToast("日记日历会在后续接入完整日期选择。");
+    return;
+  }
+
+  if (event.target.closest("[data-diary-photo-placeholder]")) {
+    showToast("图片上传会在后续接入附件与相册能力。");
+    return;
+  }
+
+  if (event.target.closest("[data-diary-ai-prompt]")) {
+    showToast("AI 日记追问会在后续接入对话生成。");
+    return;
+  }
+
+  if (event.target.closest("[data-profile-notification]")) {
+    showToast("通知中心会在后续接入提醒聚合。");
+    return;
+  }
+
+  if (event.target.closest("[data-profile-preferences]")) {
+    showToast("个性化设置会在后续接入账号与偏好配置。");
+    return;
+  }
+
+  if (event.target.closest("[data-profile-placeholder]")) {
+    showToast("该个人工具会在后续接入详细配置页。");
     return;
   }
 
@@ -215,6 +258,7 @@ document.addEventListener("click", (event) => {
     state.modalOpen = false;
     state.editingBill = null;
     state.taskModalOpen = false;
+    state.diaryModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
@@ -291,6 +335,7 @@ document.addEventListener("keydown", (event) => {
       state.modalOpen
       || state.deleteTarget
       || state.taskModalOpen
+      || state.diaryModalOpen
       || state.snoozeTarget
       || state.settingsConfirm
     )
@@ -299,6 +344,7 @@ document.addEventListener("keydown", (event) => {
     state.editingBill = null;
     state.deleteTarget = null;
     state.taskModalOpen = false;
+    state.diaryModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
@@ -321,6 +367,12 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-task-form]")) {
     event.preventDefault();
     await submitTask(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-diary-form]")) {
+    event.preventDefault();
+    saveDiaryDraft(new FormData(event.target));
     return;
   }
 
@@ -474,6 +526,18 @@ async function submitTask(formData) {
     state.saving = false;
     render();
   }
+}
+
+function saveDiaryDraft(formData) {
+  state.diaryDraft = {
+    title: String(formData.get("title") || "今天的日记").trim(),
+    content: String(formData.get("content") || "").trim(),
+    mood: String(formData.get("mood") || "happy"),
+    weather: String(formData.get("weather") || "晴天").trim(),
+    created_at: new Date().toISOString(),
+  };
+  state.diaryModalOpen = false;
+  showToast("日记草稿已保存到本次前端体验。");
 }
 
 async function completeTask(taskId) {
@@ -699,7 +763,7 @@ function getRoute() {
 function render() {
   const route = routes.find((item) => item.id === state.route) ?? routes[0];
   const primaryAction = getPrimaryAction();
-  const hasCustomHeader = ["dashboard", "bills", "tasks"].includes(state.route);
+  const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "settings"].includes(state.route);
   app.innerHTML = `
     <div class="app-shell mobile-shell">
       <main class="main mobile-main">
@@ -710,6 +774,7 @@ function render() {
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
+      ${state.diaryModalOpen ? renderDiaryModal() : ""}
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""}
@@ -797,8 +862,8 @@ function renderPage() {
 
   if (state.route === "bills") return renderBillsPage();
   if (state.route === "tasks") return renderTasksPage();
-  if (state.route === "diary") return renderDiaryPage();
-  if (state.route === "settings") return renderSettingsPage();
+  if (state.route === "diary") return renderDiaryMobilePage();
+  if (state.route === "settings") return renderProfilePage();
   return renderDashboard();
 }
 
@@ -1601,6 +1666,276 @@ function iconForTask(task) {
   return task?.task_type === "reminder" ? "bell" : "check-circle";
 }
 
+function renderDiaryMobilePage() {
+  const diary = getDiarySnapshot();
+  return `
+    <div class="mobile-page diary-mobile-page diary-page">
+      <section class="diary-hero">
+        <div>
+          <h1 class="diary-title">日记</h1>
+          <p class="diary-subtitle">记录生活点滴，收藏今天的心情</p>
+        </div>
+        <div class="diary-hero-art" aria-hidden="true">
+          <span class="diary-window-art"></span>
+          <span class="diary-plant diary-plant-left"></span>
+          <span class="diary-plant diary-plant-right"></span>
+          <span class="diary-cup-art"></span>
+          <span class="diary-mascot-art"></span>
+          <span class="diary-book-art-hero"></span>
+          <span class="diary-pencil-art"></span>
+        </div>
+      </section>
+
+      <section class="surface diary-period-panel">
+        ${renderDiaryPeriodTabs()}
+      </section>
+
+      ${renderDiaryMoodSummary(diary)}
+      ${renderDiaryEntry(diary)}
+      ${renderDiaryGallery()}
+      ${renderDiaryAiAssistant()}
+      ${renderDiaryActionDock()}
+    </div>
+  `;
+}
+
+function getDiarySnapshot() {
+  const draft = state.diaryDraft;
+  const recentBills = state.bills.slice(0, 2).map((bill) => bill.merchant).filter(Boolean);
+  const pendingTasks = state.tasks.filter((task) => task.status === "pending").length;
+  return {
+    title: draft?.title || "今天的日记",
+    mood: draft?.mood || "happy",
+    moodLabel: diaryMoodLabel(draft?.mood || "happy"),
+    moodScore: draft?.mood === "calm" ? 78 : draft?.mood === "tired" ? 52 : 86,
+    weather: draft?.weather || "晴天",
+    createdAt: draft?.created_at || new Date().toISOString(),
+    streakDays: 7,
+    monthEntries: Math.max(12, Number(state.bootstrap?.data_summary?.task_count ?? 0) + 12),
+    body: draft?.content || [
+      "今天是充实又安稳的一天。",
+      recentBills.length
+        ? `记录了 ${recentBills.join("、")} 相关的小事，生活节奏正在慢慢变清楚。`
+        : "完成了一些重要安排，也给自己留了片刻安静时间。",
+      pendingTasks
+        ? `还有 ${pendingTasks} 件提醒待处理，晚上可以简单收个尾。`
+        : "今晚没有太多挂念，可以轻轻松松结束这一天。",
+      "希望明天也能保持这样的好状态。",
+    ].join("\n"),
+  };
+}
+
+function renderDiaryPeriodTabs() {
+  const tabs = [
+    ["today", "今天"],
+    ["week", "本周"],
+    ["month", "本月"],
+  ];
+  return `
+    <div class="diary-period-tabs" aria-label="日记时间范围">
+      ${tabs
+        .map(
+          ([value, label]) => `
+            <button class="diary-period-tab ${state.diaryFilters.period === value ? "is-active" : ""}"
+              type="button" data-diary-period="${value}">
+              ${label}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderDiaryMoodSummary(diary) {
+  return `
+    <section class="surface diary-mood-section">
+      <div class="diary-section-header">
+        <div class="diary-section-title">
+          <span class="panel-icon">${icon("smile")}</span>
+          <h2 class="section-title">今日心情</h2>
+        </div>
+        <button class="diary-icon-button" type="button" data-diary-calendar-placeholder aria-label="选择日记日期">
+          ${icon("calendar")}
+        </button>
+      </div>
+      <div class="diary-mood-body">
+        <div class="diary-mood-card">
+          <span class="diary-face ${escapeHtml(diary.mood)}" aria-hidden="true"></span>
+          <div class="diary-mood-copy">
+            <div>
+              <strong>${escapeHtml(diary.moodLabel)}</strong>
+              <span class="diary-quality-pill">很好</span>
+            </div>
+            <p>${diary.mood === "tired" ? "今天有点累，适合早点休息。" : "阳光正好，心情很棒。"}</p>
+          </div>
+        </div>
+        ${diaryMiniStat("连续记录", diary.streakDays, "天")}
+        ${diaryMiniStat("本月已写", diary.monthEntries, "篇")}
+        <div class="diary-index">
+          <span>心情指数</span>
+          ${renderDiaryMoodRing(diary.moodScore)}
+          <small>${diary.moodScore >= 80 ? "很好" : diary.moodScore >= 60 ? "平稳" : "需休息"}</small>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function diaryMiniStat(label, value, unit) {
+  return `
+    <div class="diary-mini-stat">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      <small>${unit}</small>
+    </div>
+  `;
+}
+
+function renderDiaryMoodRing(percent) {
+  const radius = 36;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (percent / 100) * circumference;
+  return `
+    <div class="diary-ring" aria-label="心情指数 ${percent}%">
+      <svg viewBox="0 0 92 92" aria-hidden="true">
+        <circle class="ring-track" cx="46" cy="46" r="${radius}"></circle>
+        <circle class="ring-value" cx="46" cy="46" r="${radius}"
+          stroke-dasharray="${circumference.toFixed(2)}"
+          stroke-dashoffset="${offset.toFixed(2)}"></circle>
+      </svg>
+      <strong>${percent}%</strong>
+    </div>
+  `;
+}
+
+function renderDiaryEntry(diary) {
+  const lines = diary.body.split("\n").filter(Boolean);
+  return `
+    <section class="surface diary-entry-section">
+      <div class="diary-entry-header">
+        <div class="diary-section-title">
+          <span class="panel-icon">${icon("notebook")}</span>
+          <h2 class="section-title">${escapeHtml(diary.title)}</h2>
+        </div>
+        <div class="diary-entry-meta">
+          <span>${icon("clock")}${formatDiaryTime(diary.createdAt)}</span>
+          <span>${icon("sun")}${escapeHtml(diary.weather)}</span>
+          <span class="is-soft">${icon("smile")}${escapeHtml(diary.moodLabel)}</span>
+          <button class="diary-more" type="button" data-diary-placeholder aria-label="编辑日记">
+            ${icon("more-horizontal")}
+          </button>
+        </div>
+      </div>
+      <div class="diary-entry-body">
+        ${lines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderDiaryGallery() {
+  const photos = [
+    ["coffee", "晨间咖啡"],
+    ["window", "窗边时刻"],
+    ["desk", "夜晚书桌"],
+  ];
+  return `
+    <section class="surface diary-gallery-section">
+      <div class="diary-section-header">
+        <div class="diary-section-title">
+          <span class="panel-icon">${icon("image")}</span>
+          <h2 class="section-title">今日片段</h2>
+        </div>
+        <button class="button ghost" type="button" data-diary-photo-placeholder>
+          查看全部 ${icon("chevron-right")}
+        </button>
+      </div>
+      <div class="diary-photo-grid">
+        ${photos.map(([tone, label]) => renderDiaryPhotoCard(tone, label)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderDiaryPhotoCard(tone, label) {
+  return `
+    <button class="diary-photo-card ${tone}" type="button" data-diary-photo-placeholder aria-label="${escapeHtml(label)}">
+      <span class="photo-scene" aria-hidden="true"></span>
+      <span>${escapeHtml(label)}</span>
+    </button>
+  `;
+}
+
+function renderDiaryAiAssistant() {
+  const prompts = [
+    ["heart", "今天最开心的事是什么？"],
+    ["users", "有没有想感谢的人？"],
+    ["lightbulb", "记录一下今天学到的新东西。"],
+  ];
+  return `
+    <section class="ai-diary-panel" aria-label="AI 日记助手">
+      <div class="ai-diary-title">
+        <span class="panel-icon blue">${icon("spark")}</span>
+        <h2 class="section-title">AI 日记助手</h2>
+      </div>
+      <div class="ai-diary-body">
+        <div class="ai-diary-prompts">
+          ${prompts
+            .map(
+              ([iconName, text]) => `
+                <button class="ai-diary-prompt" type="button" data-diary-ai-prompt>
+                  ${icon(iconName)}
+                  <span>${escapeHtml(text)}</span>
+                  ${icon("chevron-right")}
+                </button>
+              `,
+            )
+            .join("")}
+        </div>
+        <div class="ai-diary-bot" aria-hidden="true">
+          <span class="bot-ear left"></span>
+          <span class="bot-ear right"></span>
+          <span class="bot-head"><span></span></span>
+          <span class="bot-body"></span>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderDiaryActionDock() {
+  return `
+    <section class="diary-action-dock" aria-label="日记操作">
+      <button class="diary-dock-side" type="button" data-voice-placeholder>
+        ${icon("mic")}语音日记
+      </button>
+      <button class="diary-dock-main" type="button" data-open-diary-modal>
+        ${icon("plus")}写日记
+      </button>
+      <button class="diary-dock-side" type="button" data-diary-photo-placeholder>
+        ${icon("image")}添加图片
+      </button>
+    </section>
+  `;
+}
+
+function diaryMoodLabel(value) {
+  return {
+    happy: "开心",
+    calm: "平静",
+    tired: "疲惫",
+  }[value] ?? "开心";
+}
+
+function formatDiaryTime(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return "今天";
+  }
+  return `今天 ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 function renderDiaryPage() {
   return `
     <div class="mobile-page diary-mobile-page">
@@ -1623,6 +1958,246 @@ function renderDiaryPage() {
         </div>
       </section>
     </div>
+  `;
+}
+
+function renderProfilePage() {
+  const overview = state.billOverview ?? {};
+  const monthly = overview.monthly_statistics ?? state.bootstrap?.dashboard?.monthly_statistics ?? {};
+  const summary = state.bootstrap?.data_summary ?? {};
+  const expense = Number(monthly.total_expense ?? 0);
+  const income = Number(monthly.total_income ?? 0);
+  const netAmount = Number(monthly.net_amount ?? income - expense);
+  const completedTasks = state.tasks.filter((task) => task.status === "done").length;
+  const diaryCount = state.diaryDraft ? 1 : 0;
+
+  return `
+    <div class="mobile-page profile-mobile-page profile-page">
+      <section class="profile-hero">
+        <div class="profile-topline">
+          <h1 class="profile-title">我的</h1>
+          <div class="profile-top-actions">
+            <button class="profile-icon-button" type="button" data-profile-notification aria-label="通知中心">
+              ${icon("bell")}
+            </button>
+            <button class="profile-icon-button" type="button" data-profile-preferences aria-label="个人设置">
+              ${icon("settings")}
+            </button>
+          </div>
+        </div>
+        <div class="profile-greeting">
+          <span class="profile-avatar" aria-hidden="true">
+            <span class="avatar-face"></span>
+          </span>
+          <div class="profile-greeting-copy">
+            <h2>Hi，今天也要加油呀</h2>
+            <p>记录生活，遇见更好的自己</p>
+          </div>
+          <button class="profile-link-button" type="button" data-profile-placeholder aria-label="查看个人资料">
+            ${icon("chevron-right")}
+          </button>
+        </div>
+        <div class="profile-landscape" aria-hidden="true">
+          <span class="profile-cloud cloud-a"></span>
+          <span class="profile-cloud cloud-b"></span>
+          <span class="profile-mountain mountain-a"></span>
+          <span class="profile-mountain mountain-b"></span>
+          <span class="profile-field"></span>
+          <span class="profile-person"></span>
+          <span class="profile-leaves"></span>
+        </div>
+      </section>
+
+      ${renderProfileFinanceCard(expense, income, netAmount, monthly)}
+      ${renderProfileQuickLinks()}
+      ${renderProfileTools()}
+      ${renderProfileDataPanel(summary, completedTasks, diaryCount)}
+      ${renderProfileSafetyPanel()}
+    </div>
+  `;
+}
+
+function renderProfileFinanceCard(expense, income, netAmount, monthly) {
+  const categories = profileFinanceCategories(monthly, expense);
+  return `
+    <section class="surface profile-finance-card">
+      <div class="profile-finance-copy">
+        <p class="profile-card-label">本月总支出 ${icon("eye")}</p>
+        <strong>${money(expense)}</strong>
+        <span>本月收入 <b class="income">${money(income)}</b></span>
+        <span>结余 <b class="${netAmount >= 0 ? "income" : "expense"}">${money(netAmount)}</b></span>
+      </div>
+      <div class="profile-finance-chart">
+        ${renderProfileDonut(categories)}
+        <div class="profile-category-legend">
+          ${categories
+            .map(
+              (item, index) => `
+                <button class="profile-legend-row" type="button" aria-label="${escapeHtml(item.category)} ${item.percent}%">
+                  <i class="profile-dot dot-${(index % 5) + 1}"></i>
+                  <span>${escapeHtml(item.category)}</span>
+                  <strong>${item.percent}%</strong>
+                  <span class="chart-tooltip">
+                    <span class="tooltip-title">${escapeHtml(item.category)}</span>
+                    <span class="tooltip-value">${money(item.amount)}</span>
+                  </span>
+                </button>
+              `,
+            )
+            .join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function profileFinanceCategories(monthly, expense) {
+  const source = (monthly.category_breakdown ?? [])
+    .map((item) => ({
+      category: item.category,
+      amount: Number(item.amount ?? item.total ?? 0),
+    }))
+    .filter((item) => item.amount > 0)
+    .slice(0, 4);
+
+  if (!source.length) {
+    return [{ category: "暂无记录", amount: 0, percent: 100, empty: true }];
+  }
+
+  const total = expense > 0 ? expense : source.reduce((sum, item) => sum + item.amount, 0);
+  return source.map((item) => ({
+    ...item,
+    percent: total > 0 ? Math.max(1, Math.round((item.amount / total) * 100)) : 0,
+  }));
+}
+
+function renderProfileDonut(categories) {
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  return `
+    <div class="profile-donut" aria-label="本月支出分类占比">
+      <svg viewBox="0 0 112 112" aria-hidden="true">
+        <circle class="profile-donut-track" cx="56" cy="56" r="${radius}"></circle>
+        ${categories
+          .map((item, index) => {
+            const length = ((item.empty ? 100 : item.percent) / 100) * circumference;
+            const segment = `
+              <circle class="profile-donut-segment segment-${(index % 5) + 1} ${item.empty ? "empty" : ""}"
+                cx="56" cy="56" r="${radius}"
+                stroke-dasharray="${length.toFixed(2)} ${circumference.toFixed(2)}"
+                stroke-dashoffset="${(-offset).toFixed(2)}"></circle>
+            `;
+            offset += length;
+            return segment;
+          })
+          .join("")}
+      </svg>
+    </div>
+  `;
+}
+
+function renderProfileQuickLinks() {
+  return `
+    <section class="surface profile-shortcuts" aria-label="个人快捷入口">
+      ${profileShortcut("wallet", "记账本", "记录每一笔收支", "data-route=\"bills\"", "mint")}
+      ${profileShortcut("spark", "智能助手", "语音对话操作", "data-voice-placeholder", "blue")}
+      ${profileShortcut("calendar-check", "待办提醒", "查看事项安排", "data-route=\"tasks\"", "gold")}
+      ${profileShortcut("notebook", "日记本", "记录心情日常", "data-route=\"diary\"", "rose")}
+    </section>
+  `;
+}
+
+function profileShortcut(iconName, title, note, attribute, tone) {
+  return `
+    <button class="profile-shortcut ${tone}" type="button" ${attribute}>
+      <span>${icon(iconName)}</span>
+      <strong>${title}</strong>
+      <small>${note}</small>
+    </button>
+  `;
+}
+
+function renderProfileTools() {
+  return `
+    <section class="surface profile-tools-panel">
+      <div class="profile-section-header">
+        <h2 class="section-title">我的工具</h2>
+        <button class="button ghost" type="button" data-profile-placeholder>
+          全部工具 ${icon("chevron-right")}
+        </button>
+      </div>
+      <div class="profile-tool-grid">
+        ${profileTool("pie-chart", "预算管理", "data-profile-placeholder", "mint")}
+        ${profileTool("file-text", "账单导出", "data-export-json", "blue")}
+        ${profileTool("grid", "分类管理", "data-profile-placeholder", "orange")}
+        ${profileTool("tag", "标签管理", "data-profile-placeholder", "mint")}
+        ${profileTool("cloud", "数据备份", "data-snapshot-save", "blue")}
+      </div>
+    </section>
+  `;
+}
+
+function profileTool(iconName, label, attribute, tone) {
+  return `
+    <button class="profile-tool ${tone}" type="button" ${attribute} ${state.saving ? "disabled" : ""}>
+      ${icon(iconName)}
+      <span>${label}</span>
+    </button>
+  `;
+}
+
+function renderProfileDataPanel(summary, completedTasks, diaryCount) {
+  const billCount = Number(summary.bill_count ?? state.bills.length ?? 0);
+  const attachmentCount = Number(summary.attachment_count ?? 0);
+  return `
+    <section class="surface profile-data-panel">
+      <div class="profile-section-header">
+        <h2 class="section-title">我的数据</h2>
+        <button class="button ghost" type="button" data-profile-placeholder>
+          查看全部 ${icon("chevron-right")}
+        </button>
+      </div>
+      <div class="profile-data-grid">
+        ${profileDataCard("calendar", "记账天数", billCount, "天", "坚持记录", "mint")}
+        ${profileDataCard("notebook", "日记篇数", diaryCount, "篇", "记录心情", "blue")}
+        ${profileDataCard("check-circle", "完成事项", completedTasks, "个", "高效生活", "orange")}
+        ${profileDataCard("image", "附件片段", attachmentCount, "个", "生活素材", "rose")}
+      </div>
+    </section>
+  `;
+}
+
+function profileDataCard(iconName, label, value, unit, note, tone) {
+  return `
+    <div class="profile-data-card ${tone}">
+      <span>${icon(iconName)}</span>
+      <p>${label}</p>
+      <strong>${value}<small>${unit}</small></strong>
+      <em>${note}</em>
+    </div>
+  `;
+}
+
+function renderProfileSafetyPanel() {
+  const privacy = state.bootstrap?.privacy_settings ?? {};
+  const snapshot = state.snapshotStatus;
+  return `
+    <section class="surface profile-safety-panel">
+      <div>
+        <h2 class="section-title">数据与隐私</h2>
+        <p>${privacy.local_only_mode ? "本地体验已开启" : "本地体验未开启"} · ${escapeHtml(snapshotText(snapshot))}</p>
+      </div>
+      <div class="profile-safety-actions">
+        <button class="button ghost" type="button" data-settings-action="loadSnapshot"
+          ${!snapshot?.exists || state.saving ? "disabled" : ""}>
+          ${icon("upload")}加载快照
+        </button>
+        <button class="button danger" type="button" data-settings-action="clear" ${state.saving ? "disabled" : ""}>
+          ${icon("trash")}清除数据
+        </button>
+      </div>
+    </section>
   `;
 }
 
@@ -2163,6 +2738,58 @@ function renderTaskModal() {
   `;
 }
 
+function renderDiaryModal() {
+  const diary = getDiarySnapshot();
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="diary-modal-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="diary-modal-title">写日记</h2>
+            <p class="section-note">当前先保存为本次前端体验草稿，后续接入真实日记存储。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form" data-diary-form>
+          <div class="form-grid">
+            <div class="field full">
+              <label for="diary_title">标题</label>
+              <input id="diary_title" name="title" required maxlength="80" placeholder="今天的日记"
+                value="${escapeHtml(diary.title)}" />
+            </div>
+            <div class="field">
+              <label for="diary_mood">心情</label>
+              <select id="diary_mood" name="mood">
+                <option value="happy" ${diary.mood === "happy" ? "selected" : ""}>开心</option>
+                <option value="calm" ${diary.mood === "calm" ? "selected" : ""}>平静</option>
+                <option value="tired" ${diary.mood === "tired" ? "selected" : ""}>疲惫</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="diary_weather">天气</label>
+              <input id="diary_weather" name="weather" maxlength="20" placeholder="晴天"
+                value="${escapeHtml(diary.weather)}" />
+            </div>
+            <div class="field full">
+              <label for="diary_content">内容</label>
+              <textarea id="diary_content" name="content" required maxlength="800"
+                placeholder="记录今天发生的小事、心情和想法。">${escapeHtml(diary.body)}</textarea>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-modal>取消</button>
+            <button class="button primary" type="submit">
+              ${icon("save")}保存草稿
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
 function renderSnoozeModal() {
   const task = state.snoozeTarget;
   return `
@@ -2416,7 +3043,9 @@ function icon(name) {
     edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="M13.5 6.5l4 4"></path>',
     eye: '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"></path><circle cx="12" cy="12" r="3"></circle>',
     calendar: '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4"></path><path d="M16 3v4"></path><path d="M4 10h16"></path>',
+    "calendar-check": '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4"></path><path d="M16 3v4"></path><path d="M4 10h16"></path><path d="M8 15l2.5 2.5L16 12"></path>',
     camera: '<path d="M5 7h3l1.5-2h5L16 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"></path><circle cx="12" cy="13" r="4"></circle>',
+    image: '<rect x="4" y="5" width="16" height="14" rx="2"></rect><circle cx="9" cy="10" r="2"></circle><path d="M4 16l4-4 4 4 2-2 6 5"></path>',
     wallet: '<path d="M4 7h14a2 2 0 0 1 2 2v10H4V7z"></path><path d="M4 7V5a2 2 0 0 1 2-2h10v4"></path><path d="M16 13h4"></path>',
     income: '<path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path><path d="M5 21h14"></path>',
     utensils: '<path d="M4 3v8"></path><path d="M8 3v8"></path><path d="M4 7h4"></path><path d="M6 11v10"></path><path d="M15 3v18"></path><path d="M15 3c3 2 4 5 2 8"></path>',
@@ -2438,6 +3067,16 @@ function icon(name) {
     "chevron-right": '<path d="M9 6l6 6-6 6"></path>',
     send: '<path d="M21 3 10 14"></path><path d="M21 3l-7 18-4-7-7-4 18-7z"></path>',
     moon: '<path d="M20 15.5A8 8 0 0 1 8.5 4 7 7 0 1 0 20 15.5z"></path>',
+    smile: '<circle cx="12" cy="12" r="9"></circle><path d="M8 10h.01"></path><path d="M16 10h.01"></path><path d="M8 14a5 5 0 0 0 8 0"></path>',
+    sun: '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="M4.9 4.9l1.4 1.4"></path><path d="M17.7 17.7l1.4 1.4"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="M4.9 19.1l1.4-1.4"></path><path d="M17.7 6.3l1.4-1.4"></path>',
+    "more-horizontal": '<circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle>',
+    heart: '<path d="M20.8 8.6a5 5 0 0 0-8.1-3.9L12 5.4l-.7-.7a5 5 0 0 0-7.1 7.1L12 19l7.8-7.2a5 5 0 0 0 1-3.2z"></path>',
+    lightbulb: '<path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4h-6c0-2 0-3-1-4z"></path>',
+    "pie-chart": '<path d="M12 3v9h9"></path><path d="M19.1 15A8 8 0 1 1 9 4.6"></path><path d="M14 3.3A8 8 0 0 1 20.7 10H14V3.3z"></path>',
+    "file-text": '<path d="M6 3h9l3 3v15H6V3z"></path><path d="M14 3v4h4"></path><path d="M9 11h6"></path><path d="M9 15h6"></path><path d="M9 19h4"></path>',
+    grid: '<rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect>',
+    tag: '<path d="M20 13 13 20l-9-9V4h7l9 9z"></path><circle cx="8.5" cy="8.5" r="1"></circle>',
+    cloud: '<path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6.2 8.8 4.5 4.5 0 0 0 7 18z"></path>',
     user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
     download: '<path d="M12 3v12"></path><path d="M7 10l5 5 5-5"></path><path d="M5 21h14"></path>',
     upload: '<path d="M12 21V9"></path><path d="M7 14l5-5 5 5"></path><path d="M5 3h14"></path>',
