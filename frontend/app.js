@@ -60,6 +60,10 @@ const state = {
     transaction_type: "",
     q: "",
   },
+  taskFilters: {
+    view: "today",
+    category: "",
+  },
   billListMeta: {
     total: 0,
     page: 1,
@@ -112,6 +116,83 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-voice-placeholder]")) {
     showToast("语音操作会在后续接入 AI 对话和识别流程。");
+    return;
+  }
+
+  if (event.target.closest("[data-bill-photo-placeholder]")) {
+    showToast("拍照记账会在后续接入图片上传和 OCR 识别。");
+    return;
+  }
+
+  if (event.target.closest("[data-bill-filter-panel]")) {
+    showToast("更细的筛选面板会在下一步补齐。");
+    return;
+  }
+
+  const taskViewButton = event.target.closest("[data-task-view]");
+  if (taskViewButton) {
+    state.taskFilters.view = taskViewButton.dataset.taskView || "today";
+    render();
+    return;
+  }
+
+  const taskCategoryButton = event.target.closest("[data-task-category]");
+  if (taskCategoryButton) {
+    state.taskFilters.category = taskCategoryButton.dataset.taskCategory || "";
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-task-calendar-placeholder]")) {
+    showToast("日历视图会在后续接入完整日期选择。");
+    return;
+  }
+
+  if (event.target.closest("[data-task-sort-placeholder]")) {
+    showToast("当前按时间优先展示提醒，排序面板会在后续补齐。");
+    return;
+  }
+
+  if (event.target.closest("[data-repeat-task-placeholder]")) {
+    showToast("重复提醒会在后续接入周期规则。");
+    return;
+  }
+
+  if (event.target.closest("[data-view-all-tasks]")) {
+    state.taskFilters.view = "today";
+    state.taskFilters.category = "";
+    showToast("已清除提醒分类筛选。");
+    return;
+  }
+
+  const billPeriodButton = event.target.closest("[data-bill-period]");
+  if (billPeriodButton) {
+    if (billPeriodButton.dataset.billPeriod === "month") {
+      const now = new Date();
+      state.billFilters.year = String(now.getFullYear());
+      state.billFilters.month = String(now.getMonth() + 1);
+      state.billFilters.q = "";
+      state.billListMeta.page = 1;
+      loadData();
+    } else {
+      showToast("本周和自定义周期会在下一步接入日期筛选。");
+    }
+    return;
+  }
+
+  const billTypeButton = event.target.closest("[data-bill-type]");
+  if (billTypeButton) {
+    state.billFilters.transaction_type = billTypeButton.dataset.billType;
+    state.billListMeta.page = 1;
+    loadData();
+    return;
+  }
+
+  const billCategoryButton = event.target.closest("[data-bill-category]");
+  if (billCategoryButton) {
+    state.billFilters.category = billCategoryButton.dataset.billCategory;
+    state.billListMeta.page = 1;
+    loadData();
     return;
   }
 
@@ -618,10 +699,11 @@ function getRoute() {
 function render() {
   const route = routes.find((item) => item.id === state.route) ?? routes[0];
   const primaryAction = getPrimaryAction();
+  const hasCustomHeader = ["dashboard", "bills", "tasks"].includes(state.route);
   app.innerHTML = `
     <div class="app-shell mobile-shell">
       <main class="main mobile-main">
-        ${state.route === "dashboard" ? "" : renderTopbar(route, primaryAction)}
+        ${hasCustomHeader ? "" : renderTopbar(route, primaryAction)}
         ${renderPage()}
         ${renderMobileTabbar()}
       </main>
@@ -851,34 +933,672 @@ function renderDashboard() {
 }
 
 function renderBillsPage() {
+  const overview = state.billOverview ?? {};
+  const monthly = overview.monthly_statistics ?? state.bootstrap?.dashboard?.monthly_statistics ?? {};
+  const categories = monthly.category_breakdown ?? [];
+  const trend = overview.monthly_trend ?? [];
+  const previousMonth = trend.length > 1 ? trend[trend.length - 2] : null;
+  const expense = Number(monthly.total_expense ?? 0);
+  const income = Number(monthly.total_income ?? 0);
+  const netAmount = Number(monthly.net_amount ?? income - expense);
+
   return `
-    <div class="mobile-page bills-mobile-page">
-      <section class="mobile-page-head">
-        <p class="eyebrow">账单</p>
-        <h1 class="mobile-page-title">每一笔都清楚</h1>
-        <p class="mobile-page-subtitle">${state.billListMeta.total} 条记录，支持按月份、分类和关键词筛选。</p>
+    <div class="mobile-page bills-mobile-page ledger-page">
+      <section class="ledger-hero">
+        <div>
+          <h1 class="ledger-title">记账</h1>
+          <p class="ledger-subtitle">轻松记录每一笔收支</p>
+        </div>
+        <div class="ledger-hero-art" aria-hidden="true">
+          <span class="ledger-leaf leaf-a"></span>
+          <span class="ledger-leaf leaf-b"></span>
+          <span class="ledger-calendar-art"></span>
+          <span class="ledger-mascot"></span>
+          <span class="ledger-coin"></span>
+        </div>
       </section>
-      ${renderBillFilters()}
-      <section class="surface bill-feed-panel">
+
+      <section class="surface ledger-overview-panel">
+        ${renderBillControls()}
+        <section class="ledger-summary" aria-label="本月账单摘要">
+          ${ledgerMetric("本月结余", money(netAmount), metricTrend(netAmount, previousMonth?.net_amount), "balance", "eye")}
+          ${ledgerMetric("本月收入", money(income), metricTrend(income, previousMonth?.total_income), "income")}
+          ${ledgerMetric("本月支出", money(expense), metricTrend(expense, previousMonth?.total_expense, true), "expense")}
+        </section>
+        <div class="ledger-insights">
+          ${renderBillCategoryPanel(categories, expense)}
+          ${renderBillTrendPanel(overview.daily_breakdown ?? [])}
+        </div>
+      </section>
+
+      <section class="surface bill-feed-panel ledger-feed-panel">
+        <div class="ledger-feed-header">
+          <h2 class="section-title">最近账单</h2>
+          ${renderBillCategoryFilters(categories)}
+        </div>
         ${state.bills.length ? renderBillFeed(state.bills) : empty("还没有账单，可以先新增一条手动记录。")}
       </section>
+      ${renderBillActionDock()}
     </div>
   `;
 }
 
-function renderTasksPage() {
+function renderBillControls() {
+  const activeType = state.billFilters.transaction_type || "expense";
   return `
-    <section class="surface">
-      <div class="section-header">
-        <div>
-          <h2 class="section-title">待办提醒</h2>
-          <p class="section-note">支持手动创建、完成待办和延后提醒；AI 对话创建会在后续增量接入。</p>
-        </div>
-        <span class="pill">${state.tasks.length} 条</span>
+    <div class="ledger-controls">
+      <div class="ledger-period-tabs" aria-label="时间范围">
+        <button class="ledger-tab is-active" type="button" data-bill-period="month">本月</button>
+        <button class="ledger-tab" type="button" data-bill-period="week">本周</button>
+        <button class="ledger-tab" type="button" data-bill-period="custom">自定义</button>
+        <button class="ledger-icon-tab" type="button" data-bill-period="custom" aria-label="选择日期">
+          ${icon("calendar")}
+        </button>
       </div>
-      ${state.tasks.length ? renderTaskList(state.tasks) : empty("还没有待办。")}
+      <div class="ledger-type-toggle" aria-label="收支类型">
+        <button class="ledger-type ${activeType !== "income" ? "is-active" : ""}" type="button" data-bill-type="expense">支出</button>
+        <button class="ledger-type ${activeType === "income" ? "is-active" : ""}" type="button" data-bill-type="income">收入</button>
+      </div>
+    </div>
+  `;
+}
+
+function ledgerMetric(label, value, hint, tone, iconName = "") {
+  return `
+    <div class="ledger-metric">
+      <span class="ledger-metric-label">
+        ${label}${iconName ? icon(iconName) : ""}
+      </span>
+      <strong class="${tone}">${value}</strong>
+      <small class="${hint.tone}">${hint.text}</small>
+    </div>
+  `;
+}
+
+function metricTrend(currentValue, previousValue, invertTone = false) {
+  const current = Number(currentValue ?? 0);
+  const previous = Number(previousValue ?? 0);
+  if (!previous) {
+    return { text: "较上月 0%", tone: "neutral" };
+  }
+  const delta = ((current - previous) / Math.abs(previous)) * 100;
+  const isUp = delta >= 0;
+  const isGood = invertTone ? !isUp : isUp;
+  return {
+    text: `较上月 ${isUp ? "↑" : "↓"} ${Math.abs(delta).toFixed(1)}%`,
+    tone: isGood ? "positive" : "negative",
+  };
+}
+
+function renderBillCategoryPanel(categories, totalExpense) {
+  const topCategories = categories.slice(0, 5);
+  return `
+    <section class="ledger-insight-panel">
+      <div class="ledger-panel-header">
+        <h2 class="section-title">支出分类</h2>
+        <button class="button ghost" type="button" data-bill-filter-panel>查看全部</button>
+      </div>
+      ${
+        topCategories.length
+          ? `
+            <div class="ledger-category-body">
+              ${renderCategoryDonut(topCategories, totalExpense)}
+              <div class="ledger-category-list">
+                ${topCategories
+                  .map(
+                    (item, index) => `
+                      <button class="category-row" type="button" data-bill-category="${escapeHtml(item.category)}">
+                        <span class="category-dot dot-${index + 1}"></span>
+                        <span>${escapeHtml(item.category)}</span>
+                        <strong>${Number(item.percentage ?? 0).toFixed(0)}%</strong>
+                        <small>${money(item.amount)}</small>
+                      </button>
+                    `,
+                  )
+                  .join("")}
+              </div>
+            </div>
+          `
+          : empty("暂无分类数据。")
+      }
     </section>
   `;
+}
+
+function renderCategoryDonut(categories, totalExpense) {
+  const circumference = 2 * Math.PI * 42;
+  const colors = ["#10b98f", "#43c7b4", "#8edfd0", "#c7e6e2", "#c5d3ef"];
+  let offset = 0;
+  const segments = categories
+    .map((item, index) => {
+      const percent = Number(item.percentage ?? 0);
+      const length = Math.max(0, Math.min(circumference, (percent / 100) * circumference));
+      const segment = `
+        <circle class="ledger-donut-segment" cx="60" cy="60" r="42"
+          stroke="${colors[index % colors.length]}"
+          stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}"
+          stroke-dashoffset="${(-offset).toFixed(2)}"></circle>
+      `;
+      offset += length;
+      return segment;
+    })
+    .join("");
+
+  return `
+    <div class="ledger-donut" aria-label="总支出 ${money(totalExpense)}">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="ledger-donut-track" cx="60" cy="60" r="42"></circle>
+        ${segments}
+      </svg>
+      <div class="ledger-donut-center">
+        <span>总支出</span>
+        <strong>${money(totalExpense)}</strong>
+      </div>
+    </div>
+  `;
+}
+
+function renderBillTrendPanel(items) {
+  const days = items.length ? items : [];
+  const maxValue = Math.max(
+    ...days.map((item) => Math.max(Number(item.total_expense ?? 0), Number(item.total_income ?? 0))),
+    0,
+  );
+  const max = maxValue > 0 ? maxValue : 1500;
+  const mid = max / 2;
+  const expensePoints = trendLinePoints(days, max, "total_expense");
+  const incomePoints = trendLinePoints(days, max, "total_income");
+  const highlight = days[Math.min(19, Math.max(0, days.length - 1))];
+  return `
+    <section class="ledger-insight-panel">
+      <div class="ledger-panel-header">
+        <div>
+          <h2 class="section-title">本月收支趋势</h2>
+          <div class="trend-legend" aria-hidden="true">
+            <span><i class="expense"></i>支出</span>
+            <span><i class="income"></i>收入</span>
+          </div>
+        </div>
+        <button class="button ghost" type="button" data-route="bills">查看全部</button>
+      </div>
+      <div class="ledger-trend-chart">
+        <div class="trend-scale" aria-hidden="true">
+          <span>${compactMoney(max)}</span>
+          <span>${compactMoney(mid)}</span>
+          <span>0</span>
+        </div>
+        <div class="trend-plot">
+          <div class="trend-bars" role="list" aria-label="每日收支">
+            ${days
+              .map((item) => {
+                const expense = Number(item.total_expense ?? 0);
+                const income = Number(item.total_income ?? 0);
+                return `
+                  <button class="trend-day" type="button" role="listitem"
+                    aria-label="${formatMonthDay(item.date)} 收入 ${money(income)} 支出 ${money(expense)}">
+                    <span class="chart-tooltip">
+                      <span class="tooltip-title">${formatMonthDay(item.date)}</span>
+                      <span class="tooltip-value">收入 ${money(income)}</span>
+                      <span class="tooltip-value">支出 ${money(expense)}</span>
+                    </span>
+                    <span class="trend-bar income" style="height:${Math.max(5, Math.round((income / max) * 90))}px"></span>
+                    <span class="trend-bar expense" style="height:${Math.max(5, Math.round((expense / max) * 90))}px"></span>
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
+          <svg class="trend-line" viewBox="0 0 300 110" preserveAspectRatio="none" aria-hidden="true">
+            <polyline class="expense" points="${expensePoints}" />
+            <polyline class="income" points="${incomePoints}" />
+          </svg>
+          ${
+            highlight
+              ? `<span class="trend-badge">${formatMonthDay(highlight.date)}</span>`
+              : ""
+          }
+        </div>
+        <div class="trend-axis" aria-hidden="true">
+          <span>${days[0] ? formatMonthDay(days[0].date) : ""}</span>
+          <span>${days[9] ? formatMonthDay(days[9].date) : ""}</span>
+          <span>${days[19] ? formatMonthDay(days[19].date) : ""}</span>
+          <span>${days.length ? formatMonthDay(days[days.length - 1].date) : ""}</span>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function trendLinePoints(items, max, field) {
+  if (!items.length) {
+    return "";
+  }
+  return items
+    .map((item, index) => {
+      const x = items.length === 1 ? 150 : (index / (items.length - 1)) * 300;
+      const value = Number(item[field] ?? 0);
+      const y = 100 - (value / max) * 86;
+      return `${x.toFixed(2)},${Math.max(8, y).toFixed(2)}`;
+    })
+    .join(" ");
+}
+
+function renderBillCategoryFilters(categories) {
+  const activeCategory = state.billFilters.category;
+  const chips = [["", "全部"], ...categories.slice(0, 3).map((item) => [item.category, item.category])];
+  return `
+    <div class="ledger-filter-chips" aria-label="账单分类筛选">
+      ${chips
+        .map(
+          ([value, label]) => `
+            <button class="ledger-chip ${activeCategory === value ? "is-active" : ""}" type="button"
+              data-bill-category="${escapeHtml(value)}">
+              ${escapeHtml(label)}
+            </button>
+          `,
+        )
+        .join("")}
+      <button class="ledger-filter-icon" type="button" data-bill-filter-panel aria-label="更多筛选">
+        ${icon("filter")}
+      </button>
+    </div>
+  `;
+}
+
+function renderBillActionDock() {
+  return `
+    <section class="bill-action-dock" aria-label="记账方式">
+      <button class="bill-dock-side" type="button" data-voice-placeholder>
+        ${icon("mic")}语音记账
+      </button>
+      <button class="bill-dock-main" type="button" data-open-bill-modal>
+        ${icon("plus")}记一笔
+      </button>
+      <button class="bill-dock-side" type="button" data-bill-photo-placeholder>
+        ${icon("camera")}拍照记账
+      </button>
+    </section>
+  `;
+}
+
+function renderTasksPage() {
+  const groups = getReminderTaskGroups();
+  const visibleTasks = getVisibleReminderTasks(groups);
+  const totalForProgress = groups.pending.length + groups.done.length;
+  const progress = totalForProgress ? Math.round((groups.done.length / totalForProgress) * 100) : 0;
+
+  return `
+    <div class="mobile-page reminders-mobile-page reminder-page">
+      <section class="reminder-hero">
+        <div>
+          <h1 class="reminder-title">提醒</h1>
+          <p class="reminder-subtitle">安排好今天，每件事都不遗漏</p>
+        </div>
+        <div class="reminder-hero-art" aria-hidden="true">
+          <span class="reminder-leaf reminder-leaf-left"></span>
+          <span class="reminder-leaf reminder-leaf-right"></span>
+          <span class="reminder-bell-art"></span>
+          <span class="reminder-mascot"></span>
+          <span class="reminder-calendar-art"></span>
+        </div>
+      </section>
+
+      <section class="surface reminder-overview-panel">
+        ${renderReminderViewTabs()}
+        ${renderReminderCategoryTabs()}
+        <section class="reminder-summary" aria-label="今日提醒摘要">
+          ${reminderStat("今日待办", groups.today.length, "待完成事项")}
+          ${reminderStat("已完成", groups.done.length, "已完成事项", "success")}
+          ${reminderStat("重要事项", groups.important.length, "需要优先处理", "danger")}
+          <div class="reminder-progress-summary">
+            <span>今日完成进度</span>
+            ${renderTaskProgressRing(progress)}
+            <strong>${groups.done.length}/${totalForProgress || 0} 已完成</strong>
+          </div>
+        </section>
+      </section>
+
+      <section class="surface reminder-list-panel">
+        <div class="reminder-list-header">
+          <h2 class="section-title">${reminderListTitle()}</h2>
+          <button class="reminder-sort-button" type="button" data-task-sort-placeholder>
+            ${icon("list-filter")}按时间排序
+          </button>
+        </div>
+        ${visibleTasks.length ? renderReminderTaskList(visibleTasks) : renderReminderEmpty()}
+        <button class="reminder-more-button" type="button" data-view-all-tasks>
+          查看全部 ${icon("chevron-right")}
+        </button>
+      </section>
+
+      ${renderAiReminderAdvice(groups)}
+      ${renderReminderActionDock()}
+    </div>
+  `;
+}
+
+function getReminderTaskGroups() {
+  const sorted = [...state.tasks].sort(compareReminderTasks);
+  const pending = sorted.filter((task) => task.status === "pending");
+  const done = sorted.filter((task) => task.status === "done");
+  const today = pending.filter(isTodayTask);
+  return {
+    all: sorted,
+    pending,
+    done,
+    today: today.length ? today : pending,
+    upcoming: pending.filter((task) => !isTodayTask(task)),
+    important: pending.filter((task) => task.priority === "high"),
+  };
+}
+
+function getVisibleReminderTasks(groups) {
+  const view = state.taskFilters.view;
+  let tasks = groups.today;
+  if (view === "upcoming") {
+    tasks = groups.upcoming.length ? groups.upcoming : groups.pending;
+  } else if (view === "done") {
+    tasks = groups.done;
+  }
+
+  if (state.taskFilters.category) {
+    tasks = tasks.filter((task) => matchesTaskCategory(task, state.taskFilters.category));
+  }
+  return tasks.slice(0, 5);
+}
+
+function renderReminderViewTabs() {
+  const tabs = [
+    ["today", "今天"],
+    ["upcoming", "即将到来"],
+    ["done", "已完成"],
+  ];
+  return `
+    <div class="reminder-view-tabs" aria-label="提醒状态">
+      ${tabs
+        .map(
+          ([value, label]) => `
+            <button class="reminder-view-tab ${state.taskFilters.view === value ? "is-active" : ""}"
+              type="button" data-task-view="${value}">
+              ${label}
+            </button>
+          `,
+        )
+        .join("")}
+      <button class="reminder-calendar-button" type="button" data-task-calendar-placeholder aria-label="选择日期">
+        ${icon("calendar")}
+      </button>
+    </div>
+  `;
+}
+
+function renderReminderCategoryTabs() {
+  const tabs = [
+    ["", "全部", "check-circle"],
+    ["学习", "学习", "book"],
+    ["生活", "生活", "coffee"],
+    ["工作", "工作", "briefcase"],
+  ];
+  return `
+    <div class="reminder-category-tabs" aria-label="提醒分类">
+      ${tabs
+        .map(
+          ([value, label, iconName]) => `
+            <button class="reminder-category-tab ${state.taskFilters.category === value ? "is-active" : ""}"
+              type="button" data-task-category="${escapeHtml(value)}">
+              ${icon(iconName)}${label}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function reminderStat(label, value, hint, tone = "") {
+  return `
+    <div class="reminder-stat ${tone}">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      <small>${hint}</small>
+    </div>
+  `;
+}
+
+function renderTaskProgressRing(percent) {
+  const radius = 44;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (percent / 100) * circumference;
+  return `
+    <div class="progress-figure reminder-progress-figure" aria-label="今日完成进度 ${percent}%">
+      <svg class="progress-ring" viewBox="0 0 112 112" aria-hidden="true">
+        <circle class="ring-track" cx="56" cy="56" r="${radius}"></circle>
+        <circle class="ring-value" cx="56" cy="56" r="${radius}"
+          stroke-dasharray="${circumference.toFixed(2)}"
+          stroke-dashoffset="${offset.toFixed(2)}"></circle>
+      </svg>
+      <strong>${percent}%</strong>
+    </div>
+  `;
+}
+
+function reminderListTitle() {
+  return {
+    today: "今日提醒",
+    upcoming: "即将到来",
+    done: "已完成",
+  }[state.taskFilters.view] ?? "今日提醒";
+}
+
+function renderReminderTaskList(tasks) {
+  return `
+    <div class="reminder-list">
+      ${tasks.map((task) => renderReminderTaskItem(task)).join("")}
+    </div>
+  `;
+}
+
+function renderReminderTaskItem(task) {
+  const done = task.status === "done";
+  const tone = reminderTaskTone(task);
+  const chip = reminderTaskChip(task);
+  const priorityBadge = task.priority === "high" && !done
+    ? '<span class="reminder-badge danger">重要</span>'
+    : "";
+  return `
+    <article class="reminder-item ${done ? "is-done" : ""}">
+      <span class="reminder-item-icon ${tone}">${icon(iconForTask(task))}</span>
+      <div class="reminder-item-main">
+        <div class="reminder-item-title-line">
+          <h3>${escapeHtml(task.title)}</h3>
+          ${priorityBadge}
+        </div>
+        <p>${shortTaskTime(task)}</p>
+      </div>
+      <span class="reminder-tag ${chip.tone}">${escapeHtml(chip.label)}</span>
+      <button class="reminder-check ${done ? "is-done" : ""}" type="button"
+        data-complete-task="${task.id}"
+        aria-label="完成 ${escapeHtml(task.title)}"
+        ${done || state.saving ? "disabled" : ""}>
+        ${done ? icon("check") : ""}
+      </button>
+    </article>
+  `;
+}
+
+function renderReminderEmpty() {
+  return `
+    <div class="reminder-empty">
+      <span class="reminder-item-icon life">${icon("bell")}</span>
+      <div>
+        <p class="item-title">当前筛选下还没有提醒</p>
+        <p class="item-meta">可以先添加一条，页面会立即使用真实后端数据刷新。</p>
+      </div>
+      <button class="button ghost" type="button" data-open-task-modal>${icon("plus")}添加</button>
+    </div>
+  `;
+}
+
+function renderAiReminderAdvice(groups) {
+  const nextTask = groups.pending[0];
+  const importantTask = groups.important[0];
+  const advice = [
+    nextTask
+      ? `建议优先安排「${nextTask.title}」，时间是 ${shortTaskTime(nextTask)}。`
+      : "今天还没有待处理提醒，可以安排一个轻量目标。",
+    importantTask
+      ? `「${importantTask.title}」标记为重要，适合放在精力最稳定的时间段。`
+      : "暂无重要事项，今天的安排可以保持轻松节奏。",
+    groups.pending.length > 3
+      ? "待处理事项较多，建议预留一段缓冲时间。"
+      : "当前事项不多，处理完后记得留出休息时间。",
+  ];
+
+  return `
+    <section class="ai-reminder-panel" aria-label="AI 提醒建议">
+      <div class="ai-reminder-title">
+        <span class="panel-icon blue">${icon("spark")}</span>
+        <h2 class="section-title">AI 提醒建议</h2>
+      </div>
+      <div class="ai-reminder-body">
+        <div class="ai-reminder-rows">
+          ${advice
+            .map(
+              (item, index) => `
+                <p class="ai-reminder-row">
+                  ${icon(index === 0 ? "send" : index === 1 ? "clock" : "moon")}
+                  <span>${escapeHtml(item)}</span>
+                </p>
+              `,
+            )
+            .join("")}
+        </div>
+        <div class="ai-reminder-bot" aria-hidden="true">
+          <span class="bot-ear left"></span>
+          <span class="bot-ear right"></span>
+          <span class="bot-head"><span></span></span>
+          <span class="bot-body"></span>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderReminderActionDock() {
+  return `
+    <section class="reminder-action-dock" aria-label="提醒操作">
+      <button class="reminder-dock-side" type="button" data-voice-placeholder>
+        ${icon("mic")}语音添加
+      </button>
+      <button class="reminder-dock-main" type="button" data-open-task-modal>
+        ${icon("plus")}添加提醒
+      </button>
+      <button class="reminder-dock-side" type="button" data-repeat-task-placeholder>
+        ${icon("refresh")}重复提醒
+      </button>
+    </section>
+  `;
+}
+
+function compareReminderTasks(a, b) {
+  const statusWeight = (task) => (task.status === "done" ? 1 : 0);
+  const priorityWeight = (task) => ({ high: 0, medium: 1, low: 2 }[task.priority] ?? 1);
+  const aTime = taskTargetDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  const bTime = taskTargetDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+  return statusWeight(a) - statusWeight(b)
+    || aTime - bTime
+    || priorityWeight(a) - priorityWeight(b)
+    || String(a.title ?? "").localeCompare(String(b.title ?? ""), "zh-CN");
+}
+
+function taskTargetDate(task) {
+  const target = task?.task_type === "reminder"
+    ? task.remind_at || task.due_at
+    : task?.due_at || task?.remind_at;
+  if (!target) {
+    return null;
+  }
+  const date = new Date(target);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isTodayTask(task) {
+  const target = taskTargetDate(task);
+  if (!target) {
+    return task.status === "pending";
+  }
+  const now = new Date();
+  return target.getFullYear() === now.getFullYear()
+    && target.getMonth() === now.getMonth()
+    && target.getDate() === now.getDate();
+}
+
+function shortTaskTime(task) {
+  const target = taskTargetDate(task);
+  if (!target) {
+    return "未设置时间";
+  }
+  const time = target.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (isTodayTask(task)) {
+    return `今天 ${time}`;
+  }
+  if (
+    target.getFullYear() === tomorrow.getFullYear()
+    && target.getMonth() === tomorrow.getMonth()
+    && target.getDate() === tomorrow.getDate()
+  ) {
+    return `明天 ${time}`;
+  }
+  return `${formatMonthDay(target)} ${time}`;
+}
+
+function matchesTaskCategory(task, selectedCategory) {
+  if (!selectedCategory) {
+    return true;
+  }
+  return reminderTaskCategory(task) === selectedCategory;
+}
+
+function reminderTaskCategory(task) {
+  const text = `${task?.category ?? ""} ${task?.title ?? ""}`.toLowerCase();
+  if (text.includes("学") || text.includes("作业") || text.includes("study")) return "学习";
+  if (text.includes("工") || text.includes("会议") || text.includes("项目") || text.includes("work")) return "工作";
+  if (text.includes("个人") || text.includes("日记") || text.includes("心情")) return "个人";
+  return "生活";
+}
+
+function reminderTaskTone(task) {
+  return {
+    学习: "study",
+    工作: "work",
+    个人: "personal",
+    生活: "life",
+  }[reminderTaskCategory(task)] ?? "life";
+}
+
+function reminderTaskChip(task) {
+  if (task.status === "done") {
+    return { label: "已完成", tone: "done" };
+  }
+  if (task.priority === "high" && isTodayTask(task)) {
+    return { label: "今天截止", tone: "urgent" };
+  }
+  const category = reminderTaskCategory(task);
+  return { label: category, tone: reminderTaskTone(task) };
+}
+
+function iconForTask(task) {
+  const text = `${task?.category ?? ""} ${task?.title ?? ""}`.toLowerCase();
+  if (text.includes("会议") || text.includes("团队") || text.includes("meeting")) return "users";
+  if (text.includes("信用") || text.includes("账单") || text.includes("card")) return "card";
+  if (text.includes("购物") || text.includes("超市") || text.includes("shop")) return "shopping";
+  if (text.includes("学习") || text.includes("作业") || text.includes("study")) return "book";
+  if (text.includes("日记") || text.includes("心情")) return "notebook";
+  if (text.includes("工作") || text.includes("项目") || text.includes("work")) return "briefcase";
+  return task?.task_type === "reminder" ? "bell" : "check-circle";
 }
 
 function renderDiaryPage() {
@@ -1225,31 +1945,21 @@ function renderBillFeed(bills) {
       ${bills
         .map(
           (bill) => `
-            <article class="bill-feed-item">
+            <button class="bill-feed-item ledger-feed-item" type="button" data-edit-bill="${bill.id}">
               <span class="bill-feed-icon">${icon(iconForBill(bill))}</span>
               <div class="bill-feed-main">
                 <div class="bill-feed-topline">
                   <h2>${escapeHtml(bill.merchant)}</h2>
-                  <span class="amount ${bill.transaction_type}">${money(bill.amount)}</span>
+                  <span class="amount ${bill.transaction_type}">${signedMoney(bill)}</span>
                 </div>
                 <p class="item-meta">
                   ${escapeHtml(bill.category)}
-                  · ${labelTransaction(bill.transaction_type)}
                   · ${formatDate(bill.paid_at)}
                 </p>
                 ${bill.note ? `<p class="bill-note">${escapeHtml(bill.note)}</p>` : ""}
               </div>
-              <div class="bill-feed-actions">
-                <button class="icon-button" type="button" data-edit-bill="${bill.id}"
-                  aria-label="编辑 ${escapeHtml(bill.merchant)}" title="编辑">
-                  ${icon("edit")}
-                </button>
-                <button class="icon-button danger" type="button" data-delete-bill="${bill.id}"
-                  aria-label="删除 ${escapeHtml(bill.merchant)}" title="删除">
-                  ${icon("trash")}
-                </button>
-              </div>
-            </article>
+              <span class="ledger-payment">${escapeHtml(bill.payment_method || labelTransaction(bill.transaction_type))}</span>
+            </button>
           `,
         )
         .join("")}
@@ -1571,6 +2281,22 @@ function money(value) {
   }).format(number);
 }
 
+function signedMoney(bill) {
+  const prefix = bill.transaction_type === "expense" ? "-" : "+";
+  return `${prefix}${money(bill.amount)}`;
+}
+
+function compactMoney(value) {
+  const number = Number(value ?? 0);
+  if (number >= 10000) {
+    return `${(number / 10000).toFixed(1)}万`;
+  }
+  if (number >= 1000) {
+    return `${Math.round(number).toLocaleString("zh-CN")}`;
+  }
+  return String(Math.round(number));
+}
+
 function downloadText(filename, content, mimeType) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -1591,6 +2317,12 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatMonthDay(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function labelTransaction(value) {
@@ -1679,8 +2411,12 @@ function icon(name) {
     plus: '<path d="M12 5v14"></path><path d="M5 12h14"></path>',
     refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 16v-5h-5"></path>',
     search: '<circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path>',
+    filter: '<path d="M4 5h16"></path><path d="M7 12h10"></path><path d="M10 19h4"></path>',
     reset: '<path d="M4 7h11a5 5 0 1 1-3.5 8.5"></path><path d="M4 7l4-4"></path><path d="M4 7l4 4"></path>',
     edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="M13.5 6.5l4 4"></path>',
+    eye: '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"></path><circle cx="12" cy="12" r="3"></circle>',
+    calendar: '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4"></path><path d="M16 3v4"></path><path d="M4 10h16"></path>',
+    camera: '<path d="M5 7h3l1.5-2h5L16 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"></path><circle cx="12" cy="13" r="4"></circle>',
     wallet: '<path d="M4 7h14a2 2 0 0 1 2 2v10H4V7z"></path><path d="M4 7V5a2 2 0 0 1 2-2h10v4"></path><path d="M16 13h4"></path>',
     income: '<path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path><path d="M5 21h14"></path>',
     utensils: '<path d="M4 3v8"></path><path d="M8 3v8"></path><path d="M4 7h4"></path><path d="M6 11v10"></path><path d="M15 3v18"></path><path d="M15 3c3 2 4 5 2 8"></path>',
@@ -1693,6 +2429,15 @@ function icon(name) {
     clock: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
     bell: '<path d="M6 10a6 6 0 0 1 12 0c0 4 2 5 2 7H4c0-2 2-3 2-7z"></path><path d="M10 21h4"></path>',
     book: '<path d="M5 4h8a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3V4z"></path><path d="M16 7h3v13h-3"></path><path d="M8 8h4"></path><path d="M8 12h4"></path>',
+    notebook: '<path d="M7 4h10a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"></path><path d="M9 4v16"></path><path d="M12 8h4"></path><path d="M12 12h4"></path>',
+    briefcase: '<path d="M10 6V4h4v2"></path><rect x="4" y="6" width="16" height="13" rx="2"></rect><path d="M4 12h16"></path><path d="M10 12v2h4v-2"></path>',
+    coffee: '<path d="M5 8h11v5a5 5 0 0 1-5 5H10a5 5 0 0 1-5-5V8z"></path><path d="M16 9h2a3 3 0 0 1 0 6h-2"></path><path d="M7 4v1"></path><path d="M11 4v1"></path>',
+    users: '<path d="M16 19a4 4 0 0 0-8 0"></path><circle cx="12" cy="9" r="4"></circle><path d="M20 19a3 3 0 0 0-3-3"></path><path d="M4 19a3 3 0 0 1 3-3"></path>',
+    card: '<rect x="4" y="6" width="16" height="12" rx="2"></rect><path d="M4 10h16"></path><path d="M8 15h4"></path>',
+    "list-filter": '<path d="M4 6h12"></path><path d="M4 12h9"></path><path d="M4 18h6"></path><path d="M18 9v9"></path><path d="M15 15l3 3 3-3"></path>',
+    "chevron-right": '<path d="M9 6l6 6-6 6"></path>',
+    send: '<path d="M21 3 10 14"></path><path d="M21 3l-7 18-4-7-7-4 18-7z"></path>',
+    moon: '<path d="M20 15.5A8 8 0 0 1 8.5 4 7 7 0 1 0 20 15.5z"></path>',
     user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
     download: '<path d="M12 3v12"></path><path d="M7 10l5 5 5-5"></path><path d="M5 21h14"></path>',
     upload: '<path d="M12 21V9"></path><path d="M7 14l5-5 5 5"></path><path d="M5 3h14"></path>',
