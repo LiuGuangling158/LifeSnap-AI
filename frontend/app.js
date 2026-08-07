@@ -52,6 +52,7 @@ const state = {
   deleteTarget: null,
   taskModalOpen: false,
   diaryModalOpen: false,
+  diaryCalendarOpen: false,
   chatModalOpen: false,
   snoozeTarget: null,
   settingsConfirm: null,
@@ -68,10 +69,20 @@ const state = {
     view: "today",
     category: "",
   },
+  taskListExpanded: false,
+  taskListMeta: {
+    total: 0,
+    page: 1,
+    page_size: 20,
+    total_pages: 0,
+  },
   diaryFilters: {
     period: "today",
   },
+  diarySelectedDateKey: todayDateKey(),
+  diaryCalendarMonthKey: monthKeyFromDate(new Date()),
   diaryDraft: null,
+  diaryEntries: [],
   billListMeta: {
     total: 0,
     page: 1,
@@ -164,8 +175,38 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-diary-calendar-placeholder]")) {
-    showToast("日记日历会在后续接入完整日期选择。");
+  if (event.target.closest("[data-open-diary-calendar], [data-diary-calendar-placeholder]")) {
+    openDiaryCalendar();
+    return;
+  }
+
+  const diaryCalendarNavButton = event.target.closest("[data-diary-calendar-nav]");
+  if (diaryCalendarNavButton) {
+    shiftDiaryCalendarMonth(Number(diaryCalendarNavButton.dataset.diaryCalendarNav || 0));
+    return;
+  }
+
+  const diaryDateButton = event.target.closest("[data-diary-date]");
+  if (diaryDateButton) {
+    selectDiaryDate(diaryDateButton.dataset.diaryDate);
+    return;
+  }
+
+  if (event.target.closest("[data-diary-calendar-today]")) {
+    selectDiaryToday();
+    return;
+  }
+
+  if (event.target.closest("[data-diary-calendar-write]")) {
+    state.diaryCalendarOpen = false;
+    state.diaryModalOpen = true;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-diary-calendar-done]")) {
+    state.diaryCalendarOpen = false;
+    render();
     return;
   }
 
@@ -197,14 +238,18 @@ document.addEventListener("click", (event) => {
   const taskViewButton = event.target.closest("[data-task-view]");
   if (taskViewButton) {
     state.taskFilters.view = taskViewButton.dataset.taskView || "today";
-    render();
+    state.taskListExpanded = false;
+    state.taskListMeta.page = 1;
+    loadData();
     return;
   }
 
   const taskCategoryButton = event.target.closest("[data-task-category]");
   if (taskCategoryButton) {
     state.taskFilters.category = taskCategoryButton.dataset.taskCategory || "";
-    render();
+    state.taskListExpanded = false;
+    state.taskListMeta.page = 1;
+    loadData();
     return;
   }
 
@@ -224,9 +269,8 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-view-all-tasks]")) {
-    state.taskFilters.view = "today";
-    state.taskFilters.category = "";
-    showToast("已清除提醒分类筛选。");
+    state.taskListExpanded = true;
+    render();
     return;
   }
 
@@ -281,6 +325,7 @@ document.addEventListener("click", (event) => {
     state.editingBill = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
+    state.diaryCalendarOpen = false;
     state.chatModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
@@ -359,6 +404,7 @@ document.addEventListener("keydown", (event) => {
       || state.deleteTarget
       || state.taskModalOpen
       || state.diaryModalOpen
+      || state.diaryCalendarOpen
       || state.chatModalOpen
       || state.snoozeTarget
       || state.settingsConfirm
@@ -369,6 +415,7 @@ document.addEventListener("keydown", (event) => {
     state.deleteTarget = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
+    state.diaryCalendarOpen = false;
     state.chatModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
@@ -425,7 +472,7 @@ async function loadData() {
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
       api(buildBillListPath()),
-      api("/tasks?page_size=8"),
+      api(buildTaskListPath()),
       api("/tasks/statistics/overview?upcoming_days=7&item_limit=10"),
       api("/data/snapshot/status"),
     ]);
@@ -439,6 +486,12 @@ async function loadData() {
       total_pages: billList.total_pages ?? 0,
     };
     state.tasks = taskList.items ?? [];
+    state.taskListMeta = {
+      total: taskList.total ?? 0,
+      page: taskList.page ?? 1,
+      page_size: taskList.page_size ?? 20,
+      total_pages: taskList.total_pages ?? 0,
+    };
     state.taskOverview = taskOverview;
     state.snapshotStatus = snapshotStatus;
   } catch (error) {
@@ -562,15 +615,46 @@ async function submitTask(formData) {
 }
 
 function saveDiaryDraft(formData) {
-  state.diaryDraft = {
+  const dateKey = state.diarySelectedDateKey || todayDateKey();
+  const entry = {
+    dateKey,
     title: String(formData.get("title") || "今天的日记").trim(),
     content: String(formData.get("content") || "").trim(),
     mood: String(formData.get("mood") || "happy"),
     weather: String(formData.get("weather") || "晴天").trim(),
-    created_at: new Date().toISOString(),
+    created_at: diaryEntryTimestamp(dateKey),
   };
+  state.diaryEntries = [
+    entry,
+    ...state.diaryEntries.filter((item) => item.dateKey !== dateKey),
+  ].sort((left, right) => right.dateKey.localeCompare(left.dateKey));
+  state.diaryDraft = entry;
   state.diaryModalOpen = false;
   showToast("日记草稿已保存到本次前端体验。");
+}
+
+function openDiaryCalendar() {
+  state.diaryCalendarOpen = true;
+  state.diaryCalendarMonthKey = monthKeyFromDate(dateFromDateKey(state.diarySelectedDateKey || todayDateKey()));
+  render();
+}
+
+function shiftDiaryCalendarMonth(delta) {
+  state.diaryCalendarMonthKey = shiftMonthKey(state.diaryCalendarMonthKey, delta);
+  render();
+}
+
+function selectDiaryDate(dateKey) {
+  if (!dateKey) {
+    return;
+  }
+  state.diarySelectedDateKey = dateKey;
+  state.diaryCalendarMonthKey = monthKeyFromDate(dateFromDateKey(dateKey));
+  render();
+}
+
+function selectDiaryToday() {
+  selectDiaryDate(todayDateKey());
 }
 
 function openChatModal(draft = "") {
@@ -891,6 +975,52 @@ function buildBillListPath() {
   return `/bills?${params.toString()}`;
 }
 
+function buildTaskListPath() {
+  const params = new URLSearchParams({
+    page: String(state.taskListMeta.page),
+    page_size: String(state.taskListMeta.page_size),
+  });
+  const view = state.taskFilters.view || "today";
+  if (state.taskFilters.category) {
+    params.set("category", state.taskFilters.category);
+  }
+
+  if (view === "done") {
+    params.set("status", "done");
+    return `/tasks?${params.toString()}`;
+  }
+
+  params.set("status", "pending");
+  if (view === "today") {
+    const { start, end } = localDayRange();
+    params.set("due_from", start.toISOString());
+    params.set("due_to", end.toISOString());
+  }
+  if (view === "upcoming") {
+    const { start, end } = upcomingRange(7);
+    params.set("due_from", start.toISOString());
+    params.set("due_to", end.toISOString());
+  }
+  return `/tasks?${params.toString()}`;
+}
+
+function localDayRange(value = new Date()) {
+  const start = new Date(value);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 1);
+  end.setMilliseconds(-1);
+  return { start, end };
+}
+
+function upcomingRange(days) {
+  const start = new Date();
+  const end = new Date(start);
+  end.setDate(start.getDate() + days);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   const text = await response.text();
@@ -932,6 +1062,7 @@ function render() {
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
       ${state.diaryModalOpen ? renderDiaryModal() : ""}
+      ${state.diaryCalendarOpen ? renderDiaryCalendarModal() : ""}
       ${state.chatModalOpen ? renderChatModal() : ""}
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
@@ -1447,8 +1578,10 @@ function renderBillActionDock() {
 function renderTasksPage() {
   const groups = getReminderTaskGroups();
   const visibleTasks = getVisibleReminderTasks(groups);
-  const totalForProgress = groups.pending.length + groups.done.length;
-  const progress = totalForProgress ? Math.round((groups.done.length / totalForProgress) * 100) : 0;
+  const summary = getReminderSummary(groups);
+  const totalForProgress = summary.pending + summary.done;
+  const progress = totalForProgress ? Math.round((summary.done / totalForProgress) * 100) : 0;
+  const hasHiddenTasks = !state.taskListExpanded && state.taskListMeta.total > visibleTasks.length;
 
   return `
     <div class="mobile-page reminders-mobile-page reminder-page">
@@ -1470,13 +1603,13 @@ function renderTasksPage() {
         ${renderReminderViewTabs()}
         ${renderReminderCategoryTabs()}
         <section class="reminder-summary" aria-label="今日提醒摘要">
-          ${reminderStat("今日待办", groups.today.length, "待完成事项")}
-          ${reminderStat("已完成", groups.done.length, "已完成事项", "success")}
-          ${reminderStat("重要事项", groups.important.length, "需要优先处理", "danger")}
+          ${reminderStat("今日待办", summary.today, "待完成事项")}
+          ${reminderStat("已完成", summary.done, "已完成事项", "success")}
+          ${reminderStat("重要事项", summary.important, "需要优先处理", "danger")}
           <div class="reminder-progress-summary">
-            <span>今日完成进度</span>
+            <span>任务完成进度</span>
             ${renderTaskProgressRing(progress)}
-            <strong>${groups.done.length}/${totalForProgress || 0} 已完成</strong>
+            <strong>${summary.done}/${totalForProgress || 0} 已完成</strong>
           </div>
         </section>
       </section>
@@ -1489,19 +1622,29 @@ function renderTasksPage() {
           </button>
         </div>
         ${visibleTasks.length ? renderReminderTaskList(visibleTasks) : renderReminderEmpty()}
-        <button class="reminder-more-button" type="button" data-view-all-tasks>
-          查看全部 ${icon("chevron-right")}
-        </button>
+        ${
+          hasHiddenTasks
+            ? `<button class="reminder-more-button" type="button" data-view-all-tasks>
+                查看全部 ${icon("chevron-right")}
+              </button>`
+            : ""
+        }
       </section>
 
-      ${renderAiReminderAdvice(groups)}
+      ${renderAiReminderAdvice(groups, summary)}
       ${renderReminderActionDock()}
     </div>
   `;
 }
 
 function getReminderTaskGroups() {
-  const sorted = [...state.tasks].sort(compareReminderTasks);
+  const overview = state.taskOverview ?? {};
+  const sorted = uniqueTasks([
+    ...state.tasks,
+    ...(overview.overdue_tasks ?? []),
+    ...(overview.today_tasks ?? []),
+    ...(overview.upcoming_reminders ?? []),
+  ]).sort(compareReminderTasks);
   const pending = sorted.filter((task) => task.status === "pending");
   const done = sorted.filter((task) => task.status === "done");
   const today = pending.filter(isTodayTask);
@@ -1513,6 +1656,32 @@ function getReminderTaskGroups() {
     upcoming: pending.filter((task) => !isTodayTask(task)),
     important: pending.filter((task) => task.priority === "high"),
   };
+}
+
+function uniqueTasks(tasks) {
+  const seen = new Set();
+  return tasks.filter((task) => {
+    if (!task?.id || seen.has(task.id)) {
+      return false;
+    }
+    seen.add(task.id);
+    return true;
+  });
+}
+
+function getReminderSummary(groups) {
+  const overview = state.taskOverview ?? {};
+  return {
+    pending: Number(overview.pending_count ?? groups.pending.length),
+    done: Number(overview.done_count ?? groups.done.length),
+    today: Number(overview.due_today_count ?? groups.today.length),
+    important: countOverviewPriority("high") || groups.important.length,
+  };
+}
+
+function countOverviewPriority(priority) {
+  const item = (state.taskOverview?.priority_breakdown ?? []).find((entry) => entry.priority === priority);
+  return Number(item?.count ?? 0);
 }
 
 function getVisibleReminderTasks(groups) {
@@ -1527,7 +1696,7 @@ function getVisibleReminderTasks(groups) {
   if (state.taskFilters.category) {
     tasks = tasks.filter((task) => matchesTaskCategory(task, state.taskFilters.category));
   }
-  return tasks.slice(0, 5);
+  return tasks.slice(0, state.taskListExpanded ? state.taskListMeta.page_size : 5);
 }
 
 function renderReminderViewTabs() {
@@ -1858,20 +2027,26 @@ function renderDiaryMobilePage() {
 }
 
 function getDiarySnapshot() {
-  const draft = state.diaryDraft;
+  const selectedDateKey = state.diarySelectedDateKey || todayDateKey();
+  const draft = diaryEntryForDate(selectedDateKey);
   const recentBills = state.bills.slice(0, 2).map((bill) => bill.merchant).filter(Boolean);
-  const pendingTasks = state.tasks.filter((task) => task.status === "pending").length;
+  const pendingTasks = Number(
+    state.taskOverview?.pending_count ?? state.tasks.filter((task) => task.status === "pending").length,
+  );
   return {
-    title: draft?.title || "今天的日记",
+    title: draft?.title || `${diaryDateLabel(selectedDateKey)}的日记`,
     mood: draft?.mood || "happy",
     moodLabel: diaryMoodLabel(draft?.mood || "happy"),
     moodScore: draft?.mood === "calm" ? 78 : draft?.mood === "tired" ? 52 : 86,
     weather: draft?.weather || "晴天",
-    createdAt: draft?.created_at || new Date().toISOString(),
-    streakDays: 7,
-    monthEntries: Math.max(12, Number(state.bootstrap?.data_summary?.task_count ?? 0) + 12),
+    createdAt: draft?.created_at || diaryEntryTimestamp(selectedDateKey),
+    dateKey: selectedDateKey,
+    dateLabel: diaryDateLabel(selectedDateKey),
+    hasEntry: Boolean(draft),
+    streakDays: diaryStreakDays(),
+    monthEntries: diaryEntriesInMonth(selectedDateKey),
     body: draft?.content || [
-      "今天是充实又安稳的一天。",
+      `${diaryDateLabel(selectedDateKey)}还没有保存日记，可以先留下一点生活记录。`,
       recentBills.length
         ? `记录了 ${recentBills.join("、")} 相关的小事，生活节奏正在慢慢变清楚。`
         : "完成了一些重要安排，也给自己留了片刻安静时间。",
@@ -1911,9 +2086,9 @@ function renderDiaryMoodSummary(diary) {
       <div class="diary-section-header">
         <div class="diary-section-title">
           <span class="panel-icon">${icon("smile")}</span>
-          <h2 class="section-title">今日心情</h2>
+          <h2 class="section-title">${escapeHtml(diary.dateLabel)}心情</h2>
         </div>
-        <button class="diary-icon-button" type="button" data-diary-calendar-placeholder aria-label="选择日记日期">
+        <button class="diary-icon-button" type="button" data-open-diary-calendar aria-label="选择日记日期">
           ${icon("calendar")}
         </button>
       </div>
@@ -1977,6 +2152,7 @@ function renderDiaryEntry(diary) {
           <h2 class="section-title">${escapeHtml(diary.title)}</h2>
         </div>
         <div class="diary-entry-meta">
+          <span>${icon("calendar")}${escapeHtml(diary.dateLabel)}</span>
           <span>${icon("clock")}${formatDiaryTime(diary.createdAt)}</span>
           <span>${icon("sun")}${escapeHtml(diary.weather)}</span>
           <span class="is-soft">${icon("smile")}${escapeHtml(diary.moodLabel)}</span>
@@ -1989,6 +2165,73 @@ function renderDiaryEntry(diary) {
         ${lines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
       </div>
     </section>
+  `;
+}
+
+function renderDiaryCalendarModal() {
+  const monthDate = dateFromMonthKey(state.diaryCalendarMonthKey || monthKeyFromDate(new Date()));
+  const selectedKey = state.diarySelectedDateKey || todayDateKey();
+  const days = diaryCalendarDays(monthDate);
+  const monthLabel = monthDate.toLocaleDateString("zh-CN", { year: "numeric", month: "long" });
+  const selectedEntry = diaryEntryForDate(selectedKey);
+  const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal diary-calendar-modal" role="dialog" aria-modal="true" aria-labelledby="diary-calendar-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="diary-calendar-title">日记日历</h2>
+            <p class="section-note">当前是前端本地草稿日历，后续可接入真实日记存储。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="diary-calendar-toolbar">
+          <button class="diary-calendar-nav is-prev" type="button" data-diary-calendar-nav="-1" aria-label="上个月">
+            ${icon("chevron-right")}
+          </button>
+          <strong>${escapeHtml(monthLabel)}</strong>
+          <button class="diary-calendar-nav" type="button" data-diary-calendar-nav="1" aria-label="下个月">
+            ${icon("chevron-right")}
+          </button>
+        </div>
+        <div class="diary-calendar-weekdays" aria-hidden="true">
+          ${weekdays.map((day) => `<span>${day}</span>`).join("")}
+        </div>
+        <div class="diary-calendar-grid">
+          ${days.map((day) => renderDiaryCalendarDay(day, monthDate, selectedKey)).join("")}
+        </div>
+        <div class="diary-calendar-footer">
+          <div>
+            <strong>${escapeHtml(diaryDateLabel(selectedKey))}</strong>
+            <span>${selectedEntry ? "已有本地草稿" : "还没有日记草稿"}</span>
+          </div>
+          <div class="diary-calendar-actions">
+            <button class="button ghost" type="button" data-diary-calendar-today>今天</button>
+            <button class="button ghost" type="button" data-diary-calendar-done>完成</button>
+            <button class="button primary" type="button" data-diary-calendar-write>
+              ${icon("edit")}写这天
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderDiaryCalendarDay(day, monthDate, selectedKey) {
+  const key = dateKeyFromDate(day);
+  const isCurrentMonth = day.getMonth() === monthDate.getMonth();
+  const isSelected = key === selectedKey;
+  const isToday = key === todayDateKey();
+  const hasEntry = Boolean(diaryEntryForDate(key));
+  return `
+    <button class="diary-calendar-day ${isCurrentMonth ? "" : "is-muted"} ${isSelected ? "is-selected" : ""} ${isToday ? "is-today" : ""} ${hasEntry ? "has-entry" : ""}"
+      type="button" data-diary-date="${key}" aria-label="选择 ${escapeHtml(diaryDateLabel(key))}">
+      <span>${day.getDate()}</span>
+      ${hasEntry ? "<i></i>" : ""}
+    </button>
   `;
 }
 
@@ -2089,9 +2332,89 @@ function diaryMoodLabel(value) {
 function formatDiaryTime(value) {
   const date = value ? new Date(value) : new Date();
   if (Number.isNaN(date.getTime())) {
+    return "未设置";
+  }
+  const prefix = dateKeyFromDate(date) === todayDateKey() ? "今天" : formatMonthDay(date);
+  return `${prefix} ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function todayDateKey() {
+  return dateKeyFromDate(new Date());
+}
+
+function dateKeyFromDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateFromDateKey(dateKey) {
+  const [year, month, day] = String(dateKey || todayDateKey()).split("-").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1);
+}
+
+function monthKeyFromDate(date) {
+  return dateKeyFromDate(date).slice(0, 7);
+}
+
+function dateFromMonthKey(monthKey) {
+  const [year, month] = String(monthKey || monthKeyFromDate(new Date())).split("-").map(Number);
+  return new Date(year, (month || 1) - 1, 1);
+}
+
+function shiftMonthKey(monthKey, delta) {
+  const date = dateFromMonthKey(monthKey);
+  date.setMonth(date.getMonth() + delta);
+  return monthKeyFromDate(date);
+}
+
+function diaryCalendarDays(monthDate) {
+  const first = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const mondayOffset = (first.getDay() + 6) % 7;
+  const start = new Date(first);
+  start.setDate(first.getDate() - mondayOffset);
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    return day;
+  });
+}
+
+function diaryDateLabel(dateKey) {
+  const date = dateFromDateKey(dateKey);
+  if (dateKey === todayDateKey()) {
     return "今天";
   }
-  return `今天 ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+  return date.toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+}
+
+function diaryEntryTimestamp(dateKey) {
+  const date = dateFromDateKey(dateKey);
+  const now = new Date();
+  date.setHours(now.getHours(), now.getMinutes(), 0, 0);
+  return date.toISOString();
+}
+
+function diaryEntryForDate(dateKey) {
+  return state.diaryEntries.find((entry) => entry.dateKey === dateKey)
+    ?? (state.diaryDraft?.dateKey === dateKey ? state.diaryDraft : null);
+}
+
+function diaryEntriesInMonth(dateKey) {
+  const monthKey = String(dateKey || todayDateKey()).slice(0, 7);
+  return state.diaryEntries.filter((entry) => entry.dateKey?.startsWith(monthKey)).length;
+}
+
+function diaryStreakDays() {
+  const keys = new Set(state.diaryEntries.map((entry) => entry.dateKey));
+  let cursor = dateFromDateKey(todayDateKey());
+  let count = 0;
+  while (keys.has(dateKeyFromDate(cursor))) {
+    count += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return count;
 }
 
 function renderDiaryPage() {
@@ -2129,7 +2452,7 @@ function renderProfilePage() {
   const completedTasks = Number(
     state.taskOverview?.done_count ?? state.tasks.filter((task) => task.status === "done").length,
   );
-  const diaryDraftCount = state.diaryDraft ? 1 : 0;
+  const diaryDraftCount = state.diaryEntries.length || (state.diaryDraft ? 1 : 0);
 
   return `
     <div class="mobile-page profile-mobile-page profile-page">
@@ -2911,7 +3234,7 @@ function renderDiaryModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="diary-modal-title">写日记</h2>
-            <p class="section-note">当前先保存为本次前端体验草稿，后续接入真实日记存储。</p>
+            <p class="section-note">保存到 ${escapeHtml(diary.dateLabel)} 的本次前端草稿，后续接入真实日记存储。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
