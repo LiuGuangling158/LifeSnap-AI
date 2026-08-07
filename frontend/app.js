@@ -52,8 +52,11 @@ const state = {
   deleteTarget: null,
   taskModalOpen: false,
   diaryModalOpen: false,
+  chatModalOpen: false,
   snoozeTarget: null,
   settingsConfirm: null,
+  chatMessages: [],
+  chatDraft: "",
   billFilters: {
     year: "",
     month: "",
@@ -77,6 +80,7 @@ const state = {
   },
   bootstrap: null,
   billOverview: null,
+  taskOverview: null,
   snapshotStatus: null,
   bills: [],
   tasks: [],
@@ -121,7 +125,25 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-voice-placeholder]")) {
-    showToast("语音操作会在后续接入 AI 对话和识别流程。");
+    openChatModal();
+    return;
+  }
+
+  const chatExampleButton = event.target.closest("[data-chat-example]");
+  if (chatExampleButton) {
+    openChatModal(chatExampleButton.dataset.chatExample || "");
+    return;
+  }
+
+  const chatConfirmButton = event.target.closest("[data-chat-confirm]");
+  if (chatConfirmButton) {
+    confirmChatAction(chatConfirmButton.dataset.actionType, chatConfirmButton.dataset.candidateId);
+    return;
+  }
+
+  const chatDiscardButton = event.target.closest("[data-chat-discard]");
+  if (chatDiscardButton) {
+    discardChatAction(chatDiscardButton.dataset.actionType, chatDiscardButton.dataset.candidateId);
     return;
   }
 
@@ -259,6 +281,7 @@ document.addEventListener("click", (event) => {
     state.editingBill = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
+    state.chatModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
@@ -336,6 +359,7 @@ document.addEventListener("keydown", (event) => {
       || state.deleteTarget
       || state.taskModalOpen
       || state.diaryModalOpen
+      || state.chatModalOpen
       || state.snoozeTarget
       || state.settingsConfirm
     )
@@ -345,6 +369,7 @@ document.addEventListener("keydown", (event) => {
     state.deleteTarget = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
+    state.chatModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
@@ -376,6 +401,12 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-chat-form]")) {
+    event.preventDefault();
+    await submitChatMessage(new FormData(event.target));
+    return;
+  }
+
   if (event.target.matches("[data-snooze-form]")) {
     event.preventDefault();
     await submitSnooze(new FormData(event.target));
@@ -390,11 +421,12 @@ async function loadData() {
   render();
 
   try {
-    const [bootstrap, billOverview, billList, taskList, snapshotStatus] = await Promise.all([
+    const [bootstrap, billOverview, billList, taskList, taskOverview, snapshotStatus] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
       api(buildBillListPath()),
       api("/tasks?page_size=8"),
+      api("/tasks/statistics/overview?upcoming_days=7&item_limit=10"),
       api("/data/snapshot/status"),
     ]);
     state.bootstrap = bootstrap;
@@ -407,6 +439,7 @@ async function loadData() {
       total_pages: billList.total_pages ?? 0,
     };
     state.tasks = taskList.items ?? [];
+    state.taskOverview = taskOverview;
     state.snapshotStatus = snapshotStatus;
   } catch (error) {
     state.error = error.message || "后端连接失败";
@@ -538,6 +571,130 @@ function saveDiaryDraft(formData) {
   };
   state.diaryModalOpen = false;
   showToast("日记草稿已保存到本次前端体验。");
+}
+
+function openChatModal(draft = "") {
+  state.chatModalOpen = true;
+  if (draft) {
+    state.chatDraft = draft;
+  }
+  if (!state.chatMessages.length) {
+    state.chatMessages = [
+      {
+        role: "assistant",
+        text: "你可以直接说一句账单或提醒，我会先整理成候选记录，确认后再保存。",
+      },
+    ];
+  }
+  render();
+}
+
+async function submitChatMessage(formData) {
+  const message = String(formData.get("message") || "").trim();
+  if (!message) {
+    return;
+  }
+
+  state.chatMessages = [...state.chatMessages, { role: "user", text: message }];
+  state.chatDraft = "";
+  state.saving = true;
+  render();
+
+  try {
+    const response = await api("/chat/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    state.chatMessages = [
+      ...state.chatMessages,
+      { role: "assistant", text: response.reply, response },
+    ];
+  } catch (error) {
+    state.chatMessages = [
+      ...state.chatMessages,
+      { role: "assistant", text: error.message || "AI 助手暂时没有响应。" },
+    ];
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function confirmChatAction(actionType, candidateId) {
+  if (!actionType || !candidateId) {
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const response = await api("/chat/confirm-action", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": `web-chat-confirm-${candidateId}-${crypto.randomUUID()}`,
+      },
+      body: JSON.stringify({ action_type: actionType, candidate_id: candidateId }),
+    });
+    markChatCandidate(candidateId, "confirmed");
+    state.chatMessages = [
+      ...state.chatMessages,
+      { role: "assistant", text: response.reply || "已确认保存。" },
+    ];
+    state.toast = actionType === "bill_candidate" ? "AI 账单已保存" : "AI 待办已保存";
+    await loadData();
+  } catch (error) {
+    state.chatMessages = [
+      ...state.chatMessages,
+      { role: "assistant", text: error.message || "确认保存失败。" },
+    ];
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function discardChatAction(actionType, candidateId) {
+  if (!actionType || !candidateId) {
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const response = await api("/chat/discard-action", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": `web-chat-discard-${candidateId}-${crypto.randomUUID()}`,
+      },
+      body: JSON.stringify({ action_type: actionType, candidate_id: candidateId }),
+    });
+    markChatCandidate(candidateId, "discarded");
+    state.chatMessages = [
+      ...state.chatMessages,
+      { role: "assistant", text: response.reply || "已丢弃候选记录。" },
+    ];
+    await loadData();
+  } catch (error) {
+    state.chatMessages = [
+      ...state.chatMessages,
+      { role: "assistant", text: error.message || "丢弃失败。" },
+    ];
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+function markChatCandidate(candidateId, status) {
+  state.chatMessages = state.chatMessages.map((message) => {
+    const responseCandidateId = getChatCandidateId(message.response);
+    return responseCandidateId === candidateId ? { ...message, handled: status } : message;
+  });
 }
 
 async function completeTask(taskId) {
@@ -775,6 +932,7 @@ function render() {
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
       ${state.diaryModalOpen ? renderDiaryModal() : ""}
+      ${state.chatModalOpen ? renderChatModal() : ""}
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""}
@@ -1968,8 +2126,10 @@ function renderProfilePage() {
   const expense = Number(monthly.total_expense ?? 0);
   const income = Number(monthly.total_income ?? 0);
   const netAmount = Number(monthly.net_amount ?? income - expense);
-  const completedTasks = state.tasks.filter((task) => task.status === "done").length;
-  const diaryCount = state.diaryDraft ? 1 : 0;
+  const completedTasks = Number(
+    state.taskOverview?.done_count ?? state.tasks.filter((task) => task.status === "done").length,
+  );
+  const diaryDraftCount = state.diaryDraft ? 1 : 0;
 
   return `
     <div class="mobile-page profile-mobile-page profile-page">
@@ -2011,7 +2171,7 @@ function renderProfilePage() {
       ${renderProfileFinanceCard(expense, income, netAmount, monthly)}
       ${renderProfileQuickLinks()}
       ${renderProfileTools()}
-      ${renderProfileDataPanel(summary, completedTasks, diaryCount)}
+      ${renderProfileDataPanel(summary, completedTasks, diaryDraftCount)}
       ${renderProfileSafetyPanel()}
     </div>
   `;
@@ -2056,6 +2216,7 @@ function profileFinanceCategories(monthly, expense) {
     .map((item) => ({
       category: item.category,
       amount: Number(item.amount ?? item.total ?? 0),
+      backendPercent: Number(item.percentage ?? NaN),
     }))
     .filter((item) => item.amount > 0)
     .slice(0, 4);
@@ -2065,10 +2226,14 @@ function profileFinanceCategories(monthly, expense) {
   }
 
   const total = expense > 0 ? expense : source.reduce((sum, item) => sum + item.amount, 0);
-  return source.map((item) => ({
-    ...item,
-    percent: total > 0 ? Math.max(1, Math.round((item.amount / total) * 100)) : 0,
-  }));
+  return source.map((item) => {
+    const computedPercent = total > 0 ? Math.max(1, Math.round((item.amount / total) * 100)) : 0;
+    return {
+      category: item.category,
+      amount: item.amount,
+      percent: Number.isFinite(item.backendPercent) ? Math.max(0, Math.round(item.backendPercent)) : computedPercent,
+    };
+  });
 }
 
 function renderProfileDonut(categories) {
@@ -2159,8 +2324,8 @@ function renderProfileDataPanel(summary, completedTasks, diaryCount) {
         </button>
       </div>
       <div class="profile-data-grid">
-        ${profileDataCard("calendar", "记账天数", billCount, "天", "坚持记录", "mint")}
-        ${profileDataCard("notebook", "日记篇数", diaryCount, "篇", "记录心情", "blue")}
+        ${profileDataCard("calendar", "记账笔数", billCount, "笔", "后端账单", "mint")}
+        ${profileDataCard("notebook", "日记草稿", diaryCount, "篇", "本地草稿", "blue")}
         ${profileDataCard("check-circle", "完成事项", completedTasks, "个", "高效生活", "orange")}
         ${profileDataCard("image", "附件片段", attachmentCount, "个", "生活素材", "rose")}
       </div>
@@ -2788,6 +2953,167 @@ function renderDiaryModal() {
       </section>
     </div>
   `;
+}
+
+function renderChatModal() {
+  const messages = state.chatMessages.length
+    ? state.chatMessages
+    : [{ role: "assistant", text: "你可以直接说一句账单或提醒，我会先整理成候选记录，确认后再保存。" }];
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal chat-modal" role="dialog" aria-modal="true" aria-labelledby="chat-modal-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="chat-modal-title">AI 助手</h2>
+            <p class="section-note">输入账单或提醒描述，后端会生成待确认的记录。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="chat-examples" aria-label="快捷输入">
+          <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">沙县午餐</button>
+          <button type="button" data-chat-example="提醒我明天 10 点开会">明天开会</button>
+          <button type="button" data-chat-example="工资收入 6800 元">工资收入</button>
+        </div>
+        <div class="chat-thread" aria-live="polite">
+          ${messages.map((message, index) => renderChatMessage(message, index)).join("")}
+          ${state.saving ? `<div class="chat-message assistant"><span>${icon("spark")}</span><p>正在整理...</p></div>` : ""}
+        </div>
+        <form class="chat-form" data-chat-form>
+          <label class="sr-only" for="chat_message">输入账单或提醒</label>
+          <textarea id="chat_message" name="message" maxlength="5000" required
+            placeholder="例如：第一行写商户，第二行写午餐 28 元；或：提醒我明天 10 点开会">${escapeHtml(state.chatDraft)}</textarea>
+          <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+            ${icon("send")}发送
+          </button>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderChatMessage(message, index) {
+  const role = message.role === "user" ? "user" : "assistant";
+  return `
+    <article class="chat-message ${role}" data-chat-message="${index}">
+      <span>${icon(role === "user" ? "user" : "spark")}</span>
+      <div>
+        <p>${escapeHtml(message.text ?? "")}</p>
+        ${renderChatCandidate(message)}
+      </div>
+    </article>
+  `;
+}
+
+function renderChatCandidate(message) {
+  const response = message.response;
+  if (!response || response.action_type === "none" || !response.candidate) {
+    return "";
+  }
+
+  const candidateId = getChatCandidateId(response);
+  const actionType = response.action_type;
+  const candidate = response.candidate;
+  const data = candidate.data ?? {};
+  const confidence = Math.round(Number(candidate.confidence ?? response.confidence ?? 0) * 100);
+  const rows = actionType === "bill_candidate"
+    ? [
+        ["类型", labelTransaction(data.transaction_type)],
+        ["金额", data.amount ? money(data.amount) : "待补充"],
+        ["商户", data.merchant || "待补充"],
+        ["分类", data.category || "其他"],
+        ["时间", data.paid_at ? formatDate(data.paid_at) : "待补充"],
+      ]
+    : [
+        ["类型", labelTaskType(data.task_type)],
+        ["标题", data.title || "待补充"],
+        ["分类", data.category || "生活"],
+        ["优先级", labelTaskPriority(data.priority)],
+        ["时间", formatChatTaskTime(data)],
+      ];
+  const warnings = response.warnings?.length ? response.warnings : candidate.warnings ?? [];
+  const canConfirm = isChatCandidateConfirmable(actionType, data);
+  const warningText = chatCandidateWarningText(actionType, data, warnings);
+  const handledLabel = {
+    confirmed: "已保存",
+    discarded: "已丢弃",
+  }[message.handled];
+
+  return `
+    <div class="chat-candidate">
+      <div class="chat-candidate-head">
+        <strong>${actionType === "bill_candidate" ? "候选账单" : "候选提醒"}</strong>
+        <span>可信度 ${confidence}%</span>
+      </div>
+      <div class="chat-candidate-grid">
+        ${rows
+          .map(
+            ([label, value]) => `
+              <div>
+                <small>${escapeHtml(label)}</small>
+                <b>${escapeHtml(String(value ?? ""))}</b>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+      ${warningText ? `<p class="chat-warning">${escapeHtml(warningText)}</p>` : ""}
+      <div class="chat-candidate-actions">
+        ${
+          handledLabel
+            ? `<span class="chat-status">${handledLabel}</span>`
+            : `
+              <button class="button primary" type="button"
+                data-chat-confirm
+                data-action-type="${escapeHtml(actionType)}"
+                data-candidate-id="${escapeHtml(candidateId)}"
+                ${state.saving || !canConfirm ? "disabled" : ""}>
+                ${icon("check-circle")}确认保存
+              </button>
+              <button class="button ghost" type="button"
+                data-chat-discard
+                data-action-type="${escapeHtml(actionType)}"
+                data-candidate-id="${escapeHtml(candidateId)}"
+                ${state.saving ? "disabled" : ""}>
+                ${icon("trash")}丢弃
+              </button>
+            `
+        }
+      </div>
+    </div>
+  `;
+}
+
+function getChatCandidateId(response) {
+  return String(response?.candidate_id || response?.candidate?.candidate_id || "");
+}
+
+function isChatCandidateConfirmable(actionType, data) {
+  if (actionType === "bill_candidate") {
+    return Boolean(data?.amount && data?.merchant);
+  }
+  if (actionType === "task_candidate") {
+    return Boolean(data?.title && (data.task_type !== "reminder" || data.remind_at));
+  }
+  return false;
+}
+
+function chatCandidateWarningText(actionType, data, warnings) {
+  if (actionType === "bill_candidate" && !isChatCandidateConfirmable(actionType, data)) {
+    return "缺少金额或商户，暂不能确认保存。可以第一行写商户，第二行写金额和支付方式。";
+  }
+  if (actionType === "task_candidate" && !isChatCandidateConfirmable(actionType, data)) {
+    return "缺少标题或提醒时间，暂不能确认保存。请重新输入更完整的一句。";
+  }
+  return warnings.length ? "有字段可能需要你再确认。" : "";
+}
+
+function formatChatTaskTime(data) {
+  const target = data?.task_type === "reminder"
+    ? data.remind_at || data.due_at
+    : data?.due_at || data?.remind_at;
+  return target ? formatDate(target) : "待补充";
 }
 
 function renderSnoozeModal() {
