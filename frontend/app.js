@@ -32,6 +32,14 @@ const routes = [
     subtitle: "记录生活点滴的入口先占位，后续接入真实日记数据。",
   },
   {
+    id: "assistant",
+    label: "助手",
+    icon: "spark",
+    eyebrow: "意图识别",
+    title: "智能助手",
+    subtitle: "把一句话、图片或语音整理成可确认的生活操作。",
+  },
+  {
     id: "settings",
     label: "设置",
     icon: "settings",
@@ -53,11 +61,12 @@ const state = {
   taskModalOpen: false,
   diaryModalOpen: false,
   diaryCalendarOpen: false,
-  chatModalOpen: false,
   snoozeTarget: null,
   settingsConfirm: null,
   chatMessages: [],
   chatDraft: "",
+  chatAttachments: [],
+  voiceListening: false,
   billFilters: {
     year: "",
     month: "",
@@ -136,13 +145,24 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-voice-placeholder]")) {
-    openChatModal();
+    openAssistantPage("", { startVoice: true });
     return;
   }
 
   const chatExampleButton = event.target.closest("[data-chat-example]");
   if (chatExampleButton) {
-    openChatModal(chatExampleButton.dataset.chatExample || "");
+    openAssistantPage(chatExampleButton.dataset.chatExample || "");
+    return;
+  }
+
+  if (event.target.closest("[data-assistant-voice]")) {
+    toggleVoiceInput();
+    return;
+  }
+
+  const removeChatAttachmentButton = event.target.closest("[data-remove-chat-attachment]");
+  if (removeChatAttachmentButton) {
+    removeChatAttachment(removeChatAttachmentButton.dataset.removeChatAttachment);
     return;
   }
 
@@ -326,7 +346,6 @@ document.addEventListener("click", (event) => {
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
-    state.chatModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
@@ -405,7 +424,6 @@ document.addEventListener("keydown", (event) => {
       || state.taskModalOpen
       || state.diaryModalOpen
       || state.diaryCalendarOpen
-      || state.chatModalOpen
       || state.snoozeTarget
       || state.settingsConfirm
     )
@@ -416,10 +434,22 @@ document.addEventListener("keydown", (event) => {
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
-    state.chatModalOpen = false;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
+  }
+});
+
+document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-chat-input]")) {
+    state.chatDraft = event.target.value;
+  }
+});
+
+document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-chat-image-input]")) {
+    await addChatImages(event.target.files);
+    event.target.value = "";
   }
 });
 
@@ -657,38 +687,77 @@ function selectDiaryToday() {
   selectDiaryDate(todayDateKey());
 }
 
+function ensureChatIntro() {
+  if (state.chatMessages.length) {
+    return;
+  }
+  state.chatMessages = [
+    {
+      role: "assistant",
+      text: "你可以直接说一句账单或提醒，我会先整理成候选记录，确认后再保存。",
+    },
+  ];
+}
+
 function openChatModal(draft = "") {
-  state.chatModalOpen = true;
+  openAssistantPage(draft);
+}
+
+function openAssistantPage(draft = "", options = {}) {
   if (draft) {
     state.chatDraft = draft;
   }
-  if (!state.chatMessages.length) {
-    state.chatMessages = [
-      {
-        role: "assistant",
-        text: "你可以直接说一句账单或提醒，我会先整理成候选记录，确认后再保存。",
-      },
-    ];
+  ensureChatIntro();
+  if (state.route !== "assistant") {
+    window.location.hash = "assistant";
+  } else {
+    render();
   }
-  render();
+  if (options.startVoice) {
+    window.setTimeout(() => startVoiceInput(), 80);
+  }
 }
 
 async function submitChatMessage(formData) {
   const message = String(formData.get("message") || "").trim();
-  if (!message) {
+  const attachments = state.chatAttachments.filter((attachment) => attachment.status === "uploaded");
+  const hasUploading = state.chatAttachments.some((attachment) => attachment.status === "uploading");
+  const hasFailedAttachments = state.chatAttachments.some((attachment) => attachment.status === "failed");
+
+  if (hasUploading) {
+    showToast("图片还在上传，稍等一下再发送。");
     return;
   }
 
-  state.chatMessages = [...state.chatMessages, { role: "user", text: message }];
+  if (!message && hasFailedAttachments && !attachments.length) {
+    showToast("图片上传失败，请移除后重试或补充文字再发送。");
+    return;
+  }
+
+  if (!message && !attachments.length) {
+    return;
+  }
+
+  const displayText = message || "发送了一张图片";
+  state.chatMessages = [
+    ...state.chatMessages,
+    {
+      role: "user",
+      text: displayText,
+      attachments: attachments.map(toChatMessageAttachment),
+    },
+  ];
   state.chatDraft = "";
+  state.chatAttachments = [];
   state.saving = true;
   render();
 
   try {
+    const backendMessage = buildChatBackendMessage(message, attachments);
     const response = await api("/chat/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message: backendMessage }),
     });
     state.chatMessages = [
       ...state.chatMessages,
@@ -701,6 +770,176 @@ async function submitChatMessage(formData) {
     ];
   } finally {
     state.saving = false;
+    render();
+  }
+}
+
+async function addChatImages(fileList) {
+  const files = Array.from(fileList || []).filter((file) => file.type.startsWith("image/"));
+  if (!files.length) {
+    showToast("请选择图片文件。");
+    return;
+  }
+
+  const slots = Math.max(0, 4 - state.chatAttachments.length);
+  const selectedFiles = files.slice(0, slots);
+  if (!selectedFiles.length) {
+    showToast("一次最多保留 4 张待发送图片。");
+    return;
+  }
+
+  const pendingItems = selectedFiles.map((file) => ({
+    id: crypto.randomUUID(),
+    name: file.name || "图片",
+    type: file.type,
+    size: file.size,
+    previewUrl: URL.createObjectURL(file),
+    status: "uploading",
+  }));
+  state.chatAttachments = [...state.chatAttachments, ...pendingItems];
+  render();
+
+  await Promise.all(
+    pendingItems.map(async (item, index) => {
+      const file = selectedFiles[index];
+      const payload = new FormData();
+      payload.append("file", file);
+      payload.append("source", "upload");
+
+      try {
+        const uploaded = await api("/attachments/upload", {
+          method: "POST",
+          body: payload,
+        });
+        updateChatAttachment(item.id, {
+          status: "uploaded",
+          backendId: uploaded.id,
+          name: uploaded.filename || item.name,
+          type: uploaded.content_type || item.type,
+          size: uploaded.file_size ?? item.size,
+        });
+      } catch (error) {
+        updateChatAttachment(item.id, {
+          status: "failed",
+          error: error.message || "上传失败",
+        });
+      }
+    }),
+  );
+  render();
+}
+
+function updateChatAttachment(id, updates) {
+  state.chatAttachments = state.chatAttachments.map((attachment) =>
+    attachment.id === id ? { ...attachment, ...updates } : attachment,
+  );
+}
+
+function removeChatAttachment(id) {
+  state.chatAttachments = state.chatAttachments.filter((attachment) => attachment.id !== id);
+  render();
+}
+
+function toChatMessageAttachment(attachment) {
+  return {
+    id: attachment.id,
+    backendId: attachment.backendId,
+    name: attachment.name,
+    type: attachment.type,
+    size: attachment.size,
+    previewUrl: attachment.previewUrl,
+    status: attachment.status,
+  };
+}
+
+function buildChatBackendMessage(message, attachments) {
+  if (!attachments.length) {
+    return message;
+  }
+  const attachmentLines = attachments.map(
+    (attachment) => `图片附件：${attachment.name}，附件ID：${attachment.backendId || "未上传"}`,
+  );
+  return [
+    message || "请根据图片附件判断是否需要生成账单、提醒或日记操作。",
+    ...attachmentLines,
+  ].join("\n");
+}
+
+function toggleVoiceInput() {
+  if (state.voiceListening) {
+    stopVoiceInput();
+    return;
+  }
+  startVoiceInput();
+}
+
+function startVoiceInput() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    showToast("当前浏览器暂不支持语音输入，可以先手动输入。");
+    return;
+  }
+
+  stopVoiceInput(false);
+  const recognition = new Recognition();
+  const initialDraft = state.chatDraft.trim();
+  let spokenText = "";
+
+  recognition.lang = "zh-CN";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+
+  recognition.onresult = (event) => {
+    let interimText = "";
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const transcript = event.results[index][0]?.transcript?.trim() || "";
+      if (event.results[index].isFinal) {
+        spokenText = `${spokenText}${spokenText && transcript ? " " : ""}${transcript}`.trim();
+      } else {
+        interimText = transcript;
+      }
+    }
+    const currentSpeech = [spokenText, interimText].filter(Boolean).join(" ");
+    state.chatDraft = [initialDraft, currentSpeech].filter(Boolean).join(initialDraft && currentSpeech ? " " : "");
+    render();
+  };
+
+  recognition.onerror = () => {
+    state.voiceListening = false;
+    render();
+    showToast("语音输入没有成功，可以再试一次。");
+  };
+
+  recognition.onend = () => {
+    state.voiceListening = false;
+    render();
+  };
+
+  window.chatSpeechRecognition = recognition;
+  state.voiceListening = true;
+  render();
+  try {
+    recognition.start();
+  } catch (error) {
+    state.voiceListening = false;
+    render();
+    showToast("语音输入启动失败，可以再试一次。");
+  }
+}
+
+function stopVoiceInput(shouldRender = true) {
+  if (window.chatSpeechRecognition) {
+    window.chatSpeechRecognition.onend = null;
+    window.chatSpeechRecognition.onerror = null;
+    try {
+      window.chatSpeechRecognition.stop();
+    } catch (error) {
+      // Speech recognition can already be stopped by the browser.
+    }
+    window.chatSpeechRecognition = null;
+  }
+  state.voiceListening = false;
+  if (shouldRender) {
     render();
   }
 }
@@ -1050,7 +1289,7 @@ function getRoute() {
 function render() {
   const route = routes.find((item) => item.id === state.route) ?? routes[0];
   const primaryAction = getPrimaryAction();
-  const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "settings"].includes(state.route);
+  const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "assistant", "settings"].includes(state.route);
   app.innerHTML = `
     <div class="app-shell mobile-shell">
       <main class="main mobile-main">
@@ -1063,7 +1302,6 @@ function render() {
       ${state.taskModalOpen ? renderTaskModal() : ""}
       ${state.diaryModalOpen ? renderDiaryModal() : ""}
       ${state.diaryCalendarOpen ? renderDiaryCalendarModal() : ""}
-      ${state.chatModalOpen ? renderChatModal() : ""}
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""}
@@ -1152,6 +1390,7 @@ function renderPage() {
   if (state.route === "bills") return renderBillsPage();
   if (state.route === "tasks") return renderTasksPage();
   if (state.route === "diary") return renderDiaryMobilePage();
+  if (state.route === "assistant") return renderAssistantPage();
   if (state.route === "settings") return renderProfilePage();
   return renderDashboard();
 }
@@ -2589,7 +2828,7 @@ function renderProfileQuickLinks() {
   return `
     <section class="surface profile-shortcuts" aria-label="个人快捷入口">
       ${profileShortcut("wallet", "记账本", "记录每一笔收支", "data-route=\"bills\"", "mint")}
-      ${profileShortcut("spark", "智能助手", "语音对话操作", "data-voice-placeholder", "blue")}
+      ${profileShortcut("spark", "智能助手", "语音对话操作", "data-route=\"assistant\"", "blue")}
       ${profileShortcut("calendar-check", "待办提醒", "查看事项安排", "data-route=\"tasks\"", "gold")}
       ${profileShortcut("notebook", "日记本", "记录心情日常", "data-route=\"diary\"", "rose")}
     </section>
@@ -2839,6 +3078,7 @@ function renderMobileTabbar() {
   const tabs = [
     ["dashboard", "首页", "home"],
     ["bills", "记账", "wallet"],
+    ["assistant", "助手", "spark"],
     ["tasks", "提醒", "bell"],
     ["diary", "日记", "book"],
     ["settings", "我的", "user"],
@@ -3278,40 +3518,107 @@ function renderDiaryModal() {
   `;
 }
 
-function renderChatModal() {
+function renderAssistantPage() {
   const messages = state.chatMessages.length
     ? state.chatMessages
     : [{ role: "assistant", text: "你可以直接说一句账单或提醒，我会先整理成候选记录，确认后再保存。" }];
   return `
-    <div class="modal-backdrop" role="presentation">
-      <section class="modal chat-modal" role="dialog" aria-modal="true" aria-labelledby="chat-modal-title">
-        <div class="modal-header">
+    <div class="mobile-page assistant-page">
+      <section class="assistant-page-hero" aria-label="智能助手">
+        <div>
+          <span class="assistant-kicker">${icon("spark")}LifeSnap AI</span>
+          <h1 class="assistant-page-title">智能助手</h1>
+          <p class="assistant-page-subtitle">把生活里的小事先说出来，确认后再执行。</p>
+        </div>
+        <div class="assistant-hero-bot" aria-hidden="true">
+          <span class="bot-antenna"></span>
+          <span class="bot-face"></span>
+          <span class="bot-body"></span>
+        </div>
+      </section>
+
+      <section class="assistant-chat-page" aria-label="AI 对话">
+        <div class="assistant-session-bar">
           <div>
-            <h2 class="modal-title" id="chat-modal-title">AI 助手</h2>
-            <p class="section-note">输入账单或提醒描述，后端会生成待确认的记录。</p>
+            <p class="assistant-session-label">当前会话</p>
+            <h2 class="assistant-session-title">生活意图识别</h2>
           </div>
-          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
-            ${icon("close")}
+          <button class="assistant-session-action ${state.voiceListening ? "is-listening" : ""}" type="button"
+            data-assistant-voice aria-label="${state.voiceListening ? "停止语音输入" : "语音输入"}">
+            ${icon("mic")}
           </button>
         </div>
-        <div class="chat-examples" aria-label="快捷输入">
-          <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">沙县午餐</button>
-          <button type="button" data-chat-example="提醒我明天 10 点开会">明天开会</button>
-          <button type="button" data-chat-example="工资收入 6800 元">工资收入</button>
-        </div>
-        <div class="chat-thread" aria-live="polite">
+
+        ${renderAssistantQuickPrompts()}
+
+        <div class="assistant-thread chat-thread" aria-live="polite">
           ${messages.map((message, index) => renderChatMessage(message, index)).join("")}
           ${state.saving ? `<div class="chat-message assistant"><span>${icon("spark")}</span><p>正在整理...</p></div>` : ""}
         </div>
-        <form class="chat-form" data-chat-form>
+
+        <form class="assistant-composer" data-chat-form>
+          ${renderChatAttachmentQueue()}
           <label class="sr-only" for="chat_message">输入账单或提醒</label>
-          <textarea id="chat_message" name="message" maxlength="5000" required
+          <textarea id="chat_message" name="message" maxlength="5000" data-chat-input
             placeholder="例如：第一行写商户，第二行写午餐 28 元；或：提醒我明天 10 点开会">${escapeHtml(state.chatDraft)}</textarea>
-          <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
-            ${icon("send")}发送
-          </button>
+
+          <div class="assistant-composer-actions">
+            <label class="assistant-tool-button" aria-label="发送图片">
+              ${icon("image")}
+              <span>图片</span>
+              <input class="sr-only" type="file" accept="image/png,image/jpeg,image/webp"
+                multiple data-chat-image-input />
+            </label>
+            <button class="assistant-tool-button ${state.voiceListening ? "is-listening" : ""}" type="button"
+              data-assistant-voice>
+              ${icon("mic")}<span>${state.voiceListening ? "聆听中" : "语音"}</span>
+            </button>
+            <button class="assistant-send-button" type="submit"
+              ${state.saving || state.chatAttachments.some((attachment) => attachment.status === "uploading") ? "disabled" : ""}>
+              ${icon("send")}发送
+            </button>
+          </div>
         </form>
       </section>
+    </div>
+  `;
+}
+
+function renderAssistantQuickPrompts() {
+  return `
+    <div class="assistant-prompts" aria-label="快捷输入">
+      <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">
+        ${icon("utensils")}沙县午餐
+      </button>
+      <button type="button" data-chat-example="提醒我明天 10 点开会">
+        ${icon("bell")}明天开会
+      </button>
+      <button type="button" data-chat-example="工资收入 6800 元">
+        ${icon("income")}工资收入
+      </button>
+    </div>
+  `;
+}
+
+function renderChatAttachmentQueue() {
+  if (!state.chatAttachments.length) {
+    return "";
+  }
+  return `
+    <div class="assistant-attachment-queue" aria-label="待发送图片">
+      ${state.chatAttachments.map((attachment) => `
+        <div class="assistant-attachment">
+          <img src="${escapeHtml(attachment.previewUrl)}" alt="${escapeHtml(attachment.name)}" />
+          <div>
+            <strong>${escapeHtml(attachment.name)}</strong>
+            <span>${chatAttachmentStatus(attachment)}</span>
+          </div>
+          <button type="button" data-remove-chat-attachment="${escapeHtml(attachment.id)}"
+            aria-label="移除 ${escapeHtml(attachment.name)}">
+            ${icon("close")}
+          </button>
+        </div>
+      `).join("")}
     </div>
   `;
 }
@@ -3323,10 +3630,37 @@ function renderChatMessage(message, index) {
       <span>${icon(role === "user" ? "user" : "spark")}</span>
       <div>
         <p>${escapeHtml(message.text ?? "")}</p>
+        ${renderChatMessageAttachments(message.attachments)}
         ${renderChatCandidate(message)}
       </div>
     </article>
   `;
+}
+
+function renderChatMessageAttachments(attachments = []) {
+  if (!attachments.length) {
+    return "";
+  }
+  return `
+    <div class="chat-message-attachments">
+      ${attachments.map((attachment) => `
+        <figure>
+          <img src="${escapeHtml(attachment.previewUrl)}" alt="${escapeHtml(attachment.name)}" />
+          <figcaption>${escapeHtml(attachment.name)}</figcaption>
+        </figure>
+      `).join("")}
+    </div>
+  `;
+}
+
+function chatAttachmentStatus(attachment) {
+  if (attachment.status === "uploaded") {
+    return "已上传";
+  }
+  if (attachment.status === "failed") {
+    return attachment.error || "上传失败";
+  }
+  return "上传中";
 }
 
 function renderChatCandidate(message) {
