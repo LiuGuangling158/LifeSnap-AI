@@ -4674,6 +4674,12 @@ td {
   letter-spacing: 0;
 }
 
+.assistant-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .assistant-session-action {
   display: grid;
   width: 42px;
@@ -4917,6 +4923,72 @@ td {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-result-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 9px;
+  border: 1px solid #d6e5dd;
+  border-radius: var(--radius);
+  background: #f8fcf9;
+  padding: 11px;
+}
+
+.chat-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #24332b;
+}
+
+.chat-result-head > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e1f4ea;
+  color: var(--accent-dark);
+}
+
+.chat-result-head .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.chat-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.chat-result-grid div {
+  min-width: 0;
+  border: 1px solid #e1e9e4;
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 8px;
+}
+
+.chat-result-grid small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-result-grid b {
+  display: block;
+  overflow: hidden;
+  margin-top: 4px;
+  color: #24332b;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-result-card .button {
+  justify-self: start;
 }
 
 .modal-backdrop {
@@ -6077,6 +6149,10 @@ button:focus-visible {
 
   .chat-message-attachments figure {
     width: 104px;
+  }
+
+  .chat-result-grid {
+    grid-template-columns: 1fr;
   }
 
   .mobile-tabbar {

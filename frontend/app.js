@@ -160,6 +160,11 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-chat-clear]")) {
+    resetChatSession();
+    return;
+  }
+
   const removeChatAttachmentButton = event.target.closest("[data-remove-chat-attachment]");
   if (removeChatAttachmentButton) {
     removeChatAttachment(removeChatAttachmentButton.dataset.removeChatAttachment);
@@ -416,6 +421,17 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (
+    event.target.matches("[data-chat-input]")
+    && event.key === "Enter"
+    && !event.shiftKey
+    && !event.isComposing
+  ) {
+    event.preventDefault();
+    event.target.closest("form")?.requestSubmit();
+    return;
+  }
+
   if (
     event.key === "Escape"
     && (
@@ -716,6 +732,15 @@ function openAssistantPage(draft = "", options = {}) {
   if (options.startVoice) {
     window.setTimeout(() => startVoiceInput(), 80);
   }
+}
+
+function resetChatSession() {
+  stopVoiceInput(false);
+  state.chatMessages = [];
+  state.chatDraft = "";
+  state.chatAttachments = [];
+  ensureChatIntro();
+  showToast("已清空当前助手会话。");
 }
 
 async function submitChatMessage(formData) {
@@ -1025,7 +1050,7 @@ async function confirmChatAction(actionType, candidateId) {
     markChatCandidate(candidateId, "confirmed");
     state.chatMessages = [
       ...state.chatMessages,
-      { role: "assistant", text: response.reply || "已确认保存。" },
+      { role: "assistant", text: response.reply || "已确认保存。", response },
     ];
     state.toast = actionType === "bill_candidate" ? "AI 账单已保存" : "AI 待办已保存";
     await loadData();
@@ -1369,6 +1394,16 @@ function render() {
       ${state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""}
     </div>
   `;
+  afterRender();
+}
+
+function afterRender() {
+  if (state.route === "assistant") {
+    const thread = app.querySelector(".assistant-thread");
+    if (thread) {
+      thread.scrollTop = thread.scrollHeight;
+    }
+  }
 }
 
 function renderTopbar(route, primaryAction) {
@@ -3605,10 +3640,16 @@ function renderAssistantPage() {
             <p class="assistant-session-label">当前会话</p>
             <h2 class="assistant-session-title">生活意图识别</h2>
           </div>
-          <button class="assistant-session-action ${state.voiceListening ? "is-listening" : ""}" type="button"
-            data-assistant-voice aria-label="${state.voiceListening ? "停止语音输入" : "语音输入"}">
-            ${icon("mic")}
-          </button>
+          <div class="assistant-session-actions">
+            <button class="assistant-session-action" type="button"
+              data-chat-clear aria-label="清空当前会话">
+              ${icon("trash")}
+            </button>
+            <button class="assistant-session-action ${state.voiceListening ? "is-listening" : ""}" type="button"
+              data-assistant-voice aria-label="${state.voiceListening ? "停止语音输入" : "语音输入"}">
+              ${icon("mic")}
+            </button>
+          </div>
         </div>
 
         ${renderAssistantQuickPrompts()}
@@ -3694,6 +3735,7 @@ function renderChatMessage(message, index) {
         <p>${escapeHtml(message.text ?? "")}</p>
         ${renderChatMessageAttachments(message.attachments)}
         ${renderChatCandidate(message)}
+        ${renderChatResult(message)}
       </div>
     </article>
   `;
@@ -3723,6 +3765,77 @@ function chatAttachmentStatus(attachment) {
     return attachment.error || "上传失败";
   }
   return "上传中";
+}
+
+function renderChatResult(message) {
+  const response = message.response;
+  if (response?.created_bill) {
+    const bill = response.created_bill;
+    return `
+      <div class="chat-result-card">
+        <div class="chat-result-head">
+          <span>${icon("check-circle")}</span>
+          <strong>账单已保存</strong>
+        </div>
+        <div class="chat-result-grid">
+          <div>
+            <small>金额</small>
+            <b>${money(bill.amount)}</b>
+          </div>
+          <div>
+            <small>商户</small>
+            <b>${escapeHtml(bill.merchant || "未命名")}</b>
+          </div>
+          <div>
+            <small>分类</small>
+            <b>${escapeHtml(bill.category || "其他")}</b>
+          </div>
+          <div>
+            <small>时间</small>
+            <b>${formatDate(bill.paid_at)}</b>
+          </div>
+        </div>
+        <button class="button ghost" type="button" data-route="bills">
+          ${icon("wallet")}查看记账
+        </button>
+      </div>
+    `;
+  }
+
+  if (response?.created_task) {
+    const task = response.created_task;
+    return `
+      <div class="chat-result-card">
+        <div class="chat-result-head">
+          <span>${icon("check-circle")}</span>
+          <strong>提醒已保存</strong>
+        </div>
+        <div class="chat-result-grid">
+          <div>
+            <small>标题</small>
+            <b>${escapeHtml(task.title || "未命名")}</b>
+          </div>
+          <div>
+            <small>类型</small>
+            <b>${escapeHtml(labelTaskType(task.task_type))}</b>
+          </div>
+          <div>
+            <small>优先级</small>
+            <b>${escapeHtml(labelTaskPriority(task.priority))}</b>
+          </div>
+          <div>
+            <small>时间</small>
+            <b>${escapeHtml(taskTargetText(task))}</b>
+          </div>
+        </div>
+        <button class="button ghost" type="button" data-route="tasks">
+          ${icon("bell")}查看提醒
+        </button>
+      </div>
+    `;
+  }
+
+  return "";
 }
 
 function renderChatCandidate(message) {
