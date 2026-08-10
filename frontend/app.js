@@ -753,16 +753,28 @@ async function submitChatMessage(formData) {
   render();
 
   try {
-    const backendMessage = buildChatBackendMessage(message, attachments);
-    const response = await api("/chat/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: backendMessage }),
-    });
-    state.chatMessages = [
-      ...state.chatMessages,
-      { role: "assistant", text: response.reply, response },
-    ];
+    const imageMessages = attachments.length ? await analyzeChatAttachments(attachments) : [];
+    const hasImageCandidate = imageMessages.some(
+      (item) => item.response?.action_type === "bill_candidate",
+    );
+    const shouldSendTextToChat = Boolean(message) && !hasImageCandidate;
+
+    if (imageMessages.length) {
+      state.chatMessages = [...state.chatMessages, ...imageMessages];
+    }
+
+    if (shouldSendTextToChat) {
+      const backendMessage = buildChatBackendMessage(message, attachments);
+      const response = await api("/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: backendMessage }),
+      });
+      state.chatMessages = [
+        ...state.chatMessages,
+        { role: "assistant", text: response.reply, response },
+      ];
+    }
   } catch (error) {
     state.chatMessages = [
       ...state.chatMessages,
@@ -772,6 +784,56 @@ async function submitChatMessage(formData) {
     state.saving = false;
     render();
   }
+}
+
+async function analyzeChatAttachments(attachments) {
+  const messages = [];
+  for (const attachment of attachments) {
+    if (!attachment.backendId) {
+      messages.push({
+        role: "assistant",
+        text: `图片「${attachment.name}」还没有上传成功，暂时无法识别。`,
+      });
+      continue;
+    }
+
+    try {
+      const result = await api(`/attachments/${attachment.backendId}/recognize-and-parse-bill`, {
+        method: "POST",
+      });
+      messages.push(chatMessageFromAttachmentResult(attachment, result));
+    } catch (error) {
+      messages.push({
+        role: "assistant",
+        text: `图片「${attachment.name}」已上传，但识别时遇到问题：${error.message || "请稍后再试"}`,
+      });
+    }
+  }
+  return messages;
+}
+
+function chatMessageFromAttachmentResult(attachment, result) {
+  if (result.status === "candidate_created" && result.candidate) {
+    return {
+      role: "assistant",
+      text: `我尝试识别了图片「${attachment.name}」，先整理成一个待确认账单。`,
+      response: {
+        reply: "我从图片里整理出一个待确认账单，你确认后再保存。",
+        intent: "create_bill",
+        confidence: result.candidate.confidence ?? 0.7,
+        action_type: "bill_candidate",
+        candidate_id: result.candidate.candidate_id,
+        candidate: result.candidate,
+        warnings: result.warnings ?? [],
+        need_user_confirmation: true,
+      },
+    };
+  }
+
+  return {
+    role: "assistant",
+    text: `图片「${attachment.name}」已上传，但当前本地 OCR 还没有识别出文字。你可以补充商户、金额或提醒内容，我再继续整理。`,
+  };
 }
 
 async function addChatImages(fileList) {
@@ -3528,7 +3590,7 @@ function renderAssistantPage() {
         <div>
           <span class="assistant-kicker">${icon("spark")}LifeSnap AI</span>
           <h1 class="assistant-page-title">智能助手</h1>
-          <p class="assistant-page-subtitle">把生活里的小事先说出来，确认后再执行。</p>
+          <p class="assistant-page-subtitle">把生活里的小事说出来，也可以发图片，我会先整理成候选操作。</p>
         </div>
         <div class="assistant-hero-bot" aria-hidden="true">
           <span class="bot-antenna"></span>
@@ -3560,7 +3622,7 @@ function renderAssistantPage() {
           ${renderChatAttachmentQueue()}
           <label class="sr-only" for="chat_message">输入账单或提醒</label>
           <textarea id="chat_message" name="message" maxlength="5000" data-chat-input
-            placeholder="例如：第一行写商户，第二行写午餐 28 元；或：提醒我明天 10 点开会">${escapeHtml(state.chatDraft)}</textarea>
+            placeholder="例如：午餐 28 元 微信支付；或：提醒我明天 10 点开会。也可以先选图片再补一句说明。">${escapeHtml(state.chatDraft)}</textarea>
 
           <div class="assistant-composer-actions">
             <label class="assistant-tool-button" aria-label="发送图片">
@@ -3655,7 +3717,7 @@ function renderChatMessageAttachments(attachments = []) {
 
 function chatAttachmentStatus(attachment) {
   if (attachment.status === "uploaded") {
-    return "已上传";
+    return "已上传，发送后识别";
   }
   if (attachment.status === "failed") {
     return attachment.error || "上传失败";
