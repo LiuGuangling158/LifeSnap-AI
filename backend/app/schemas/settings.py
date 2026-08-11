@@ -1,10 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.agent import ParseBillResponse, ParseTaskResponse
 from app.schemas.attachment import AttachmentRead, RetentionPolicy
 from app.schemas.bill import BillRead
+from app.schemas.diary import DiaryRead
 from app.schemas.task import TaskRead
 
 
@@ -27,11 +28,13 @@ class PrivacySettingsUpdate(BaseModel):
 class LocalDataSummary(BaseModel):
     bill_count: int
     task_count: int
+    diary_count: int = 0
     attachment_count: int
     bill_candidate_count: int
     task_candidate_count: int
     deleted_bill_count: int = 0
     deleted_task_count: int = 0
+    deleted_diary_count: int = 0
 
 
 class DataExportResponse(BaseModel):
@@ -39,6 +42,7 @@ class DataExportResponse(BaseModel):
     privacy_settings: PrivacySettings
     bills: list[BillRead]
     tasks: list[TaskRead]
+    diaries: list[DiaryRead] = Field(default_factory=list)
     attachments: list[AttachmentRead]
     bill_candidates: list[ParseBillResponse]
     task_candidates: list[ParseTaskResponse]
@@ -50,6 +54,7 @@ class DataImportRequest(BaseModel):
     reset_existing: bool = False
     include_bills: bool = True
     include_tasks: bool = True
+    include_diaries: bool = True
     include_attachments: bool = True
     include_candidates: bool = True
     import_privacy_settings: bool = True
@@ -64,6 +69,7 @@ class DataImportResponse(BaseModel):
     after: LocalDataSummary
     imported_bill_count: int
     imported_task_count: int
+    imported_diary_count: int = 0
     imported_attachment_count: int
     imported_bill_candidate_count: int
     imported_task_candidate_count: int
@@ -90,6 +96,7 @@ class DataSnapshotLoadRequest(BaseModel):
     reset_existing: bool = True
     include_bills: bool = True
     include_tasks: bool = True
+    include_diaries: bool = True
     include_attachments: bool = True
     include_candidates: bool = True
     import_privacy_settings: bool = True
@@ -116,6 +123,7 @@ class DataClearRequest(BaseModel):
     confirm: bool = False
     include_bills: bool = True
     include_tasks: bool = True
+    include_diaries: bool = True
     include_attachments: bool = True
     include_candidates: bool = True
     reset_privacy_settings: bool = False

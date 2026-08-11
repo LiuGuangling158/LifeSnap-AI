@@ -11,6 +11,7 @@ from app.api.bills import router as bills_router
 from app.api.chat import router as chat_router
 from app.api.data import router as data_router
 from app.api.dashboard import router as dashboard_router
+from app.api.diaries import router as diaries_router
 from app.api.diagnostics import router as diagnostics_router
 from app.api.health import router as health_router
 from app.api.ocr import router as ocr_router
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(bills_router)
     app.include_router(tasks_router)
+    app.include_router(diaries_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
     app.include_router(data_router)

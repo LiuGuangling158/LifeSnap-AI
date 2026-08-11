@@ -34,6 +34,7 @@ from app.schemas.task import TaskCreate, TaskPriority, TaskRead, TaskSource, Tas
 from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
+from app.services.diary_store import diary_store
 from app.services.idempotency_store import idempotency_store
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
@@ -45,11 +46,13 @@ class DataManagementService:
         return LocalDataSummary(
             bill_count=len(bill_store.all()),
             task_count=len(task_store.all()),
+            diary_count=len(diary_store.all()),
             attachment_count=len(attachment_store.all()),
             bill_candidate_count=len(bill_candidate_store.all()),
             task_candidate_count=len(task_candidate_store.all()),
             deleted_bill_count=bill_store.deleted_count(),
             deleted_task_count=task_store.deleted_count(),
+            deleted_diary_count=diary_store.deleted_count(),
         )
 
     def export(self, include_deleted: bool = False) -> DataExportResponse:
@@ -58,6 +61,7 @@ class DataManagementService:
             privacy_settings=settings_store.get_privacy_settings(),
             bills=bill_store.all(include_deleted=include_deleted),
             tasks=task_store.all(include_deleted=include_deleted),
+            diaries=diary_store.all(include_deleted=include_deleted),
             attachments=attachment_store.all(),
             bill_candidates=bill_candidate_store.all(),
             task_candidates=task_candidate_store.all(),
@@ -91,6 +95,7 @@ class DataManagementService:
                 reset_existing=payload.reset_existing,
                 include_bills=payload.include_bills,
                 include_tasks=payload.include_tasks,
+                include_diaries=payload.include_diaries,
                 include_attachments=payload.include_attachments,
                 include_candidates=payload.include_candidates,
                 import_privacy_settings=payload.import_privacy_settings,
@@ -120,6 +125,7 @@ class DataManagementService:
         before = self.summary()
         imported_bill_count = len(payload.snapshot.bills) if payload.include_bills else 0
         imported_task_count = len(payload.snapshot.tasks) if payload.include_tasks else 0
+        imported_diary_count = len(payload.snapshot.diaries) if payload.include_diaries else 0
         imported_attachment_count = (
             len(payload.snapshot.attachments) if payload.include_attachments else 0
         )
@@ -139,6 +145,7 @@ class DataManagementService:
                 after=before,
                 imported_bill_count=imported_bill_count,
                 imported_task_count=imported_task_count,
+                imported_diary_count=imported_diary_count,
                 imported_attachment_count=imported_attachment_count,
                 imported_bill_candidate_count=imported_bill_candidate_count,
                 imported_task_candidate_count=imported_task_candidate_count,
@@ -151,6 +158,7 @@ class DataManagementService:
                     confirm=True,
                     include_bills=payload.include_bills,
                     include_tasks=payload.include_tasks,
+                    include_diaries=payload.include_diaries,
                     include_attachments=payload.include_attachments,
                     include_candidates=payload.include_candidates,
                     reset_privacy_settings=payload.import_privacy_settings,
@@ -161,6 +169,8 @@ class DataManagementService:
             bill_store.upsert_many(payload.snapshot.bills)
         if payload.include_tasks:
             task_store.upsert_many(payload.snapshot.tasks)
+        if payload.include_diaries:
+            diary_store.upsert_many(payload.snapshot.diaries)
         if payload.include_attachments:
             attachment_store.upsert_many(payload.snapshot.attachments)
         if payload.include_candidates:
@@ -172,6 +182,7 @@ class DataManagementService:
         if (
             payload.include_bills
             or payload.include_tasks
+            or payload.include_diaries
             or payload.include_attachments
             or payload.include_candidates
             or payload.import_privacy_settings
@@ -186,6 +197,7 @@ class DataManagementService:
             after=self.summary(),
             imported_bill_count=imported_bill_count,
             imported_task_count=imported_task_count,
+            imported_diary_count=imported_diary_count,
             imported_attachment_count=imported_attachment_count,
             imported_bill_candidate_count=imported_bill_candidate_count,
             imported_task_candidate_count=imported_task_candidate_count,
@@ -233,14 +245,18 @@ class DataManagementService:
         deleted_bills = [bill for bill in snapshot.bills if bill.deleted_at is not None]
         active_tasks = [task for task in snapshot.tasks if task.deleted_at is None]
         deleted_tasks = [task for task in snapshot.tasks if task.deleted_at is not None]
+        active_diaries = [diary for diary in snapshot.diaries if diary.deleted_at is None]
+        deleted_diaries = [diary for diary in snapshot.diaries if diary.deleted_at is not None]
         return LocalDataSummary(
             bill_count=len(active_bills),
             task_count=len(active_tasks),
+            diary_count=len(active_diaries),
             attachment_count=len(snapshot.attachments),
             bill_candidate_count=len(snapshot.bill_candidates),
             task_candidate_count=len(snapshot.task_candidates),
             deleted_bill_count=len(deleted_bills),
             deleted_task_count=len(deleted_tasks),
+            deleted_diary_count=len(deleted_diaries),
         )
 
     def export_bills_csv(self) -> str:
@@ -499,6 +515,8 @@ class DataManagementService:
             bill_store.clear()
         if payload.include_tasks:
             task_store.clear()
+        if payload.include_diaries:
+            diary_store.clear()
         if payload.include_attachments:
             attachment_store.clear()
         if payload.include_candidates:
@@ -509,6 +527,7 @@ class DataManagementService:
         if (
             payload.include_bills
             or payload.include_tasks
+            or payload.include_diaries
             or payload.include_attachments
             or payload.include_candidates
             or payload.reset_privacy_settings

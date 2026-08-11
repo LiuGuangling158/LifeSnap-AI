@@ -164,6 +164,7 @@ def load_local_snapshot(
             "reset_existing": payload.reset_existing,
             "imported_bill_count": result.import_result.imported_bill_count,
             "imported_task_count": result.import_result.imported_task_count,
+            "imported_diary_count": result.import_result.imported_diary_count,
         },
     )
     return result
@@ -206,11 +207,13 @@ def clear_local_data(payload: DataClearRequest, request: Request) -> DataClearRe
         metadata={
             "include_bills": payload.include_bills,
             "include_tasks": payload.include_tasks,
+            "include_diaries": payload.include_diaries,
             "include_attachments": payload.include_attachments,
             "include_candidates": payload.include_candidates,
             "reset_privacy_settings": payload.reset_privacy_settings,
             "after_bill_count": result.after.bill_count,
             "after_task_count": result.after.task_count,
+            "after_diary_count": result.after.diary_count,
         },
     )
     return result
@@ -234,11 +237,13 @@ def import_local_data(payload: DataImportRequest, request: Request) -> DataImpor
             "reset_existing": payload.reset_existing,
             "include_bills": payload.include_bills,
             "include_tasks": payload.include_tasks,
+            "include_diaries": payload.include_diaries,
             "include_attachments": payload.include_attachments,
             "include_candidates": payload.include_candidates,
             "import_privacy_settings": payload.import_privacy_settings,
             "imported_bill_count": result.imported_bill_count,
             "imported_task_count": result.imported_task_count,
+            "imported_diary_count": result.imported_diary_count,
         },
     )
     return result

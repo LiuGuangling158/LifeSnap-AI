@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from app.core.config import settings
 from app.schemas.bill import BillSource, TransactionType
 from app.schemas.bootstrap import AppBootstrapResponse, AppCapabilities
+from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskSource
 from app.services.attachment_store import attachment_store
 from app.services.dashboard_service import dashboard_service
@@ -26,12 +27,16 @@ class BootstrapService:
             ),
             supported_bill_sources=[source.value for source in BillSource],
             supported_task_sources=[source.value for source in TaskSource],
+            supported_diary_sources=[source.value for source in DiarySource],
+            supported_diary_moods=[mood.value for mood in DiaryMood],
             supported_transaction_types=[
                 transaction_type.value for transaction_type in TransactionType
             ],
             idempotency_supported_endpoints=[
                 "POST /bills",
                 "POST /tasks",
+                "POST /diaries",
+                "POST /diaries/{diary_id}/restore",
                 "POST /tasks/{task_id}/complete",
                 "POST /tasks/{task_id}/snooze",
                 "POST /agent/bill-candidates/{candidate_id}/confirm",
@@ -49,6 +54,7 @@ class BootstrapService:
                 "task_candidates": True,
                 "chat_actions": True,
                 "dashboard_bootstrap": True,
+                "diaries": True,
                 "demo_data_seed": True,
                 "local_snapshot_persistence": True,
                 "real_ocr_engine": False,

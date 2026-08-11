@@ -18,6 +18,8 @@ class AppCapabilities(BaseModel):
     supported_attachment_content_types: list[str]
     supported_bill_sources: list[str]
     supported_task_sources: list[str]
+    supported_diary_sources: list[str]
+    supported_diary_moods: list[str]
     supported_transaction_types: list[str]
     idempotency_supported_endpoints: list[str]
     feature_flags: dict[str, bool]

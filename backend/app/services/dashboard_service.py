@@ -6,6 +6,7 @@ from app.schemas.settings import LocalDataSummary
 from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
+from app.services.diary_store import diary_store
 from app.services.task_candidate_store import task_candidate_store
 from app.services.task_store import task_store
 
@@ -49,11 +50,13 @@ class DashboardService:
             data_summary=LocalDataSummary(
                 bill_count=len(bill_store.all()),
                 task_count=len(task_store.all()),
+                diary_count=len(diary_store.all()),
                 attachment_count=len(attachment_store.all()),
                 bill_candidate_count=len(bill_candidate_store.all()),
                 task_candidate_count=len(task_candidate_store.all()),
                 deleted_bill_count=bill_store.deleted_count(),
                 deleted_task_count=task_store.deleted_count(),
+                deleted_diary_count=diary_store.deleted_count(),
             ),
             monthly_statistics=monthly_statistics,
             recent_bills=recent_bills,
