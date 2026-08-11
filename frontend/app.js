@@ -92,6 +92,13 @@ const state = {
   diaryCalendarMonthKey: monthKeyFromDate(new Date()),
   diaryDraft: null,
   diaryEntries: [],
+  diaryOverview: null,
+  diaryListMeta: {
+    total: 0,
+    page: 1,
+    page_size: 100,
+    total_pages: 0,
+  },
   billListMeta: {
     total: 0,
     page: 1,
@@ -490,7 +497,7 @@ document.addEventListener("submit", async (event) => {
 
   if (event.target.matches("[data-diary-form]")) {
     event.preventDefault();
-    saveDiaryDraft(new FormData(event.target));
+    await submitDiary(new FormData(event.target));
     return;
   }
 
@@ -514,12 +521,23 @@ async function loadData() {
   render();
 
   try {
-    const [bootstrap, billOverview, billList, taskList, taskOverview, snapshotStatus] = await Promise.all([
+    const [
+      bootstrap,
+      billOverview,
+      billList,
+      taskList,
+      taskOverview,
+      diaryList,
+      diaryOverview,
+      snapshotStatus,
+    ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
       api(buildBillListPath()),
       api(buildTaskListPath()),
       api("/tasks/statistics/overview?upcoming_days=7&item_limit=10"),
+      api(buildDiaryListPath()),
+      api("/diaries/statistics/overview"),
       api("/data/snapshot/status"),
     ]);
     state.bootstrap = bootstrap;
@@ -539,6 +557,15 @@ async function loadData() {
       total_pages: taskList.total_pages ?? 0,
     };
     state.taskOverview = taskOverview;
+    state.diaryEntries = normalizeDiaryEntries(diaryList.items ?? []);
+    state.diaryListMeta = {
+      total: diaryList.total ?? 0,
+      page: diaryList.page ?? 1,
+      page_size: diaryList.page_size ?? 100,
+      total_pages: diaryList.total_pages ?? 0,
+    };
+    state.diaryOverview = diaryOverview;
+    state.diaryDraft = null;
     state.snapshotStatus = snapshotStatus;
   } catch (error) {
     state.error = error.message || "后端连接失败";
@@ -660,23 +687,49 @@ async function submitTask(formData) {
   }
 }
 
-function saveDiaryDraft(formData) {
+async function submitDiary(formData) {
   const dateKey = state.diarySelectedDateKey || todayDateKey();
-  const entry = {
-    dateKey,
-    title: String(formData.get("title") || "今天的日记").trim(),
-    content: String(formData.get("content") || "").trim(),
+  const content = String(formData.get("content") || "").trim();
+  const title = String(formData.get("title") || "").trim() || `${diaryDateLabel(dateKey)}的日记`;
+  const hadEntry = Boolean(diaryEntryForDate(dateKey)?.id);
+  if (!content) {
+    showToast("请先写一点日记内容。");
+    return;
+  }
+
+  const payload = {
+    entry_date: dateKey,
+    title,
+    content,
     mood: String(formData.get("mood") || "happy"),
-    weather: String(formData.get("weather") || "晴天").trim(),
-    created_at: diaryEntryTimestamp(dateKey),
+    weather: String(formData.get("weather") || "").trim() || null,
+    source: "manual",
   };
-  state.diaryEntries = [
-    entry,
-    ...state.diaryEntries.filter((item) => item.dateKey !== dateKey),
-  ].sort((left, right) => right.dateKey.localeCompare(left.dateKey));
-  state.diaryDraft = entry;
-  state.diaryModalOpen = false;
-  showToast("日记草稿已保存到本次前端体验。");
+
+  state.saving = true;
+  render();
+  try {
+    const saved = await api(`/diaries/by-date/${dateKey}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    state.diaryEntries = upsertDiaryEntry(state.diaryEntries, normalizeDiaryEntry(saved));
+    state.diaryModalOpen = false;
+    state.diaryDraft = null;
+    state.toast = hadEntry ? "日记已更新" : "日记已保存到后端";
+    await loadData();
+    window.setTimeout(() => {
+      state.toast = "";
+      render();
+    }, 2200);
+  } catch (error) {
+    state.toast = error.message || "日记保存失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
 }
 
 function openDiaryCalendar() {
@@ -1209,7 +1262,7 @@ function openSettingsConfirm(action) {
     clear: {
       action,
       title: "清除本地数据",
-      message: "会清空账单、待办、附件和候选记录。建议先保存快照或导出数据。",
+      message: "会清空账单、待办、日记、附件和候选记录。建议先保存快照或导出数据。",
       confirmLabel: "确认清除",
       danger: true,
     },
@@ -1328,6 +1381,48 @@ function buildTaskListPath() {
     params.set("due_to", end.toISOString());
   }
   return `/tasks?${params.toString()}`;
+}
+
+function buildDiaryListPath() {
+  const params = new URLSearchParams({
+    page: String(state.diaryListMeta.page),
+    page_size: String(state.diaryListMeta.page_size),
+  });
+  return `/diaries?${params.toString()}`;
+}
+
+function normalizeDiaryEntries(items) {
+  return items
+    .map(normalizeDiaryEntry)
+    .filter(Boolean)
+    .sort((left, right) => right.dateKey.localeCompare(left.dateKey));
+}
+
+function normalizeDiaryEntry(item) {
+  if (!item?.entry_date) {
+    return null;
+  }
+  return {
+    id: item.id,
+    dateKey: item.entry_date,
+    title: item.title || "今天的日记",
+    content: item.content || "",
+    mood: item.mood || "happy",
+    weather: item.weather || "晴天",
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    source: item.source || "manual",
+  };
+}
+
+function upsertDiaryEntry(entries, entry) {
+  if (!entry) {
+    return entries;
+  }
+  return [
+    entry,
+    ...entries.filter((item) => item.dateKey !== entry.dateKey),
+  ].sort((left, right) => right.dateKey.localeCompare(left.dateKey));
 }
 
 function localDayRange(value = new Date()) {
@@ -2364,24 +2459,28 @@ function renderDiaryMobilePage() {
 
 function getDiarySnapshot() {
   const selectedDateKey = state.diarySelectedDateKey || todayDateKey();
-  const draft = diaryEntryForDate(selectedDateKey);
+  const entry = diaryEntryForDate(selectedDateKey);
+  const mood = entry?.mood || "happy";
+  const streakDays = Number(state.diaryOverview?.streak_days ?? diaryStreakDays());
   const recentBills = state.bills.slice(0, 2).map((bill) => bill.merchant).filter(Boolean);
   const pendingTasks = Number(
     state.taskOverview?.pending_count ?? state.tasks.filter((task) => task.status === "pending").length,
   );
   return {
-    title: draft?.title || `${diaryDateLabel(selectedDateKey)}的日记`,
-    mood: draft?.mood || "happy",
-    moodLabel: diaryMoodLabel(draft?.mood || "happy"),
-    moodScore: draft?.mood === "calm" ? 78 : draft?.mood === "tired" ? 52 : 86,
-    weather: draft?.weather || "晴天",
-    createdAt: draft?.created_at || diaryEntryTimestamp(selectedDateKey),
+    title: entry?.title || `${diaryDateLabel(selectedDateKey)}的日记`,
+    mood,
+    moodLabel: diaryMoodLabel(mood),
+    moodScore: diaryMoodScore(mood),
+    moodQuality: diaryMoodQuality(mood),
+    moodText: diaryMoodText(mood),
+    weather: entry?.weather || "晴天",
+    createdAt: entry?.updated_at || entry?.created_at || diaryEntryTimestamp(selectedDateKey),
     dateKey: selectedDateKey,
     dateLabel: diaryDateLabel(selectedDateKey),
-    hasEntry: Boolean(draft),
-    streakDays: diaryStreakDays(),
+    hasEntry: Boolean(entry),
+    streakDays,
     monthEntries: diaryEntriesInMonth(selectedDateKey),
-    body: draft?.content || [
+    body: entry?.content || [
       `${diaryDateLabel(selectedDateKey)}还没有保存日记，可以先留下一点生活记录。`,
       recentBills.length
         ? `记录了 ${recentBills.join("、")} 相关的小事，生活节奏正在慢慢变清楚。`
@@ -2434,9 +2533,9 @@ function renderDiaryMoodSummary(diary) {
           <div class="diary-mood-copy">
             <div>
               <strong>${escapeHtml(diary.moodLabel)}</strong>
-              <span class="diary-quality-pill">很好</span>
+              <span class="diary-quality-pill">${escapeHtml(diary.moodQuality)}</span>
             </div>
-            <p>${diary.mood === "tired" ? "今天有点累，适合早点休息。" : "阳光正好，心情很棒。"}</p>
+            <p>${escapeHtml(diary.moodText)}</p>
           </div>
         </div>
         ${diaryMiniStat("连续记录", diary.streakDays, "天")}
@@ -2517,7 +2616,7 @@ function renderDiaryCalendarModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="diary-calendar-title">日记日历</h2>
-            <p class="section-note">当前是前端本地草稿日历，后续可接入真实日记存储。</p>
+            <p class="section-note">日历已读取后端日记记录，刷新后仍可通过本地快照恢复。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -2541,7 +2640,7 @@ function renderDiaryCalendarModal() {
         <div class="diary-calendar-footer">
           <div>
             <strong>${escapeHtml(diaryDateLabel(selectedKey))}</strong>
-            <span>${selectedEntry ? "已有本地草稿" : "还没有日记草稿"}</span>
+            <span>${selectedEntry ? "已有后端日记" : "还没有保存日记"}</span>
           </div>
           <div class="diary-calendar-actions">
             <button class="button ghost" type="button" data-diary-calendar-today>今天</button>
@@ -2662,7 +2761,39 @@ function diaryMoodLabel(value) {
     happy: "开心",
     calm: "平静",
     tired: "疲惫",
+    anxious: "有压力",
+    sad: "低落",
   }[value] ?? "开心";
+}
+
+function diaryMoodScore(value) {
+  return {
+    happy: 86,
+    calm: 78,
+    tired: 52,
+    anxious: 58,
+    sad: 46,
+  }[value] ?? 80;
+}
+
+function diaryMoodQuality(value) {
+  return {
+    happy: "很好",
+    calm: "平稳",
+    tired: "需休息",
+    anxious: "放慢点",
+    sad: "抱抱自己",
+  }[value] ?? "很好";
+}
+
+function diaryMoodText(value) {
+  return {
+    happy: "阳光正好，心情很棒。",
+    calm: "今天节奏平稳，适合温柔收尾。",
+    tired: "今天有点累，适合早点休息。",
+    anxious: "事情有点多，可以先把最重要的一件放前面。",
+    sad: "允许自己慢一点，记录下来也是一种照顾。",
+  }[value] ?? "阳光正好，心情很棒。";
 }
 
 function formatDiaryTime(value) {
@@ -2788,7 +2919,7 @@ function renderProfilePage() {
   const completedTasks = Number(
     state.taskOverview?.done_count ?? state.tasks.filter((task) => task.status === "done").length,
   );
-  const diaryDraftCount = state.diaryEntries.length || (state.diaryDraft ? 1 : 0);
+  const diaryCount = Number(summary.diary_count ?? state.diaryEntries.length ?? 0);
 
   return `
     <div class="mobile-page profile-mobile-page profile-page">
@@ -2830,7 +2961,7 @@ function renderProfilePage() {
       ${renderProfileFinanceCard(expense, income, netAmount, monthly)}
       ${renderProfileQuickLinks()}
       ${renderProfileTools()}
-      ${renderProfileDataPanel(summary, completedTasks, diaryDraftCount)}
+      ${renderProfileDataPanel(summary, completedTasks, diaryCount)}
       ${renderProfileSafetyPanel()}
     </div>
   `;
@@ -2984,7 +3115,7 @@ function renderProfileDataPanel(summary, completedTasks, diaryCount) {
       </div>
       <div class="profile-data-grid">
         ${profileDataCard("calendar", "记账笔数", billCount, "笔", "后端账单", "mint")}
-        ${profileDataCard("notebook", "日记草稿", diaryCount, "篇", "本地草稿", "blue")}
+        ${profileDataCard("notebook", "日记篇数", diaryCount, "篇", "后端日记", "blue")}
         ${profileDataCard("check-circle", "完成事项", completedTasks, "个", "高效生活", "orange")}
         ${profileDataCard("image", "附件片段", attachmentCount, "个", "生活素材", "rose")}
       </div>
@@ -3041,6 +3172,7 @@ function renderSettingsPage() {
       <div class="settings-summary">
         ${metric("账单", summary.bill_count ?? 0, "small")}
         ${metric("待办", summary.task_count ?? 0, "small")}
+        ${metric("日记", summary.diary_count ?? state.diaryEntries.length ?? 0, "small")}
         ${metric("附件", summary.attachment_count ?? 0, "small")}
         ${metric("候选", Number(summary.bill_candidate_count ?? 0) + Number(summary.task_candidate_count ?? 0), "small")}
       </div>
@@ -3055,7 +3187,7 @@ function renderSettingsPage() {
         )}
         ${settingsRow(
           "数据导出",
-          "导出当前活跃账单、待办、附件元数据和候选记录。",
+          "导出当前活跃账单、待办、日记、附件元数据和候选记录。",
           `
             <button class="button" type="button" data-export-json ${state.saving ? "disabled" : ""}>
               ${icon("download")}JSON
@@ -3083,7 +3215,7 @@ function renderSettingsPage() {
         )}
         ${settingsRow(
           "清除本地数据",
-          "清空当前内存中的账单、待办、附件和候选记录。建议先导出或保存快照。",
+          "清空当前内存中的账单、待办、日记、附件和候选记录。建议先导出或保存快照。",
           `
             <button class="button danger" type="button" data-settings-action="clear" ${state.saving ? "disabled" : ""}>
               ${icon("trash")}清除数据
@@ -3565,13 +3697,14 @@ function renderTaskModal() {
 
 function renderDiaryModal() {
   const diary = getDiarySnapshot();
+  const actionLabel = diary.hasEntry ? "更新日记" : "保存日记";
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="diary-modal-title">
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="diary-modal-title">写日记</h2>
-            <p class="section-note">保存到 ${escapeHtml(diary.dateLabel)} 的本次前端草稿，后续接入真实日记存储。</p>
+            <p class="section-note">保存到 ${escapeHtml(diary.dateLabel)} 的后端日记记录，可随本地快照导出和恢复。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -3590,6 +3723,8 @@ function renderDiaryModal() {
                 <option value="happy" ${diary.mood === "happy" ? "selected" : ""}>开心</option>
                 <option value="calm" ${diary.mood === "calm" ? "selected" : ""}>平静</option>
                 <option value="tired" ${diary.mood === "tired" ? "selected" : ""}>疲惫</option>
+                <option value="anxious" ${diary.mood === "anxious" ? "selected" : ""}>有压力</option>
+                <option value="sad" ${diary.mood === "sad" ? "selected" : ""}>低落</option>
               </select>
             </div>
             <div class="field">
@@ -3605,8 +3740,8 @@ function renderDiaryModal() {
           </div>
           <div class="form-actions">
             <button class="button ghost" type="button" data-close-modal>取消</button>
-            <button class="button primary" type="submit">
-              ${icon("save")}保存草稿
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("save")}${state.saving ? "保存中..." : actionLabel}
             </button>
           </div>
         </form>

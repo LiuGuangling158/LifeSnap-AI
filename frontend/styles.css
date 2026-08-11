@@ -1534,6 +1534,22 @@ button {
   background: #dce5df;
 }
 
+.diary-face.anxious {
+  background: #f4d58f;
+}
+
+.diary-face.sad {
+  background: #c9d8ec;
+}
+
+.diary-face.anxious::after,
+.diary-face.sad::after {
+  top: 38px;
+  border-top: 3px solid #23302a;
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+}
+
 .diary-mood-copy {
   min-width: 0;
 }
