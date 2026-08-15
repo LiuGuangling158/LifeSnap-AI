@@ -57,6 +57,7 @@ const state = {
   toast: "",
   modalOpen: false,
   editingBill: null,
+  billDraft: null,
   deleteTarget: null,
   taskModalOpen: false,
   diaryModalOpen: false,
@@ -129,6 +130,7 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-open-bill-modal]")) {
     state.editingBill = null;
+    state.billDraft = null;
     state.modalOpen = true;
     render();
     return;
@@ -191,7 +193,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-bill-photo-placeholder]")) {
-    showToast("拍照记账会在后续接入图片上传和 OCR 识别。");
+    app.querySelector("[data-bill-image-input]")?.click();
     return;
   }
 
@@ -340,6 +342,7 @@ document.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-bill]");
   if (editButton) {
     state.editingBill = state.bills.find((bill) => bill.id === editButton.dataset.editBill) ?? null;
+    state.billDraft = null;
     state.modalOpen = Boolean(state.editingBill);
     render();
     return;
@@ -355,6 +358,7 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("[data-close-modal]")) {
     state.modalOpen = false;
     state.editingBill = null;
+    state.billDraft = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
@@ -453,6 +457,7 @@ document.addEventListener("keydown", (event) => {
   ) {
     state.modalOpen = false;
     state.editingBill = null;
+    state.billDraft = null;
     state.deleteTarget = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
@@ -472,6 +477,11 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", async (event) => {
   if (event.target.matches("[data-chat-image-input]")) {
     await addChatImages(event.target.files);
+    event.target.value = "";
+  }
+
+  if (event.target.matches("[data-bill-image-input]")) {
+    await importBillImage(event.target.files?.[0]);
     event.target.value = "";
   }
 });
@@ -579,6 +589,7 @@ async function submitBill(formData) {
   const amount = Number(formData.get("amount"));
   const paidAt = formData.get("paid_at");
   const editingBill = state.editingBill;
+  const isEditing = Boolean(editingBill?.id);
   const payload = {
     amount,
     merchant: String(formData.get("merchant") || "").trim(),
@@ -588,24 +599,25 @@ async function submitBill(formData) {
     paid_at: paidAt ? new Date(paidAt).toISOString() : null,
     note: String(formData.get("note") || "").trim() || null,
   };
-  if (!editingBill) {
-    payload.source = "manual";
+  if (!isEditing) {
+    payload.source = state.billDraft?.source || "manual";
   }
 
   state.saving = true;
   render();
   try {
-    await api(editingBill ? `/bills/${editingBill.id}` : "/bills", {
-      method: editingBill ? "PATCH" : "POST",
+    await api(isEditing ? `/bills/${editingBill.id}` : "/bills", {
+      method: isEditing ? "PATCH" : "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(editingBill ? {} : { "Idempotency-Key": `web-bill-${crypto.randomUUID()}` }),
+        ...(isEditing ? {} : { "Idempotency-Key": `web-bill-${crypto.randomUUID()}` }),
       },
       body: JSON.stringify(payload),
     });
     state.modalOpen = false;
     state.editingBill = null;
-    state.toast = editingBill ? "账单已更新" : "账单已保存";
+    state.billDraft = null;
+    state.toast = isEditing ? "账单已更新" : "账单已保存";
     await loadData();
     window.setTimeout(() => {
       state.toast = "";
@@ -618,6 +630,89 @@ async function submitBill(formData) {
     state.saving = false;
     render();
   }
+}
+
+async function importBillImage(file) {
+  if (!file) {
+    return;
+  }
+  if (!file.type.startsWith("image/")) {
+    showToast("请选择支付截图或票据图片。");
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const payload = new FormData();
+    payload.append("file", file);
+    payload.append("source", "album");
+    const uploaded = await api("/attachments/upload", {
+      method: "POST",
+      body: payload,
+    });
+    const result = await api(`/attachments/${uploaded.id}/recognize-and-parse-bill`, {
+      method: "POST",
+    });
+
+    state.editingBill = null;
+    if (result.status === "candidate_created" && result.candidate) {
+      state.billDraft = billDraftFromCandidate(result.candidate, uploaded);
+      state.toast = "图片已整理成候选账单，请确认后保存";
+    } else {
+      state.billDraft = fallbackBillDraftFromAttachment(uploaded, result);
+      state.toast = "图片已上传，当前 OCR 需要手动补充账单字段";
+    }
+    state.modalOpen = true;
+  } catch (error) {
+    state.toast = error.message || "图片导入失败";
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+function billDraftFromCandidate(candidate, attachment) {
+  const data = candidate.data ?? {};
+  return {
+    amount: data.amount ?? "",
+    merchant: data.merchant || "",
+    category: data.category || "其他",
+    payment_method: data.payment_method || "",
+    transaction_type: data.transaction_type || "expense",
+    paid_at: data.paid_at || new Date().toISOString(),
+    note: billDraftNote(candidate, attachment),
+    source: "album",
+    candidate_id: candidate.candidate_id,
+    confidence: candidate.confidence,
+    warnings: candidate.warnings ?? [],
+  };
+}
+
+function fallbackBillDraftFromAttachment(attachment, result) {
+  const warnings = result?.warnings?.length
+    ? result.warnings.join("、")
+    : "ocr_engine_not_configured";
+  return {
+    amount: "",
+    merchant: "",
+    category: "其他",
+    payment_method: "",
+    transaction_type: "expense",
+    paid_at: new Date().toISOString(),
+    note: `来自图片导入：${attachment.filename || "支付截图"}。请手动补充金额和商户。${warnings ? `识别提示：${warnings}` : ""}`,
+    source: "album",
+    attachment_id: attachment.id,
+    warnings: result?.warnings ?? [],
+  };
+}
+
+function billDraftNote(candidate, attachment) {
+  const confidence = Math.round(Number(candidate.confidence ?? 0) * 100);
+  const warnings = candidate.warnings?.length
+    ? `；提示：${candidate.warnings.join("、")}`
+    : "";
+  return `来自图片导入：${attachment.filename || "支付截图"}；候选可信度 ${confidence}%${warnings}`;
 }
 
 async function deleteBill() {
@@ -1479,6 +1574,7 @@ function render() {
         ${renderPage()}
         ${renderMobileTabbar()}
       </main>
+      <input type="file" accept="image/*" data-bill-image-input hidden />
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
@@ -1999,8 +2095,8 @@ function renderBillActionDock() {
       <button class="bill-dock-main" type="button" data-open-bill-modal>
         ${icon("plus")}记一笔
       </button>
-      <button class="bill-dock-side" type="button" data-bill-photo-placeholder>
-        ${icon("camera")}拍照记账
+      <button class="bill-dock-side" type="button" data-bill-photo-placeholder ${state.saving ? "disabled" : ""}>
+        ${icon("camera")}${state.saving ? "导入中..." : "拍照记账"}
       </button>
     </section>
   `;
@@ -3537,9 +3633,15 @@ function renderTaskList(tasks) {
 }
 
 function renderBillModal() {
-  const bill = state.editingBill;
-  const title = bill ? "编辑账单" : "新增账单";
-  const description = bill ? "修改后会立即更新列表和首页统计。" : "先支持手动记录，后续接入截图识别候选。";
+  const bill = state.editingBill ?? state.billDraft;
+  const isEditing = Boolean(state.editingBill?.id);
+  const isCandidate = !isEditing && Boolean(state.billDraft);
+  const title = isEditing ? "编辑账单" : isCandidate ? "确认候选账单" : "新增账单";
+  const description = isEditing
+    ? "修改后会立即更新列表和首页统计。"
+    : isCandidate
+      ? "图片导入结果不会自动入账，请确认或补齐字段后再保存。"
+      : "手动记录一笔收支，也可以从记账页底部导入支付截图。";
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="bill-modal-title">
@@ -3593,7 +3695,7 @@ function renderBillModal() {
           <div class="form-actions">
             <button class="button ghost" type="button" data-close-modal>取消</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
-              ${icon("save")}${state.saving ? "保存中..." : (bill ? "更新账单" : "保存账单")}
+              ${icon("save")}${state.saving ? "保存中..." : (isEditing ? "更新账单" : "确认保存")}
             </button>
           </div>
         </form>
