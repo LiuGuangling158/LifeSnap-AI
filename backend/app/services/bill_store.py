@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from math import ceil
 from uuid import UUID, uuid4
 
+from app.core.config import settings
 from app.schemas.bill import (
     BillStatisticsOverview,
     BillSource,
@@ -23,9 +25,10 @@ from app.schemas.bill import (
 )
 
 
-class InMemoryBillStore:
+class LocalBillStore:
     def __init__(self) -> None:
         self._bills: dict[UUID, BillRead] = {}
+        self._load()
 
     def create(self, payload: BillCreate) -> BillRead:
         now = datetime.now(timezone.utc)
@@ -38,6 +41,7 @@ class InMemoryBillStore:
             **payload.model_dump(exclude={"paid_at"}),
         )
         self._bills[bill.id] = bill
+        self._persist()
         return bill
 
     def list(
@@ -127,6 +131,7 @@ class InMemoryBillStore:
 
         updated = BillRead(**data)
         self._bills[bill_id] = updated
+        self._persist()
         return updated
 
     def delete(self, bill_id: UUID) -> bool:
@@ -140,6 +145,7 @@ class InMemoryBillStore:
             data["updated_at"] = now
             data["deleted_at"] = now
             self._bills[bill_id] = BillRead(**data)
+            self._persist()
         return True
 
     def restore(self, bill_id: UUID) -> BillRead | None:
@@ -154,16 +160,19 @@ class InMemoryBillStore:
         data["deleted_at"] = None
         restored = BillRead(**data)
         self._bills[bill_id] = restored
+        self._persist()
         return restored
 
     def clear(self) -> int:
         count = len(self._bills)
         self._bills.clear()
+        self._persist()
         return count
 
     def upsert_many(self, bills: list[BillRead]) -> int:
         for bill in bills:
             self._bills[bill.id] = bill
+        self._persist()
         return len(bills)
 
     def check_duplicate(
@@ -395,5 +404,37 @@ class InMemoryBillStore:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+    def _load(self) -> None:
+        path = settings.local_bill_path
+        if not path.exists():
+            return
+        try:
+            raw_items = json.loads(path.read_text(encoding="utf-8"))
+            bills = [BillRead.model_validate(item) for item in raw_items]
+        except (OSError, ValueError, TypeError):
+            return
+        self._bills = {bill.id: bill for bill in bills}
 
-bill_store = InMemoryBillStore()
+    def _persist(self) -> None:
+        path = settings.local_bill_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                [
+                    bill.model_dump(mode="json")
+                    for bill in sorted(
+                        self._bills.values(),
+                        key=lambda item: (item.paid_at, item.created_at),
+                        reverse=True,
+                    )
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+
+bill_store = LocalBillStore()

@@ -27,7 +27,7 @@ class AttachmentRead(BaseModel):
     checksum: str
     duplicate_of: UUID | None = None
     source: AttachmentSource
-    storage_type: str = "memory"
+    storage_type: str = "local_json"
     retention_policy: RetentionPolicy
     original_saved: bool
     ocr_text: str | None = None

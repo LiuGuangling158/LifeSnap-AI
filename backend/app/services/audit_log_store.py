@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from enum import Enum
 from math import ceil
@@ -8,13 +9,15 @@ from uuid import UUID, uuid4
 
 from fastapi import Request
 
+from app.core.config import settings
 from app.schemas.audit import AuditEvent, AuditEventListResponse
 
 
-class InMemoryAuditLogStore:
+class LocalAuditLogStore:
     def __init__(self, max_events: int = 500) -> None:
         self._events: list[AuditEvent] = []
         self._max_events = max_events
+        self._load()
 
     def record(
         self,
@@ -39,6 +42,7 @@ class InMemoryAuditLogStore:
         self._events.append(event)
         if len(self._events) > self._max_events:
             self._events = self._events[-self._max_events :]
+        self._persist()
         return event
 
     def list(
@@ -72,6 +76,7 @@ class InMemoryAuditLogStore:
     def clear(self) -> int:
         count = len(self._events)
         self._events.clear()
+        self._persist()
         return count
 
     def _request_id(self, request: Request | None) -> str | None:
@@ -106,6 +111,34 @@ class InMemoryAuditLogStore:
             return {"keys": sorted(str(key) for key in value.keys())[:20]}
         return str(value)[:120]
 
+    def _load(self) -> None:
+        path = settings.local_audit_path
+        if not path.exists():
+            return
+        try:
+            raw_items = json.loads(path.read_text(encoding="utf-8"))
+            events = [AuditEvent.model_validate(item) for item in raw_items]
+        except (OSError, ValueError, TypeError):
+            return
+        self._events = sorted(events, key=lambda event: event.occurred_at)[-self._max_events :]
+
+    def _persist(self) -> None:
+        path = settings.local_audit_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                [
+                    event.model_dump(mode="json")
+                    for event in sorted(self._events, key=lambda item: item.occurred_at)
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
 
 _SENSITIVE_METADATA_KEYS = {
     "body",
@@ -119,4 +152,4 @@ _SENSITIVE_METADATA_KEYS = {
 }
 
 
-audit_log_store = InMemoryAuditLogStore()
+audit_log_store = LocalAuditLogStore()

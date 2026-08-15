@@ -1,16 +1,22 @@
+from __future__ import annotations
+
+import json
 from uuid import UUID
 
+from app.core.config import settings
 from app.schemas.agent import BillCandidateData, BillCandidateUpdate, ParseBillResponse
 from app.schemas.bill import BillCreate, BillRead
 from app.services.bill_store import bill_store
 
 
-class InMemoryBillCandidateStore:
+class LocalBillCandidateStore:
     def __init__(self) -> None:
         self._candidates: dict[UUID, ParseBillResponse] = {}
+        self._load()
 
     def save(self, candidate: ParseBillResponse) -> ParseBillResponse:
         self._candidates[candidate.candidate_id] = candidate
+        self._persist()
         return candidate
 
     def get(self, candidate_id: UUID) -> ParseBillResponse | None:
@@ -46,12 +52,14 @@ class InMemoryBillCandidateStore:
 
         bill = bill_store.create(payload)
         del self._candidates[candidate_id]
+        self._persist()
         return bill
 
     def delete(self, candidate_id: UUID) -> bool:
         if candidate_id not in self._candidates:
             return False
         del self._candidates[candidate_id]
+        self._persist()
         return True
 
     def is_confirmable(self, candidate: ParseBillResponse) -> bool:
@@ -78,11 +86,13 @@ class InMemoryBillCandidateStore:
     def clear(self) -> int:
         count = len(self._candidates)
         self._candidates.clear()
+        self._persist()
         return count
 
     def upsert_many(self, candidates: list[ParseBillResponse]) -> int:
         for candidate in candidates:
             self._candidates[candidate.candidate_id] = candidate
+        self._persist()
         return len(candidates)
 
     def _warnings(self, data: BillCandidateData) -> list[str]:
@@ -111,5 +121,36 @@ class InMemoryBillCandidateStore:
         score = sum(field_confidence[field] for field in important_fields) / len(important_fields)
         return round(score, 2)
 
+    def _load(self) -> None:
+        path = settings.local_bill_candidate_path
+        if not path.exists():
+            return
+        try:
+            raw_items = json.loads(path.read_text(encoding="utf-8"))
+            candidates = [ParseBillResponse.model_validate(item) for item in raw_items]
+        except (OSError, ValueError, TypeError):
+            return
+        self._candidates = {candidate.candidate_id: candidate for candidate in candidates}
 
-bill_candidate_store = InMemoryBillCandidateStore()
+    def _persist(self) -> None:
+        path = settings.local_bill_candidate_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                [
+                    candidate.model_dump(mode="json")
+                    for candidate in sorted(
+                        self._candidates.values(),
+                        key=lambda item: str(item.candidate_id),
+                    )
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+
+bill_candidate_store = LocalBillCandidateStore()

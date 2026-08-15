@@ -127,9 +127,10 @@ GET /audit/events?action=data_exported
 GET /audit/events?entity_type=bill&page=1&page_size=20
 ```
 
-Audit events are in-memory for the MVP backend and keep only operation metadata,
-resource IDs, route path, method, and request ID. Raw OCR text, request bodies,
-notes, and long free text are not stored in audit metadata.
+Audit events are stored at `backend/data/audit_events.json` with a rolling
+limit of 500 events. They keep only operation metadata, resource IDs, route
+path, method, and request ID. Raw OCR text, request bodies, notes, and long free
+text are not stored in audit metadata.
 
 Data import:
 
@@ -157,6 +158,31 @@ the same selective import flags as `/data/import`. Snapshot saves include
 soft-deleted bills and tasks so the restore bin survives local persistence.
 Deleting a snapshot also requires `confirm=true`.
 
+Local JSON persistence:
+
+Bills are stored at `backend/data/bills.json`, tasks are stored at
+`backend/data/tasks.json`, and diary entries are stored at
+`backend/data/diaries.json`. These files are ignored by Git and are updated
+automatically when records are created, edited, soft-deleted, restored, cleared,
+or imported from a snapshot.
+
+Privacy settings are stored at `backend/data/settings.json` and are updated
+when settings are changed, reset, or imported from a snapshot.
+
+Pending bill and task candidates are stored at
+`backend/data/bill_candidates.json` and `backend/data/task_candidates.json`.
+They are updated when AI parsing creates a candidate, the user edits it,
+confirms it, discards it, clears local data, or imports a snapshot.
+
+Attachment metadata is stored at `backend/data/attachments.json`. Retained
+original attachment files are stored under `backend/data/attachment_files/`.
+Snapshot export includes attachment metadata, OCR text, and checksum data, but
+not retained original file bytes.
+
+Audit events are stored at `backend/data/audit_events.json`, and idempotency
+records are stored at `backend/data/idempotency.json`. Idempotency records are
+cleared automatically when local data is cleared or imported.
+
 Diagnostics:
 
 ```text
@@ -174,6 +200,8 @@ Create and state-changing endpoints support an optional `Idempotency-Key` header
 for weak-network retries. Repeating the same endpoint with the same key and same
 payload returns the first successful result instead of applying the action again.
 Reusing the same key with a different payload returns `409 Conflict`.
+Successful idempotency records are persisted to `backend/data/idempotency.json`,
+so retry protection survives backend restarts.
 
 Example:
 
@@ -429,7 +457,8 @@ Content-Type: application/json
 ```
 
 When `save_original_attachments_by_default` is enabled, attachment uploads that
-do not pass `save_original` will keep the original file in memory. When
+do not pass `save_original` will keep the original file under
+`backend/data/attachment_files/`. When
 `allow_ai_text_processing` is disabled, chat and parse endpoints stop generating
 AI candidates. When `keep_ocr_text` is disabled, attachment OCR text is removed
 after parsing.

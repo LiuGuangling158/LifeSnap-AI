@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from uuid import UUID, uuid4
 
+from app.core.config import settings
 from app.schemas.task import (
     TaskCategoryBreakdown,
     TaskCreate,
@@ -20,9 +22,10 @@ from app.schemas.task import (
 )
 
 
-class InMemoryTaskStore:
+class LocalTaskStore:
     def __init__(self) -> None:
         self._tasks: dict[UUID, TaskRead] = {}
+        self._load()
 
     def create(self, payload: TaskCreate) -> TaskRead:
         now = datetime.now(timezone.utc)
@@ -36,6 +39,7 @@ class InMemoryTaskStore:
             **payload.model_dump(),
         )
         self._tasks[task.id] = task
+        self._persist()
         return task
 
     def list(
@@ -128,6 +132,7 @@ class InMemoryTaskStore:
 
         updated = TaskRead(**data)
         self._tasks[task_id] = updated
+        self._persist()
         return updated
 
     def complete(self, task_id: UUID) -> TaskRead | None:
@@ -168,6 +173,7 @@ class InMemoryTaskStore:
             data["updated_at"] = now
             data["deleted_at"] = now
             self._tasks[task_id] = TaskRead(**data)
+            self._persist()
         return True
 
     def restore(self, task_id: UUID) -> TaskRead | None:
@@ -182,16 +188,19 @@ class InMemoryTaskStore:
         data["deleted_at"] = None
         restored = TaskRead(**data)
         self._tasks[task_id] = restored
+        self._persist()
         return restored
 
     def clear(self) -> int:
         count = len(self._tasks)
         self._tasks.clear()
+        self._persist()
         return count
 
     def upsert_many(self, tasks: list[TaskRead]) -> int:
         for task in tasks:
             self._tasks[task.id] = task
+        self._persist()
         return len(tasks)
 
     def today_tasks(self, now: datetime, limit: int = 10) -> list[TaskRead]:
@@ -369,5 +378,33 @@ class InMemoryTaskStore:
         value_utc = self._as_utc(value)
         return value_utc.replace(hour=0, minute=0, second=0, microsecond=0)
 
+    def _load(self) -> None:
+        path = settings.local_task_path
+        if not path.exists():
+            return
+        try:
+            raw_items = json.loads(path.read_text(encoding="utf-8"))
+            tasks = [TaskRead.model_validate(item) for item in raw_items]
+        except (OSError, ValueError, TypeError):
+            return
+        self._tasks = {task.id: task for task in tasks}
 
-task_store = InMemoryTaskStore()
+    def _persist(self) -> None:
+        path = settings.local_task_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                [
+                    task.model_dump(mode="json")
+                    for task in sorted(self._tasks.values(), key=self._sort_key)
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+
+task_store = LocalTaskStore()

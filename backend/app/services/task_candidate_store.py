@@ -1,17 +1,23 @@
+from __future__ import annotations
+
+import json
 from uuid import UUID
 
+from app.core.config import settings
 from app.schemas.agent import ParseTaskResponse, TaskCandidateData, TaskCandidateUpdate
 from app.schemas.task import TaskCreate, TaskRead, TaskType
 from app.services.task_parser import task_parser
 from app.services.task_store import task_store
 
 
-class InMemoryTaskCandidateStore:
+class LocalTaskCandidateStore:
     def __init__(self) -> None:
         self._candidates: dict[UUID, ParseTaskResponse] = {}
+        self._load()
 
     def save(self, candidate: ParseTaskResponse) -> ParseTaskResponse:
         self._candidates[candidate.candidate_id] = candidate
+        self._persist()
         return candidate
 
     def get(self, candidate_id: UUID) -> ParseTaskResponse | None:
@@ -69,12 +75,14 @@ class InMemoryTaskCandidateStore:
             )
         )
         del self._candidates[candidate_id]
+        self._persist()
         return task
 
     def delete(self, candidate_id: UUID) -> bool:
         if candidate_id not in self._candidates:
             return False
         del self._candidates[candidate_id]
+        self._persist()
         return True
 
     def is_confirmable(self, candidate: ParseTaskResponse) -> bool:
@@ -87,12 +95,45 @@ class InMemoryTaskCandidateStore:
     def clear(self) -> int:
         count = len(self._candidates)
         self._candidates.clear()
+        self._persist()
         return count
 
     def upsert_many(self, candidates: list[ParseTaskResponse]) -> int:
         for candidate in candidates:
             self._candidates[candidate.candidate_id] = candidate
+        self._persist()
         return len(candidates)
 
+    def _load(self) -> None:
+        path = settings.local_task_candidate_path
+        if not path.exists():
+            return
+        try:
+            raw_items = json.loads(path.read_text(encoding="utf-8"))
+            candidates = [ParseTaskResponse.model_validate(item) for item in raw_items]
+        except (OSError, ValueError, TypeError):
+            return
+        self._candidates = {candidate.candidate_id: candidate for candidate in candidates}
 
-task_candidate_store = InMemoryTaskCandidateStore()
+    def _persist(self) -> None:
+        path = settings.local_task_candidate_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                [
+                    candidate.model_dump(mode="json")
+                    for candidate in sorted(
+                        self._candidates.values(),
+                        key=lambda item: str(item.candidate_id),
+                    )
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+
+task_candidate_store = LocalTaskCandidateStore()
