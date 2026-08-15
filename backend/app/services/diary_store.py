@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from math import ceil
 from uuid import UUID, uuid4
 
+from app.core.config import settings
 from app.schemas.diary import (
     DiaryCreate,
     DiaryListResponse,
@@ -19,9 +21,10 @@ class DiaryDateConflictError(ValueError):
     pass
 
 
-class InMemoryDiaryStore:
+class LocalDiaryStore:
     def __init__(self) -> None:
         self._diaries: dict[UUID, DiaryRead] = {}
+        self._load()
 
     def create(self, payload: DiaryCreate) -> DiaryRead:
         if self.get_by_date(payload.entry_date) is not None:
@@ -36,6 +39,7 @@ class InMemoryDiaryStore:
             **payload.model_dump(),
         )
         self._diaries[diary.id] = diary
+        self._persist()
         return diary
 
     def upsert_by_date(self, entry_date: date, payload: DiaryCreate) -> DiaryRead:
@@ -142,6 +146,7 @@ class InMemoryDiaryStore:
 
         updated = DiaryRead(**data)
         self._diaries[diary_id] = updated
+        self._persist()
         return updated
 
     def delete(self, diary_id: UUID) -> bool:
@@ -155,6 +160,7 @@ class InMemoryDiaryStore:
             data["updated_at"] = now
             data["deleted_at"] = now
             self._diaries[diary_id] = DiaryRead(**data)
+            self._persist()
         return True
 
     def restore(self, diary_id: UUID) -> DiaryRead | None:
@@ -173,16 +179,19 @@ class InMemoryDiaryStore:
         data["deleted_at"] = None
         restored = DiaryRead(**data)
         self._diaries[diary_id] = restored
+        self._persist()
         return restored
 
     def clear(self) -> int:
         count = len(self._diaries)
         self._diaries.clear()
+        self._persist()
         return count
 
     def upsert_many(self, diaries: list[DiaryRead]) -> int:
         for diary in diaries:
             self._diaries[diary.id] = diary
+        self._persist()
         return len(diaries)
 
     def statistics_overview(self, now: datetime | None = None) -> DiaryStatisticsOverview:
@@ -226,5 +235,37 @@ class InMemoryDiaryStore:
             current_date = date.fromordinal(current_date.toordinal() - 1)
         return streak
 
+    def _load(self) -> None:
+        path = settings.local_diary_path
+        if not path.exists():
+            return
+        try:
+            raw_items = json.loads(path.read_text(encoding="utf-8"))
+            diaries = [DiaryRead.model_validate(item) for item in raw_items]
+        except (OSError, ValueError, TypeError):
+            return
+        self._diaries = {diary.id: diary for diary in diaries}
 
-diary_store = InMemoryDiaryStore()
+    def _persist(self) -> None:
+        path = settings.local_diary_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                [
+                    diary.model_dump(mode="json")
+                    for diary in sorted(
+                        self._diaries.values(),
+                        key=lambda item: (item.entry_date, item.created_at),
+                        reverse=True,
+                    )
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+
+diary_store = LocalDiaryStore()

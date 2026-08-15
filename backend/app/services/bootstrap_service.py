@@ -18,7 +18,7 @@ class BootstrapService:
             app_version=settings.app_version,
             api_status="ok",
             generated_at=datetime.now(timezone.utc),
-            storage_backend="in_memory",
+            storage_backend="in_memory_with_diary_json",
             ocr_provider="stored_text_stub",
             ai_text_parser="rule_based",
             max_attachment_file_size_bytes=attachment_store.max_file_size,
@@ -63,7 +63,8 @@ class BootstrapService:
                 "user_accounts": False,
             },
             known_limitations=[
-                "Data is stored in process memory, with manual local snapshot save/load support.",
+                "Bills, tasks and candidates are stored in process memory, with manual local snapshot save/load support.",
+                "Diary entries are also persisted to a local JSON file under backend/data.",
                 "OCR uses stored text fallback and manual entry, not a real OCR engine.",
                 "AI parsing is rule-based and returns candidates for user confirmation.",
                 "Authentication and multi-user accounts are not implemented yet.",

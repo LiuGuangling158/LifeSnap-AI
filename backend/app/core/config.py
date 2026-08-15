@@ -10,6 +10,7 @@ class Settings:
     app_name: str = "LifeSnap AI API"
     app_version: str = "0.1.0"
     local_snapshot_path: Path = BACKEND_DIR / "data" / "local_snapshot.json"
+    local_diary_path: Path = BACKEND_DIR / "data" / "diaries.json"
 
 
 settings = Settings()
