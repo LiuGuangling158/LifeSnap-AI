@@ -123,7 +123,7 @@ class LocalTaskStore:
             return None
 
         data = existing.model_dump()
-        data.update(payload.model_dump(exclude_none=True, exclude_unset=True))
+        data.update(payload.model_dump(exclude_unset=True))
         data["updated_at"] = datetime.now(timezone.utc)
         if data["status"] == TaskStatus.done and data["completed_at"] is None:
             data["completed_at"] = data["updated_at"]

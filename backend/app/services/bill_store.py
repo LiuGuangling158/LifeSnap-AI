@@ -52,6 +52,8 @@ class LocalBillStore:
         transaction_type: TransactionType | None = None,
         source: BillSource | None = None,
         keyword: str | None = None,
+        paid_from: datetime | None = None,
+        paid_to: datetime | None = None,
         include_deleted: bool = False,
         deleted_only: bool = False,
         page: int = 1,
@@ -74,6 +76,12 @@ class LocalBillStore:
         if keyword is not None:
             normalized_keyword = keyword.casefold()
             bills = [bill for bill in bills if self._matches_keyword(bill, normalized_keyword)]
+        if paid_from is not None:
+            paid_from_utc = self._as_utc(paid_from)
+            bills = [bill for bill in bills if self._as_utc(bill.paid_at) >= paid_from_utc]
+        if paid_to is not None:
+            paid_to_utc = self._as_utc(paid_to)
+            bills = [bill for bill in bills if self._as_utc(bill.paid_at) <= paid_to_utc]
 
         sorted_bills = sorted(bills, key=lambda bill: bill.paid_at, reverse=True)
         total = len(sorted_bills)

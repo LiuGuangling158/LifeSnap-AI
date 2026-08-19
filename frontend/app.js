@@ -21,7 +21,7 @@ const routes = [
     icon: "check",
     eyebrow: "提醒辅助",
     title: "待办提醒",
-    subtitle: "展示后端已有待办数据；新增和编辑会在后续增量接入。",
+    subtitle: "管理后端待办数据，支持新增、编辑、完成、延后和重复提醒。",
   },
   {
     id: "diary",
@@ -56,13 +56,16 @@ const state = {
   error: "",
   toast: "",
   modalOpen: false,
+  billRangeOpen: false,
   editingBill: null,
   billDraft: null,
   deleteTarget: null,
   billRestoreTarget: null,
   taskDeleteTarget: null,
   taskRestoreTarget: null,
+  editingTask: null,
   taskModalOpen: false,
+  repeatTaskModalOpen: false,
   taskCalendarOpen: false,
   diaryModalOpen: false,
   diaryCalendarOpen: false,
@@ -90,8 +93,11 @@ const state = {
   chatAttachments: [],
   voiceListening: false,
   billFilters: {
-    year: "",
-    month: "",
+    period: "month",
+    year: String(new Date().getFullYear()),
+    month: String(new Date().getMonth() + 1),
+    start_date: "",
+    end_date: "",
     category: "",
     transaction_type: "",
     q: "",
@@ -164,6 +170,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-open-task-modal]")) {
+    state.editingTask = null;
     state.taskModalOpen = true;
     render();
     return;
@@ -225,7 +232,8 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-bill-filter-panel]")) {
-    showToast("更细的筛选面板会在下一步补齐。");
+    state.billRangeOpen = true;
+    render();
     return;
   }
 
@@ -369,8 +377,9 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-repeat-task-placeholder]")) {
-    showToast("重复提醒会在后续接入周期规则。");
+  if (event.target.closest("[data-open-repeat-task-modal]")) {
+    state.repeatTaskModalOpen = true;
+    render();
     return;
   }
 
@@ -382,15 +391,14 @@ document.addEventListener("click", (event) => {
 
   const billPeriodButton = event.target.closest("[data-bill-period]");
   if (billPeriodButton) {
-    if (billPeriodButton.dataset.billPeriod === "month") {
-      const now = new Date();
-      state.billFilters.year = String(now.getFullYear());
-      state.billFilters.month = String(now.getMonth() + 1);
-      state.billFilters.q = "";
-      state.billListMeta.page = 1;
-      loadData();
+    const period = billPeriodButton.dataset.billPeriod || "month";
+    if (period === "month") {
+      applyBillPeriodMonth();
+    } else if (period === "week") {
+      applyBillPeriodWeek();
     } else {
-      showToast("本周和自定义周期会在下一步接入日期筛选。");
+      state.billRangeOpen = true;
+      render();
     }
     return;
   }
@@ -434,6 +442,14 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const taskEditButton = event.target.closest("[data-edit-task]");
+  if (taskEditButton) {
+    state.editingTask = state.tasks.find((task) => task.id === taskEditButton.dataset.editTask) ?? null;
+    state.taskModalOpen = Boolean(state.editingTask);
+    render();
+    return;
+  }
+
   const diaryDeleteButton = event.target.closest("[data-delete-diary]");
   if (diaryDeleteButton) {
     state.diaryDeleteTarget = state.diaryEntries.find(
@@ -446,12 +462,15 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-close-modal]")) {
     state.modalOpen = false;
+    state.billRangeOpen = false;
     state.editingBill = null;
     state.billDraft = null;
     state.taskDeleteTarget = null;
     state.taskSortOpen = false;
     state.taskCalendarOpen = false;
     state.taskModalOpen = false;
+    state.repeatTaskModalOpen = false;
+    state.editingTask = null;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
     state.diaryDeleteTarget = null;
@@ -528,13 +547,8 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-reset-bill-filters]")) {
-    state.billFilters = {
-      year: "",
-      month: "",
-      category: "",
-      transaction_type: "",
-      q: "",
-    };
+    state.billFilters = defaultBillFilters();
+    state.billRangeOpen = false;
     loadData();
     return;
   }
@@ -669,11 +683,13 @@ document.addEventListener("keydown", (event) => {
     event.key === "Escape"
     && (
       state.modalOpen
+      || state.billRangeOpen
       || state.deleteTarget
       || state.taskDeleteTarget
       || state.taskSortOpen
       || state.taskCalendarOpen
       || state.taskModalOpen
+      || state.repeatTaskModalOpen
       || state.diaryModalOpen
       || state.diaryCalendarOpen
       || state.diaryDeleteTarget
@@ -687,6 +703,7 @@ document.addEventListener("keydown", (event) => {
     )
   ) {
     state.modalOpen = false;
+    state.billRangeOpen = false;
     state.editingBill = null;
     state.billDraft = null;
     state.deleteTarget = null;
@@ -694,6 +711,8 @@ document.addEventListener("keydown", (event) => {
     state.taskSortOpen = false;
     state.taskCalendarOpen = false;
     state.taskModalOpen = false;
+    state.repeatTaskModalOpen = false;
+    state.editingTask = null;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
     state.diaryDeleteTarget = null;
@@ -743,6 +762,12 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-bill-range-form]")) {
+    event.preventDefault();
+    applyBillRangeFilters(new FormData(event.target));
+    return;
+  }
+
   if (event.target.matches("[data-bill-form]")) {
     event.preventDefault();
     await submitBill(new FormData(event.target));
@@ -752,6 +777,12 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-task-form]")) {
     event.preventDefault();
     await submitTask(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-repeat-task-form]")) {
+    event.preventDefault();
+    await submitRepeatTask(new FormData(event.target));
     return;
   }
 
@@ -1271,6 +1302,8 @@ function recycleRestoreConfig(type) {
 }
 
 async function submitTask(formData) {
+  const editingTask = state.editingTask;
+  const isEditing = Boolean(editingTask?.id);
   const taskType = String(formData.get("task_type") || "todo");
   const dueAt = formData.get("due_at");
   const remindAt = formData.get("remind_at");
@@ -1282,23 +1315,23 @@ async function submitTask(formData) {
     due_at: taskType === "todo" && dueAt ? new Date(dueAt).toISOString() : null,
     remind_at: taskType === "reminder" && remindAt ? new Date(remindAt).toISOString() : null,
     priority: formData.get("priority"),
-    source: "manual",
   };
 
   state.taskRestoreTarget = null;
   state.saving = true;
   render();
   try {
-    await api("/tasks", {
-      method: "POST",
+    await api(isEditing ? `/tasks/${editingTask.id}` : "/tasks", {
+      method: isEditing ? "PATCH" : "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": `web-task-${crypto.randomUUID()}`,
+        ...(isEditing ? {} : { "Idempotency-Key": `web-task-${crypto.randomUUID()}` }),
       },
       body: JSON.stringify(payload),
     });
     state.taskModalOpen = false;
-    state.toast = "待办已创建";
+    state.editingTask = null;
+    state.toast = isEditing ? "待办已更新" : "待办已创建";
     await loadData();
     window.setTimeout(() => {
       state.toast = "";
@@ -1311,6 +1344,131 @@ async function submitTask(formData) {
     state.saving = false;
     render();
   }
+}
+
+async function submitRepeatTask(formData) {
+  const title = String(formData.get("title") || "").trim();
+  const category = String(formData.get("category") || "生活").trim() || "生活";
+  const description = String(formData.get("description") || "").trim();
+  const frequency = String(formData.get("frequency") || "weekly");
+  const priority = String(formData.get("priority") || "medium");
+  const startAtValue = String(formData.get("start_at") || "");
+  const startAt = startAtValue ? new Date(startAtValue) : null;
+  const count = clampRepeatCount(Number(formData.get("count") || 0));
+
+  if (!title) {
+    showToast("请先填写重复提醒标题。");
+    return;
+  }
+  if (!startAt || Number.isNaN(startAt.getTime())) {
+    showToast("请选择有效的首次提醒时间。");
+    return;
+  }
+
+  const payloads = buildRepeatReminderPayloads({
+    title,
+    category,
+    description,
+    frequency,
+    priority,
+    startAt,
+    count,
+  });
+  let createdCount = 0;
+
+  state.taskRestoreTarget = null;
+  state.repeatTaskModalOpen = true;
+  state.saving = true;
+  render();
+  try {
+    for (const [index, payload] of payloads.entries()) {
+      await api("/tasks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": `web-repeat-task-${index}-${crypto.randomUUID()}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      createdCount += 1;
+    }
+    state.repeatTaskModalOpen = false;
+    state.toast = `已创建 ${createdCount} 条重复提醒`;
+    await loadData();
+    window.setTimeout(() => {
+      state.toast = "";
+      render();
+    }, 2200);
+  } catch (error) {
+    if (createdCount) {
+      state.toast = `已创建 ${createdCount} 条，后续创建失败：${error.message || "请稍后重试"}`;
+      await loadData();
+    } else {
+      state.toast = error.message || "重复提醒创建失败";
+      render();
+    }
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+function buildRepeatReminderPayloads({
+  title,
+  category,
+  description,
+  frequency,
+  priority,
+  startAt,
+  count,
+}) {
+  return Array.from({ length: count }, (_, index) => {
+    const remindAt = addRepeatInterval(startAt, frequency, index);
+    const noteParts = [
+      description,
+      `重复提醒：${repeatFrequencyLabel(frequency)}，第 ${index + 1}/${count} 次。`,
+    ].filter(Boolean);
+    return {
+      title,
+      description: noteParts.join("\n"),
+      category,
+      task_type: "reminder",
+      due_at: null,
+      remind_at: remindAt.toISOString(),
+      priority,
+      source: "manual",
+    };
+  });
+}
+
+function addRepeatInterval(startAt, frequency, index) {
+  const next = new Date(startAt);
+  if (frequency === "daily") {
+    next.setDate(startAt.getDate() + index);
+  } else if (frequency === "biweekly") {
+    next.setDate(startAt.getDate() + index * 14);
+  } else if (frequency === "monthly") {
+    next.setMonth(startAt.getMonth() + index);
+  } else {
+    next.setDate(startAt.getDate() + index * 7);
+  }
+  return next;
+}
+
+function clampRepeatCount(value) {
+  if (!Number.isFinite(value)) {
+    return 2;
+  }
+  return Math.max(2, Math.min(30, Math.round(value)));
+}
+
+function repeatFrequencyLabel(value) {
+  return {
+    daily: "每天",
+    weekly: "每周",
+    biweekly: "每两周",
+    monthly: "每月",
+  }[value] ?? "每周";
 }
 
 async function submitDiary(formData) {
@@ -2245,22 +2403,98 @@ async function runSettingsConfirm() {
 
 function applyBillFilters(formData) {
   state.billFilters = {
+    period: "custom",
     year: String(formData.get("year") || "").trim(),
     month: String(formData.get("month") || "").trim(),
+    start_date: String(formData.get("start_date") || "").trim(),
+    end_date: String(formData.get("end_date") || "").trim(),
     category: String(formData.get("category") || "").trim(),
     transaction_type: String(formData.get("transaction_type") || "").trim(),
     q: String(formData.get("q") || "").trim(),
   };
+  state.billListMeta.page = 1;
+  loadData();
+}
+
+function applyBillRangeFilters(formData) {
+  const startDate = String(formData.get("start_date") || "").trim();
+  const endDate = String(formData.get("end_date") || "").trim();
+  if (startDate && endDate && startDate > endDate) {
+    showToast("开始日期不能晚于结束日期。");
+    return;
+  }
+
+  state.billFilters = {
+    ...state.billFilters,
+    period: "custom",
+    year: "",
+    month: "",
+    start_date: startDate,
+    end_date: endDate,
+    category: String(formData.get("category") || "").trim(),
+    transaction_type: String(formData.get("transaction_type") || "").trim(),
+    q: String(formData.get("q") || "").trim(),
+  };
+  state.billRangeOpen = false;
+  state.billListMeta.page = 1;
+  loadData();
+}
+
+function defaultBillFilters() {
+  const now = new Date();
+  return {
+    period: "month",
+    year: String(now.getFullYear()),
+    month: String(now.getMonth() + 1),
+    start_date: "",
+    end_date: "",
+    category: "",
+    transaction_type: "",
+    q: "",
+  };
+}
+
+function applyBillPeriodMonth() {
+  const current = defaultBillFilters();
+  state.billFilters = {
+    ...state.billFilters,
+    ...current,
+    transaction_type: state.billFilters.transaction_type,
+  };
+  state.billListMeta.page = 1;
+  loadData();
+}
+
+function applyBillPeriodWeek() {
+  const { start, end } = localWeekRange(new Date());
+  state.billFilters = {
+    ...state.billFilters,
+    period: "week",
+    year: "",
+    month: "",
+    start_date: dateKeyFromDate(start),
+    end_date: dateKeyFromDate(end),
+  };
+  state.billListMeta.page = 1;
   loadData();
 }
 
 function buildBillListPath() {
   const params = new URLSearchParams({ page_size: String(state.billListMeta.page_size) });
   Object.entries(state.billFilters).forEach(([key, value]) => {
+    if (["period", "start_date", "end_date"].includes(key)) {
+      return;
+    }
     if (value) {
       params.set(key, value);
     }
   });
+  if (state.billFilters.start_date) {
+    params.set("paid_from", localDayRange(dateFromDateKey(state.billFilters.start_date)).start.toISOString());
+  }
+  if (state.billFilters.end_date) {
+    params.set("paid_to", localDayRange(dateFromDateKey(state.billFilters.end_date)).end.toISOString());
+  }
   return `/bills?${params.toString()}`;
 }
 
@@ -2350,6 +2584,28 @@ function localDayRange(value = new Date()) {
   const end = new Date(start);
   end.setDate(start.getDate() + 1);
   end.setMilliseconds(-1);
+  return { start, end };
+}
+
+function localWeekRange(value = new Date()) {
+  const start = new Date(value);
+  const mondayOffset = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - mondayOffset);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+function localMonthRange(year, month) {
+  const fallback = new Date();
+  const resolvedYear = Number(year) || fallback.getFullYear();
+  const resolvedMonth = Number(month) || fallback.getMonth() + 1;
+  const start = new Date(resolvedYear, resolvedMonth - 1, 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(resolvedYear, resolvedMonth, 0);
+  end.setHours(23, 59, 59, 999);
   return { start, end };
 }
 
@@ -2475,11 +2731,13 @@ function render() {
       <input type="file" accept="image/*" data-diary-image-input multiple hidden />
       <input type="file" accept="application/json,.json" data-import-json-input hidden />
       ${state.modalOpen ? renderBillModal() : ""}
+      ${state.billRangeOpen ? renderBillRangeModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskDeleteTarget ? renderDeleteTaskModal() : ""}
       ${state.taskSortOpen ? renderTaskSortModal() : ""}
       ${state.taskCalendarOpen ? renderTaskCalendarModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
+      ${state.repeatTaskModalOpen ? renderRepeatTaskModal() : ""}
       ${state.diaryModalOpen ? renderDiaryModal() : ""}
       ${state.diaryDeleteTarget ? renderDeleteDiaryModal() : ""}
       ${state.diaryCalendarOpen ? renderDiaryCalendarModal() : ""}
@@ -2795,13 +3053,14 @@ function renderBillsPage() {
 
 function renderBillControls() {
   const activeType = state.billFilters.transaction_type || "expense";
+  const activePeriod = state.billFilters.period || "month";
   return `
     <div class="ledger-controls">
       <div class="ledger-period-tabs" aria-label="时间范围">
-        <button class="ledger-tab is-active" type="button" data-bill-period="month">本月</button>
-        <button class="ledger-tab" type="button" data-bill-period="week">本周</button>
-        <button class="ledger-tab" type="button" data-bill-period="custom">自定义</button>
-        <button class="ledger-icon-tab" type="button" data-bill-period="custom" aria-label="选择日期">
+        <button class="ledger-tab ${activePeriod === "month" ? "is-active" : ""}" type="button" data-bill-period="month">本月</button>
+        <button class="ledger-tab ${activePeriod === "week" ? "is-active" : ""}" type="button" data-bill-period="week">本周</button>
+        <button class="ledger-tab ${activePeriod === "custom" ? "is-active" : ""}" type="button" data-bill-period="custom">自定义</button>
+        <button class="ledger-icon-tab ${activePeriod === "custom" ? "is-active" : ""}" type="button" data-bill-period="custom" aria-label="选择日期">
           ${icon("calendar")}
         </button>
       </div>
@@ -2810,7 +3069,23 @@ function renderBillControls() {
         <button class="ledger-type ${activeType === "income" ? "is-active" : ""}" type="button" data-bill-type="income">收入</button>
       </div>
     </div>
+    <p class="ledger-range-note">${escapeHtml(billRangeLabel())}</p>
   `;
+}
+
+function billRangeLabel() {
+  const filters = state.billFilters;
+  if (filters.period === "week") {
+    return `当前列表：本周 ${diaryDateLabel(filters.start_date)} 至 ${diaryDateLabel(filters.end_date)}`;
+  }
+  if (filters.period === "custom") {
+    const start = filters.start_date ? diaryDateLabel(filters.start_date) : "不限开始";
+    const end = filters.end_date ? diaryDateLabel(filters.end_date) : "不限结束";
+    return `当前列表：${start} 至 ${end}`;
+  }
+  const year = filters.year || String(new Date().getFullYear());
+  const month = filters.month || String(new Date().getMonth() + 1);
+  return `当前列表：${year} 年 ${month} 月`;
 }
 
 function ledgerMetric(label, value, hint, tone, iconName = "") {
@@ -3335,6 +3610,10 @@ function renderReminderTaskItem(task) {
         <p>${shortTaskTime(task)}</p>
       </div>
       <span class="reminder-tag ${chip.tone}">${escapeHtml(chip.label)}</span>
+      <button class="reminder-edit" type="button" data-edit-task="${task.id}"
+        aria-label="编辑 ${escapeHtml(task.title)}" ${state.saving ? "disabled" : ""}>
+        ${icon("edit")}
+      </button>
       <button class="reminder-check ${done ? "is-done" : ""}" type="button"
         data-complete-task="${task.id}"
         aria-label="完成 ${escapeHtml(task.title)}"
@@ -3416,7 +3695,7 @@ function renderReminderActionDock() {
       <button class="reminder-dock-main" type="button" data-open-task-modal>
         ${icon("plus")}添加提醒
       </button>
-      <button class="reminder-dock-side" type="button" data-repeat-task-placeholder>
+      <button class="reminder-dock-side" type="button" data-open-repeat-task-modal>
         ${icon("refresh")}重复提醒
       </button>
     </section>
@@ -3970,6 +4249,16 @@ function formatDiaryTime(value) {
   }
   const prefix = dateKeyFromDate(date) === todayDateKey() ? "今天" : formatMonthDay(date);
   return `${prefix} ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function defaultRepeatStartDate() {
+  const date = new Date();
+  date.setHours(date.getHours() + 1, 0, 0, 0);
+  return date;
+}
+
+function repeatPreviewDates(startAt, frequency, count) {
+  return Array.from({ length: count }, (_, index) => addRepeatInterval(startAt, frequency, index));
 }
 
 function todayDateKey() {
@@ -4607,6 +4896,68 @@ function renderBillList(bills) {
   `;
 }
 
+function renderBillRangeModal() {
+  const filters = state.billFilters;
+  const defaultRange = filters.period === "month"
+    ? localMonthRange(filters.year, filters.month)
+    : localWeekRange(new Date());
+  const startDate = filters.start_date || dateKeyFromDate(defaultRange.start);
+  const endDate = filters.end_date || dateKeyFromDate(defaultRange.end);
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal bill-range-modal" role="dialog" aria-modal="true" aria-labelledby="bill-range-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="bill-range-title">账单筛选</h2>
+            <p class="section-note">按日期、分类、类型和关键词查看真实后端账单列表。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form" data-bill-range-form>
+          <div class="form-grid">
+            <div class="field">
+              <label for="bill_range_start">开始日期</label>
+              <input id="bill_range_start" name="start_date" type="date"
+                value="${escapeHtml(startDate)}" />
+            </div>
+            <div class="field">
+              <label for="bill_range_end">结束日期</label>
+              <input id="bill_range_end" name="end_date" type="date"
+                value="${escapeHtml(endDate)}" />
+            </div>
+            <div class="field">
+              <label for="bill_range_type">类型</label>
+              <select id="bill_range_type" name="transaction_type">
+                <option value="">全部</option>
+                ${transactionOptions(filters.transaction_type)}
+              </select>
+            </div>
+            <div class="field">
+              <label for="bill_range_category">分类</label>
+              <input id="bill_range_category" name="category" maxlength="40" placeholder="如 餐饮"
+                value="${escapeHtml(filters.category)}" />
+            </div>
+            <div class="field full">
+              <label for="bill_range_q">关键词</label>
+              <input id="bill_range_q" name="q" maxlength="80" placeholder="商户、分类、支付方式或备注"
+                value="${escapeHtml(filters.q)}" />
+            </div>
+          </div>
+          <p class="form-hint">日期为空时表示不限制该方向；本月、本周按钮会快速切换范围。</p>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-reset-bill-filters>${icon("reset")}恢复本月</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("search")}应用筛选
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
 function renderBillFilters() {
   const filters = state.billFilters;
   return `
@@ -4741,6 +5092,11 @@ function renderTaskList(tasks) {
               </div>
               <div class="task-actions">
                 <span class="pill">${labelTaskType(task.task_type)}</span>
+                <button class="icon-button" type="button" data-edit-task="${task.id}"
+                  aria-label="编辑 ${escapeHtml(task.title)}" title="编辑"
+                  ${state.saving ? "disabled" : ""}>
+                  ${icon("edit")}
+                </button>
                 <button class="icon-button" type="button" data-complete-task="${task.id}"
                   aria-label="完成 ${escapeHtml(task.title)}" title="完成"
                   ${task.status !== "pending" || state.saving ? "disabled" : ""}>
@@ -4925,13 +5281,21 @@ function renderDeleteDiaryModal() {
 }
 
 function renderTaskModal() {
+  const task = state.editingTask;
+  const isEditing = Boolean(task?.id);
+  const taskType = task?.task_type || "todo";
+  const priority = task?.priority || "medium";
+  const title = isEditing ? "编辑待办" : "新增待办";
+  const description = isEditing
+    ? "修改后会同步更新后端任务记录和提醒页。"
+    : "手动创建待办或提醒，也可以稍后交给 AI 助手整理候选事项。";
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
         <div class="modal-header">
           <div>
-            <h2 class="modal-title" id="task-modal-title">新增待办</h2>
-            <p class="section-note">先支持手动创建，后续接入 AI 对话生成待确认事项。</p>
+            <h2 class="modal-title" id="task-modal-title">${title}</h2>
+            <p class="section-note">${description}</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -4941,45 +5305,124 @@ function renderTaskModal() {
           <div class="form-grid">
             <div class="field full">
               <label for="task_title">标题</label>
-              <input id="task_title" name="title" required maxlength="120" placeholder="明天交房租" />
+              <input id="task_title" name="title" required maxlength="120" placeholder="明天交房租"
+                value="${escapeHtml(task?.title || "")}" />
             </div>
             <div class="field">
               <label for="task_type">类型</label>
               <select id="task_type" name="task_type">
-                <option value="todo">待办</option>
-                <option value="reminder">提醒</option>
+                <option value="todo" ${taskType === "todo" ? "selected" : ""}>待办</option>
+                <option value="reminder" ${taskType === "reminder" ? "selected" : ""}>提醒</option>
               </select>
             </div>
             <div class="field">
               <label for="task_priority">优先级</label>
               <select id="task_priority" name="priority">
-                <option value="medium">普通</option>
-                <option value="high">高</option>
-                <option value="low">低</option>
+                <option value="medium" ${priority === "medium" ? "selected" : ""}>普通</option>
+                <option value="high" ${priority === "high" ? "selected" : ""}>高</option>
+                <option value="low" ${priority === "low" ? "selected" : ""}>低</option>
               </select>
             </div>
             <div class="field">
               <label for="task_category">分类</label>
-              <input id="task_category" name="category" required maxlength="40" placeholder="生活" />
+              <input id="task_category" name="category" required maxlength="40" placeholder="生活"
+                value="${escapeHtml(task?.category || "")}" />
             </div>
             <div class="field">
               <label for="task_due_at">截止时间</label>
-              <input id="task_due_at" name="due_at" type="datetime-local" />
+              <input id="task_due_at" name="due_at" type="datetime-local"
+                value="${escapeHtml(toDateTimeLocal(task?.due_at))}" />
             </div>
             <div class="field">
               <label for="task_remind_at">提醒时间</label>
-              <input id="task_remind_at" name="remind_at" type="datetime-local" />
+              <input id="task_remind_at" name="remind_at" type="datetime-local"
+                value="${escapeHtml(toDateTimeLocal(task?.remind_at))}" />
             </div>
             <div class="field full">
               <label for="task_description">备注</label>
-              <textarea id="task_description" name="description" maxlength="500" placeholder="可选"></textarea>
+              <textarea id="task_description" name="description" maxlength="500" placeholder="可选">${escapeHtml(task?.description || "")}</textarea>
             </div>
           </div>
           <p class="form-hint">待办优先使用截止时间，提醒优先使用提醒时间；留空也可以先创建。</p>
           <div class="form-actions">
             <button class="button ghost" type="button" data-close-modal>取消</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
-              ${icon("save")}${state.saving ? "创建中..." : "创建待办"}
+              ${icon("save")}${state.saving ? "保存中..." : isEditing ? "保存修改" : "创建待办"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderRepeatTaskModal() {
+  const defaultStart = defaultRepeatStartDate();
+  const previewDates = repeatPreviewDates(defaultStart, "weekly", 3);
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal repeat-task-modal" role="dialog" aria-modal="true" aria-labelledby="repeat-task-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="repeat-task-title">重复提醒</h2>
+            <p class="section-note">按规则生成多条独立提醒，真实保存到后端任务数据里。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form" data-repeat-task-form>
+          <div class="form-grid">
+            <div class="field full">
+              <label for="repeat_task_title">提醒标题</label>
+              <input id="repeat_task_title" name="title" required maxlength="120" placeholder="每周复盘" />
+            </div>
+            <div class="field">
+              <label for="repeat_task_frequency">重复频率</label>
+              <select id="repeat_task_frequency" name="frequency">
+                <option value="daily">每天</option>
+                <option value="weekly" selected>每周</option>
+                <option value="biweekly">每两周</option>
+                <option value="monthly">每月</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="repeat_task_count">生成次数</label>
+              <input id="repeat_task_count" name="count" type="number" min="2" max="30" step="1" value="6" />
+            </div>
+            <div class="field">
+              <label for="repeat_task_start_at">首次提醒</label>
+              <input id="repeat_task_start_at" name="start_at" type="datetime-local"
+                value="${escapeHtml(toDateTimeLocal(defaultStart))}" />
+            </div>
+            <div class="field">
+              <label for="repeat_task_priority">优先级</label>
+              <select id="repeat_task_priority" name="priority">
+                <option value="medium">普通</option>
+                <option value="high">高</option>
+                <option value="low">低</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="repeat_task_category">分类</label>
+              <input id="repeat_task_category" name="category" required maxlength="40" value="生活" />
+            </div>
+            <div class="field full">
+              <label for="repeat_task_description">备注</label>
+              <textarea id="repeat_task_description" name="description" maxlength="500" placeholder="可选，比如提前准备材料。"></textarea>
+            </div>
+          </div>
+          <div class="repeat-rule-note">
+            <span>${icon("calendar-check")}</span>
+            <div>
+              <strong>默认预览</strong>
+              <small>${previewDates.map((date) => formatDate(date)).join("、")}；提交后可单独完成、删除或稍后提醒。</small>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-modal>取消</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("refresh")}${state.saving ? "创建中..." : "创建重复提醒"}
             </button>
           </div>
         </form>

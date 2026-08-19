@@ -107,7 +107,7 @@ def update_task(task_id: UUID, payload: TaskUpdate, request: Request) -> TaskRea
         entity_type="task",
         entity_id=task_id,
         request=request,
-        metadata={"updated_fields": payload.model_dump(exclude_none=True, exclude_unset=True)},
+        metadata={"updated_fields": payload.model_dump(exclude_unset=True)},
     )
     return task
 
