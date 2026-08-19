@@ -147,9 +147,9 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-diary-placeholder], [data-open-diary-modal]")) {
-    state.diaryModalOpen = true;
-    render();
+  const diaryModalButton = event.target.closest("[data-diary-placeholder], [data-open-diary-modal]");
+  if (diaryModalButton) {
+    openDiaryModal(diaryModalButton.dataset.diaryDate || null);
     return;
   }
 
@@ -232,9 +232,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-diary-calendar-write]")) {
-    state.diaryCalendarOpen = false;
-    state.diaryModalOpen = true;
-    render();
+    openDiaryModal(state.diarySelectedDateKey || todayDateKey());
     return;
   }
 
@@ -950,6 +948,17 @@ async function removeDiaryImage(attachmentId) {
     state.saving = false;
     render();
   }
+}
+
+function openDiaryModal(dateKey = null) {
+  const resolvedDateKey = dateKey === "today" ? todayDateKey() : dateKey;
+  if (resolvedDateKey) {
+    state.diarySelectedDateKey = resolvedDateKey;
+    state.diaryCalendarMonthKey = monthKeyFromDate(dateFromDateKey(resolvedDateKey));
+  }
+  state.diaryCalendarOpen = false;
+  state.diaryModalOpen = true;
+  render();
 }
 
 function isAttachmentReferencedOutsideDiaryDate(attachmentId, dateKey) {
@@ -1937,7 +1946,7 @@ function renderDashboard() {
               <span class="book-cover"></span>
               <span class="book-pen"></span>
             </div>
-            <button class="button primary diary-button" type="button" data-diary-placeholder>
+            <button class="button primary diary-button" type="button" data-open-diary-modal data-diary-date="today">
               ${icon("edit")}记录今天的心情
             </button>
           </div>
@@ -1947,7 +1956,7 @@ function renderDashboard() {
       <section class="quick-dock" aria-label="快捷操作">
         ${quickAction("edit", "记一笔", "快速记账", "data-open-bill-modal")}
         ${quickAction("check-circle", "添加待办", "新建任务", "data-open-task-modal")}
-        ${quickAction("book", "写日记", "记录心情", "data-diary-placeholder")}
+        ${quickAction("book", "写日记", "记录心情", "data-open-diary-modal data-diary-date=\"today\"")}
         ${quickAction("mic", "语音操作", "动口不动手", "data-voice-placeholder")}
       </section>
     </div>
@@ -2689,7 +2698,7 @@ function renderDiaryMobilePage() {
       ${renderDiaryEntry(diary)}
       ${renderDiaryGallery(diary)}
       ${renderDiaryAiAssistant()}
-      ${renderDiaryActionDock()}
+      ${renderDiaryActionDock(diary)}
     </div>
   `;
 }
@@ -2831,7 +2840,8 @@ function renderDiaryEntry(diary) {
           <span>${icon("sun")}${escapeHtml(diary.weather)}</span>
           <span class="is-soft">${icon("smile")}${escapeHtml(diary.moodLabel)}</span>
           ${attachmentCount ? `<span>${icon("image")}${attachmentCount} 张图片</span>` : ""}
-          <button class="diary-more" type="button" data-diary-placeholder aria-label="编辑日记">
+          <button class="diary-more" type="button" data-open-diary-modal
+            data-diary-date="${escapeHtml(diary.dateKey)}" aria-label="${diary.hasEntry ? "编辑日记" : "写日记"}">
             ${icon("more-horizontal")}
           </button>
         </div>
@@ -3006,14 +3016,17 @@ function renderDiaryAiAssistant() {
   `;
 }
 
-function renderDiaryActionDock() {
+function renderDiaryActionDock(diary) {
+  const actionLabel = diary?.hasEntry ? "编辑日记" : "写日记";
+  const actionIcon = diary?.hasEntry ? "edit" : "plus";
   return `
     <section class="diary-action-dock" aria-label="日记操作">
       <button class="diary-dock-side" type="button" data-voice-placeholder>
         ${icon("mic")}语音日记
       </button>
-      <button class="diary-dock-main" type="button" data-open-diary-modal>
-        ${icon("plus")}写日记
+      <button class="diary-dock-main" type="button" data-open-diary-modal
+        data-diary-date="${escapeHtml(diary?.dateKey || todayDateKey())}">
+        ${icon(actionIcon)}${actionLabel}
       </button>
       <button class="diary-dock-side" type="button" data-diary-photo-placeholder ${state.saving ? "disabled" : ""}>
         ${icon("image")}${state.saving ? "上传中..." : "添加图片"}
@@ -3969,13 +3982,17 @@ function renderTaskModal() {
 
 function renderDiaryModal() {
   const diary = getDiarySnapshot();
+  const modalTitle = diary.hasEntry ? "编辑日记" : "写日记";
   const actionLabel = diary.hasEntry ? "更新日记" : "保存日记";
+  const titleValue = diary.hasEntry ? diary.title : "";
+  const weatherValue = diary.hasEntry ? diary.weather : "";
+  const bodyValue = diary.hasEntry ? diary.body : "";
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="diary-modal-title">
         <div class="modal-header">
           <div>
-            <h2 class="modal-title" id="diary-modal-title">写日记</h2>
+            <h2 class="modal-title" id="diary-modal-title">${modalTitle}</h2>
             <p class="section-note">保存到 ${escapeHtml(diary.dateLabel)} 的后端日记记录，可随本地快照导出和恢复。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
@@ -3986,8 +4003,8 @@ function renderDiaryModal() {
           <div class="form-grid">
             <div class="field full">
               <label for="diary_title">标题</label>
-              <input id="diary_title" name="title" required maxlength="80" placeholder="今天的日记"
-                value="${escapeHtml(diary.title)}" />
+              <input id="diary_title" name="title" maxlength="80" placeholder="今天的日记"
+                value="${escapeHtml(titleValue)}" />
             </div>
             <div class="field">
               <label for="diary_mood">心情</label>
@@ -4002,12 +4019,12 @@ function renderDiaryModal() {
             <div class="field">
               <label for="diary_weather">天气</label>
               <input id="diary_weather" name="weather" maxlength="20" placeholder="晴天"
-                value="${escapeHtml(diary.weather)}" />
+                value="${escapeHtml(weatherValue)}" />
             </div>
             <div class="field full">
               <label for="diary_content">内容</label>
               <textarea id="diary_content" name="content" required maxlength="800"
-                placeholder="记录今天发生的小事、心情和想法。">${escapeHtml(diary.body)}</textarea>
+                placeholder="记录今天发生的小事、心情和想法。">${escapeHtml(bodyValue)}</textarea>
             </div>
           </div>
           <div class="form-actions">
