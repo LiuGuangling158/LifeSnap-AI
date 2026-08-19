@@ -82,6 +82,26 @@ class LocalAttachmentStore:
     def get(self, attachment_id: UUID) -> AttachmentRead | None:
         return self._attachments.get(attachment_id)
 
+    def original_content(self, attachment_id: UUID) -> tuple[AttachmentRead, bytes] | None:
+        attachment = self.get(attachment_id)
+        if attachment is None or not attachment.original_saved:
+            return None
+
+        content = self._original_files.get(attachment_id)
+        if content is not None:
+            return attachment, content
+
+        original_file = self._original_file_path(attachment_id)
+        if not original_file.exists():
+            return None
+        try:
+            content = original_file.read_bytes()
+        except OSError:
+            return None
+
+        self._original_files[attachment_id] = content
+        return attachment, content
+
     def all(self) -> list[AttachmentRead]:
         return list(self._attachments.values())
 

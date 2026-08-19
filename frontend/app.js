@@ -2870,6 +2870,17 @@ function renderDiaryGallery(diary) {
 }
 
 function renderDiaryPhotoCard(tone, label, attachmentId = "") {
+  if (attachmentId) {
+    const contentUrl = attachmentContentUrl(attachmentId);
+    return `
+      <a class="diary-photo-card saved" href="${contentUrl}" target="_blank" rel="noopener"
+        aria-label="查看${escapeHtml(label)}" title="查看已保存图片">
+        <img src="${contentUrl}" alt="${escapeHtml(label)}" loading="lazy" />
+        <span>${escapeHtml(label)}</span>
+      </a>
+    `;
+  }
+
   return `
     <button class="diary-photo-card ${tone}" type="button" data-diary-photo-placeholder
       aria-label="${escapeHtml(label)}" ${attachmentId ? `title="附件 ${escapeHtml(attachmentId)}"` : ""}>
@@ -2877,6 +2888,10 @@ function renderDiaryPhotoCard(tone, label, attachmentId = "") {
       <span>${escapeHtml(label)}</span>
     </button>
   `;
+}
+
+function attachmentContentUrl(attachmentId) {
+  return `/attachments/${encodeURIComponent(attachmentId)}/content`;
 }
 
 function renderDiaryAiAssistant() {

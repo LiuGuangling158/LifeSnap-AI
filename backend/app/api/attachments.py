@@ -1,6 +1,7 @@
 from uuid import UUID
+from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile, status
 
 from app.schemas.agent import ParseBillRequest, ParseBillResponse
 from app.schemas.attachment import (
@@ -77,6 +78,38 @@ def get_attachment(attachment_id: UUID) -> AttachmentRead:
             detail="Attachment not found",
         )
     return attachment
+
+
+@router.get("/{attachment_id}/content")
+def get_attachment_content(attachment_id: UUID, request: Request) -> Response:
+    original = attachment_store.original_content(attachment_id)
+    if original is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attachment original file not found",
+        )
+
+    attachment, content = original
+    audit_log_store.record(
+        action="attachment_original_viewed",
+        entity_type="attachment",
+        entity_id=attachment_id,
+        request=request,
+        metadata={
+            "content_type": attachment.content_type,
+            "file_size": attachment.file_size,
+            "source": attachment.source,
+        },
+    )
+    return Response(
+        content=content,
+        media_type=attachment.content_type,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Content-Disposition": f"inline; filename*=UTF-8''{quote(attachment.filename, safe='')}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/{attachment_id}/duplicates", response_model=AttachmentDuplicateResponse)

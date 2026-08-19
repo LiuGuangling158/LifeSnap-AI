@@ -557,6 +557,15 @@ Get attachment metadata:
 GET /attachments/{attachment_id}
 ```
 
+View a retained original attachment file:
+
+```text
+GET /attachments/{attachment_id}/content
+```
+
+This returns the original image or PDF only when the upload kept
+`save_original=true`; otherwise it returns `404`.
+
 Check duplicate attachments by checksum:
 
 ```text
