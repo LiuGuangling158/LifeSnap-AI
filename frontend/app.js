@@ -63,6 +63,7 @@ const state = {
   taskDeleteTarget: null,
   taskRestoreTarget: null,
   taskModalOpen: false,
+  taskCalendarOpen: false,
   diaryModalOpen: false,
   diaryCalendarOpen: false,
   diaryDeleteTarget: null,
@@ -98,7 +99,13 @@ const state = {
   taskFilters: {
     view: "today",
     category: "",
+    sort: "time",
+    dateKey: todayDateKey(),
   },
+  taskSortOpen: false,
+  taskCalendarMonthKey: monthKeyFromDate(new Date()),
+  taskCalendarLoading: false,
+  taskCalendarTasks: [],
   taskListExpanded: false,
   taskListMeta: {
     total: 0,
@@ -314,13 +321,51 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-task-calendar-placeholder]")) {
-    showToast("日历视图会在后续接入完整日期选择。");
+  if (event.target.closest("[data-open-task-calendar]")) {
+    openTaskCalendar();
     return;
   }
 
-  if (event.target.closest("[data-task-sort-placeholder]")) {
-    showToast("当前按时间优先展示提醒，排序面板会在后续补齐。");
+  const taskCalendarNavButton = event.target.closest("[data-task-calendar-nav]");
+  if (taskCalendarNavButton) {
+    shiftTaskCalendarMonth(Number(taskCalendarNavButton.dataset.taskCalendarNav || 0));
+    return;
+  }
+
+  const taskDateButton = event.target.closest("[data-task-date]");
+  if (taskDateButton) {
+    selectTaskDate(taskDateButton.dataset.taskDate);
+    return;
+  }
+
+  if (event.target.closest("[data-task-calendar-today]")) {
+    selectTaskToday();
+    return;
+  }
+
+  if (event.target.closest("[data-task-calendar-done]")) {
+    state.taskCalendarOpen = false;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-open-task-sort]")) {
+    state.taskSortOpen = true;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-close-task-sort]")) {
+    state.taskSortOpen = false;
+    render();
+    return;
+  }
+
+  const taskSortButton = event.target.closest("[data-task-sort]");
+  if (taskSortButton) {
+    state.taskFilters.sort = taskSortButton.dataset.taskSort || "time";
+    state.taskSortOpen = false;
+    render();
     return;
   }
 
@@ -404,6 +449,8 @@ document.addEventListener("click", (event) => {
     state.editingBill = null;
     state.billDraft = null;
     state.taskDeleteTarget = null;
+    state.taskSortOpen = false;
+    state.taskCalendarOpen = false;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
@@ -624,6 +671,8 @@ document.addEventListener("keydown", (event) => {
       state.modalOpen
       || state.deleteTarget
       || state.taskDeleteTarget
+      || state.taskSortOpen
+      || state.taskCalendarOpen
       || state.taskModalOpen
       || state.diaryModalOpen
       || state.diaryCalendarOpen
@@ -642,6 +691,8 @@ document.addEventListener("keydown", (event) => {
     state.billDraft = null;
     state.deleteTarget = null;
     state.taskDeleteTarget = null;
+    state.taskSortOpen = false;
+    state.taskCalendarOpen = false;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
@@ -2230,7 +2281,7 @@ function buildTaskListPath() {
 
   params.set("status", "pending");
   if (view === "today") {
-    const { start, end } = localDayRange();
+    const { start, end } = localDayRange(dateFromDateKey(taskSelectedDateKey()));
     params.set("due_from", start.toISOString());
     params.set("due_to", end.toISOString());
   }
@@ -2310,6 +2361,76 @@ function upcomingRange(days) {
   return { start, end };
 }
 
+function taskSelectedDateKey() {
+  return state.taskFilters.dateKey || todayDateKey();
+}
+
+async function openTaskCalendar() {
+  state.taskCalendarOpen = true;
+  state.taskCalendarMonthKey = monthKeyFromDate(dateFromDateKey(taskSelectedDateKey()));
+  render();
+  await refreshTaskCalendarMonth();
+}
+
+async function shiftTaskCalendarMonth(delta) {
+  state.taskCalendarMonthKey = shiftMonthKey(state.taskCalendarMonthKey, delta);
+  render();
+  await refreshTaskCalendarMonth();
+}
+
+function selectTaskDate(dateKey) {
+  if (!dateKey) {
+    return;
+  }
+  state.taskFilters.view = "today";
+  state.taskFilters.dateKey = dateKey;
+  state.taskListExpanded = false;
+  state.taskListMeta.page = 1;
+  state.taskCalendarMonthKey = monthKeyFromDate(dateFromDateKey(dateKey));
+  state.taskCalendarOpen = false;
+  loadData();
+}
+
+function selectTaskToday() {
+  selectTaskDate(todayDateKey());
+}
+
+async function refreshTaskCalendarMonth() {
+  if (state.taskCalendarLoading) {
+    return;
+  }
+  state.taskCalendarLoading = true;
+  render();
+  try {
+    const { start, end } = monthRange(state.taskCalendarMonthKey);
+    const params = new URLSearchParams({
+      status: "pending",
+      due_from: start.toISOString(),
+      due_to: end.toISOString(),
+      page_size: "100",
+    });
+    if (state.taskFilters.category) {
+      params.set("category", state.taskFilters.category);
+    }
+    const result = await api(`/tasks?${params.toString()}`);
+    state.taskCalendarTasks = result.items ?? [];
+  } catch (error) {
+    state.toast = error.message || "提醒日历加载失败";
+  } finally {
+    state.taskCalendarLoading = false;
+    render();
+  }
+}
+
+function monthRange(monthKey) {
+  const start = dateFromMonthKey(monthKey || monthKeyFromDate(new Date()));
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setMonth(start.getMonth() + 1);
+  end.setMilliseconds(-1);
+  return { start, end };
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   const text = await response.text();
@@ -2356,6 +2477,8 @@ function render() {
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskDeleteTarget ? renderDeleteTaskModal() : ""}
+      ${state.taskSortOpen ? renderTaskSortModal() : ""}
+      ${state.taskCalendarOpen ? renderTaskCalendarModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
       ${state.diaryModalOpen ? renderDiaryModal() : ""}
       ${state.diaryDeleteTarget ? renderDeleteDiaryModal() : ""}
@@ -2936,7 +3059,7 @@ function renderTasksPage() {
         ${renderReminderViewTabs()}
         ${renderReminderCategoryTabs()}
         <section class="reminder-summary" aria-label="今日提醒摘要">
-          ${reminderStat("今日待办", summary.today, "待完成事项")}
+          ${reminderStat(`${taskDateLabel(taskSelectedDateKey())}待办`, summary.today, "待完成事项")}
           ${reminderStat("已完成", summary.done, "已完成事项", "success")}
           ${reminderStat("重要事项", summary.important, "需要优先处理", "danger")}
           <div class="reminder-progress-summary">
@@ -2950,8 +3073,8 @@ function renderTasksPage() {
       <section class="surface reminder-list-panel">
         <div class="reminder-list-header">
           <h2 class="section-title">${reminderListTitle()}</h2>
-          <button class="reminder-sort-button" type="button" data-task-sort-placeholder>
-            ${icon("list-filter")}按时间排序
+          <button class="reminder-sort-button" type="button" data-open-task-sort>
+            ${icon("list-filter")}${escapeHtml(taskSortLabel(state.taskFilters.sort))}
           </button>
         </div>
         ${visibleTasks.length ? renderReminderTaskList(visibleTasks) : renderReminderEmpty()}
@@ -2980,12 +3103,12 @@ function getReminderTaskGroups() {
   ]).sort(compareReminderTasks);
   const pending = sorted.filter((task) => task.status === "pending");
   const done = sorted.filter((task) => task.status === "done");
-  const today = pending.filter(isTodayTask);
+  const selectedDateTasks = pending.filter((task) => isTaskOnDate(task, taskSelectedDateKey()));
   return {
     all: sorted,
     pending,
     done,
-    today: today.length ? today : pending,
+    today: selectedDateTasks,
     upcoming: pending.filter((task) => !isTodayTask(task)),
     important: pending.filter((task) => task.priority === "high"),
   };
@@ -3004,10 +3127,11 @@ function uniqueTasks(tasks) {
 
 function getReminderSummary(groups) {
   const overview = state.taskOverview ?? {};
+  const isSelectedToday = taskSelectedDateKey() === todayDateKey();
   return {
     pending: Number(overview.pending_count ?? groups.pending.length),
     done: Number(overview.done_count ?? groups.done.length),
-    today: Number(overview.due_today_count ?? groups.today.length),
+    today: isSelectedToday ? Number(overview.due_today_count ?? groups.today.length) : groups.today.length,
     important: countOverviewPriority("high") || groups.important.length,
   };
 }
@@ -3050,11 +3174,81 @@ function renderReminderViewTabs() {
           `,
         )
         .join("")}
-      <button class="reminder-calendar-button" type="button" data-task-calendar-placeholder aria-label="选择日期">
+      <button class="reminder-calendar-button" type="button" data-open-task-calendar aria-label="选择日期">
         ${icon("calendar")}
       </button>
     </div>
   `;
+}
+
+function renderTaskCalendarModal() {
+  const monthDate = dateFromMonthKey(state.taskCalendarMonthKey || monthKeyFromDate(new Date()));
+  const selectedKey = taskSelectedDateKey();
+  const days = diaryCalendarDays(monthDate);
+  const monthLabel = monthDate.toLocaleDateString("zh-CN", { year: "numeric", month: "long" });
+  const selectedTasks = taskCalendarTasksForDate(selectedKey);
+  const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal diary-calendar-modal" role="dialog" aria-modal="true" aria-labelledby="task-calendar-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="task-calendar-title">提醒日历</h2>
+            <p class="section-note">选择日期后，会读取后端当天的提醒和待办；日历标记来自当前月份数据。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="diary-calendar-toolbar">
+          <button class="diary-calendar-nav is-prev" type="button" data-task-calendar-nav="-1" aria-label="上个月">
+            ${icon("chevron-right")}
+          </button>
+          <strong>${escapeHtml(monthLabel)}</strong>
+          <button class="diary-calendar-nav" type="button" data-task-calendar-nav="1" aria-label="下个月">
+            ${icon("chevron-right")}
+          </button>
+        </div>
+        <div class="diary-calendar-weekdays" aria-hidden="true">
+          ${weekdays.map((day) => `<span>${day}</span>`).join("")}
+        </div>
+        <div class="diary-calendar-grid">
+          ${days.map((day) => renderTaskCalendarDay(day, monthDate, selectedKey)).join("")}
+        </div>
+        ${state.taskCalendarLoading ? `<p class="task-calendar-note">正在读取本月提醒...</p>` : ""}
+        <div class="diary-calendar-footer">
+          <div>
+            <strong>${escapeHtml(taskDateLabel(selectedKey))}</strong>
+            <span>${selectedTasks.length ? `${selectedTasks.length} 条提醒` : "当前已加载日期暂无提醒"}</span>
+          </div>
+          <div class="diary-calendar-actions">
+            <button class="button ghost" type="button" data-task-calendar-today>今天</button>
+            <button class="button primary" type="button" data-task-calendar-done>完成</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderTaskCalendarDay(day, monthDate, selectedKey) {
+  const key = dateKeyFromDate(day);
+  const isCurrentMonth = day.getMonth() === monthDate.getMonth();
+  const isSelected = key === selectedKey;
+  const isToday = key === todayDateKey();
+  const taskCount = taskCalendarTasksForDate(key).length;
+  const hasTasks = taskCount > 0;
+  return `
+    <button class="diary-calendar-day task-calendar-day ${isCurrentMonth ? "" : "is-muted"} ${isSelected ? "is-selected" : ""} ${isToday ? "is-today" : ""} ${hasTasks ? "has-entry" : ""}"
+      type="button" data-task-date="${key}" aria-label="选择 ${escapeHtml(taskDateLabel(key))}">
+      <span>${day.getDate()}</span>
+      ${hasTasks ? `<i></i><em>${taskCount}</em>` : ""}
+    </button>
+  `;
+}
+
+function taskCalendarTasksForDate(dateKey) {
+  return state.taskCalendarTasks.filter((task) => isTaskOnDate(task, dateKey));
 }
 
 function renderReminderCategoryTabs() {
@@ -3109,7 +3303,7 @@ function renderTaskProgressRing(percent) {
 
 function reminderListTitle() {
   return {
-    today: "今日提醒",
+    today: `${taskDateLabel(taskSelectedDateKey())}提醒`,
     upcoming: "即将到来",
     done: "已完成",
   }[state.taskFilters.view] ?? "今日提醒";
@@ -3231,13 +3425,39 @@ function renderReminderActionDock() {
 
 function compareReminderTasks(a, b) {
   const statusWeight = (task) => (task.status === "done" ? 1 : 0);
-  const priorityWeight = (task) => ({ high: 0, medium: 1, low: 2 }[task.priority] ?? 1);
-  const aTime = taskTargetDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-  const bTime = taskTargetDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
   return statusWeight(a) - statusWeight(b)
-    || aTime - bTime
-    || priorityWeight(a) - priorityWeight(b)
+    || compareReminderTasksBySort(a, b)
     || String(a.title ?? "").localeCompare(String(b.title ?? ""), "zh-CN");
+}
+
+function compareReminderTasksBySort(a, b) {
+  const sort = state.taskFilters.sort || "time";
+  if (sort === "priority") {
+    return priorityWeight(a) - priorityWeight(b)
+      || targetTime(a) - targetTime(b)
+      || createdTime(b) - createdTime(a);
+  }
+  if (sort === "created") {
+    return createdTime(b) - createdTime(a)
+      || targetTime(a) - targetTime(b)
+      || priorityWeight(a) - priorityWeight(b);
+  }
+  return targetTime(a) - targetTime(b)
+    || priorityWeight(a) - priorityWeight(b)
+    || createdTime(b) - createdTime(a);
+}
+
+function priorityWeight(task) {
+  return { high: 0, medium: 1, low: 2 }[task?.priority] ?? 1;
+}
+
+function targetTime(task) {
+  return taskTargetDate(task)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+}
+
+function createdTime(task) {
+  const date = task?.created_at ? new Date(task.created_at) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
 }
 
 function taskTargetDate(task) {
@@ -3251,15 +3471,23 @@ function taskTargetDate(task) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function isTodayTask(task) {
+function isTaskOnDate(task, dateKey) {
   const target = taskTargetDate(task);
   if (!target) {
-    return task.status === "pending";
+    return task?.status === "pending" && dateKey === todayDateKey();
   }
-  const now = new Date();
-  return target.getFullYear() === now.getFullYear()
-    && target.getMonth() === now.getMonth()
-    && target.getDate() === now.getDate();
+  return dateKeyFromDate(target) === dateKey;
+}
+
+function isTodayTask(task) {
+  return isTaskOnDate(task, todayDateKey());
+}
+
+function taskDateLabel(dateKey) {
+  if (dateKey === todayDateKey()) {
+    return "今日";
+  }
+  return diaryDateLabel(dateKey);
 }
 
 function shortTaskTime(task) {
@@ -5156,6 +5384,65 @@ function formatChatTaskTime(data) {
     ? data.remind_at || data.due_at
     : data?.due_at || data?.remind_at;
   return target ? formatDate(target) : "待补充";
+}
+
+function renderTaskSortModal() {
+  const currentSort = state.taskFilters.sort || "time";
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="task-sort-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="task-sort-title">提醒排序</h2>
+            <p class="section-note">调整当前提醒列表的展示顺序，不改变后端数据。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-task-sort aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="task-sort-list">
+          ${taskSortOptions().map((option) => `
+            <button class="task-sort-option ${currentSort === option.value ? "is-active" : ""}"
+              type="button" data-task-sort="${escapeHtml(option.value)}">
+              <span>${icon(option.iconName)}</span>
+              <div>
+                <strong>${escapeHtml(option.label)}</strong>
+                <small>${escapeHtml(option.note)}</small>
+              </div>
+              ${currentSort === option.value ? icon("check") : ""}
+            </button>
+          `).join("")}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function taskSortOptions() {
+  return [
+    {
+      value: "time",
+      label: "按时间排序",
+      note: "越接近当前目标时间的提醒越靠前。",
+      iconName: "clock",
+    },
+    {
+      value: "priority",
+      label: "按优先级排序",
+      note: "重要事项优先，同级再按时间排列。",
+      iconName: "check-circle",
+    },
+    {
+      value: "created",
+      label: "按创建时间排序",
+      note: "最新添加的提醒优先展示。",
+      iconName: "calendar",
+    },
+  ];
+}
+
+function taskSortLabel(value) {
+  return taskSortOptions().find((option) => option.value === value)?.label ?? "按时间排序";
 }
 
 function renderSnoozeModal() {
