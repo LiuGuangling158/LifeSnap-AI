@@ -244,6 +244,14 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const diaryPhotoRemoveButton = event.target.closest("[data-diary-photo-remove]");
+  if (diaryPhotoRemoveButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    removeDiaryImage(diaryPhotoRemoveButton.dataset.attachmentId);
+    return;
+  }
+
   if (event.target.closest("[data-diary-photo-placeholder]")) {
     app.querySelector("[data-diary-image-input]")?.click();
     return;
@@ -888,6 +896,66 @@ async function uploadDiaryImages(fileList) {
     state.saving = false;
     render();
   }
+}
+
+async function removeDiaryImage(attachmentId) {
+  if (!attachmentId || state.saving) {
+    return;
+  }
+
+  const dateKey = state.diarySelectedDateKey || todayDateKey();
+  const existing = diaryEntryForDate(dateKey);
+  const remainingAttachmentIds = diaryAttachmentIdsForDate(dateKey).filter((id) => id !== String(attachmentId));
+  const isReferencedElsewhere = isAttachmentReferencedOutsideDiaryDate(attachmentId, dateKey);
+
+  state.saving = true;
+  render();
+  try {
+    if (existing) {
+      const saved = await api(`/diaries/by-date/${dateKey}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entry_date: dateKey,
+          title: existing.title || `${diaryDateLabel(dateKey)}的日记`,
+          content: existing.content || "这一天的图片已经调整，可以继续记录新的生活片段。",
+          mood: existing.mood || "happy",
+          weather: existing.weather || null,
+          source: existing.source || "manual",
+          attachment_ids: remainingAttachmentIds,
+        }),
+      });
+      state.diaryEntries = upsertDiaryEntry(state.diaryEntries, normalizeDiaryEntry(saved));
+    }
+
+    let cleanupFailed = false;
+    if (!isReferencedElsewhere) {
+      try {
+        await api(`/attachments/${encodeURIComponent(attachmentId)}`, { method: "DELETE" });
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+
+    state.toast = cleanupFailed ? "图片已移除，附件清理稍后重试" : "日记图片已移除";
+    await loadData();
+    window.setTimeout(() => {
+      state.toast = "";
+      render();
+    }, 2200);
+  } catch (error) {
+    state.toast = error.message || "图片移除失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+function isAttachmentReferencedOutsideDiaryDate(attachmentId, dateKey) {
+  return state.diaryEntries.some(
+    (entry) => entry.dateKey !== dateKey && (entry.attachment_ids || []).map(String).includes(String(attachmentId)),
+  );
 }
 
 function openDiaryCalendar() {
@@ -2873,11 +2941,18 @@ function renderDiaryPhotoCard(tone, label, attachmentId = "") {
   if (attachmentId) {
     const contentUrl = attachmentContentUrl(attachmentId);
     return `
-      <a class="diary-photo-card saved" href="${contentUrl}" target="_blank" rel="noopener"
-        aria-label="查看${escapeHtml(label)}" title="查看已保存图片">
-        <img src="${contentUrl}" alt="${escapeHtml(label)}" loading="lazy" />
-        <span>${escapeHtml(label)}</span>
-      </a>
+      <div class="diary-photo-card saved" aria-label="${escapeHtml(label)}">
+        <a class="diary-photo-link" href="${contentUrl}" target="_blank" rel="noopener"
+          aria-label="查看${escapeHtml(label)}" title="查看已保存图片">
+          <img src="${contentUrl}" alt="${escapeHtml(label)}" loading="lazy" />
+          <span class="diary-photo-label">${escapeHtml(label)}</span>
+        </a>
+        <button class="diary-photo-remove" type="button" data-diary-photo-remove
+          data-attachment-id="${escapeHtml(attachmentId)}" aria-label="移除${escapeHtml(label)}"
+          ${state.saving ? "disabled" : ""}>
+          ${icon("close")}
+        </button>
+      </div>
     `;
   }
 
