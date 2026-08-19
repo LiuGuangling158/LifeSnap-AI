@@ -71,6 +71,12 @@ const state = {
   settingsConfirm: null,
   dataImportPreview: null,
   privacySettingsOpen: false,
+  diagnosticsOpen: false,
+  diagnosticsLoading: false,
+  diagnostics: null,
+  auditLogOpen: false,
+  auditLogLoading: false,
+  auditLog: null,
   recycleBinOpen: false,
   recycleBinLoading: false,
   recycleBin: {
@@ -406,6 +412,8 @@ document.addEventListener("click", (event) => {
     state.settingsConfirm = null;
     state.dataImportPreview = null;
     state.privacySettingsOpen = false;
+    state.diagnosticsOpen = false;
+    state.auditLogOpen = false;
     state.recycleBinOpen = false;
     render();
     return;
@@ -544,6 +552,38 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-open-diagnostics]")) {
+    openDiagnostics();
+    return;
+  }
+
+  if (event.target.closest("[data-close-diagnostics]")) {
+    state.diagnosticsOpen = false;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-refresh-diagnostics]")) {
+    refreshDiagnostics();
+    return;
+  }
+
+  if (event.target.closest("[data-open-audit-log]")) {
+    openAuditLog();
+    return;
+  }
+
+  if (event.target.closest("[data-close-audit-log]")) {
+    state.auditLogOpen = false;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-refresh-audit-log]")) {
+    refreshAuditLog();
+    return;
+  }
+
   const privacyToggleButton = event.target.closest("[data-privacy-toggle]");
   if (privacyToggleButton) {
     updatePrivacySetting(privacyToggleButton.dataset.privacyToggle);
@@ -592,6 +632,8 @@ document.addEventListener("keydown", (event) => {
       || state.settingsConfirm
       || state.dataImportPreview
       || state.privacySettingsOpen
+      || state.diagnosticsOpen
+      || state.auditLogOpen
       || state.recycleBinOpen
     )
   ) {
@@ -608,6 +650,8 @@ document.addEventListener("keydown", (event) => {
     state.settingsConfirm = null;
     state.dataImportPreview = null;
     state.privacySettingsOpen = false;
+    state.diagnosticsOpen = false;
+    state.auditLogOpen = false;
     state.recycleBinOpen = false;
     render();
   }
@@ -2024,6 +2068,54 @@ async function updatePrivacySetting(key) {
   }
 }
 
+async function openDiagnostics() {
+  if (state.saving) {
+    return;
+  }
+  state.diagnosticsOpen = true;
+  await refreshDiagnostics();
+}
+
+async function refreshDiagnostics() {
+  if (state.diagnosticsLoading) {
+    return;
+  }
+  state.diagnosticsLoading = true;
+  render();
+  try {
+    state.diagnostics = await api("/diagnostics/data-quality?issue_limit=20");
+  } catch (error) {
+    state.toast = error.message || "系统自检失败";
+  } finally {
+    state.diagnosticsLoading = false;
+    render();
+  }
+}
+
+async function openAuditLog() {
+  if (state.saving) {
+    return;
+  }
+  state.auditLogOpen = true;
+  await refreshAuditLog();
+}
+
+async function refreshAuditLog() {
+  if (state.auditLogLoading) {
+    return;
+  }
+  state.auditLogLoading = true;
+  render();
+  try {
+    state.auditLog = await api("/audit/events?page_size=20");
+  } catch (error) {
+    state.toast = error.message || "操作记录加载失败";
+  } finally {
+    state.auditLogLoading = false;
+    render();
+  }
+}
+
 function openSettingsConfirm(action) {
   const configs = {
     clear: {
@@ -2272,6 +2364,8 @@ function render() {
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.dataImportPreview ? renderDataImportModal() : ""}
       ${state.privacySettingsOpen ? renderPrivacySettingsModal() : ""}
+      ${state.diagnosticsOpen ? renderDiagnosticsModal() : ""}
+      ${state.auditLogOpen ? renderAuditLogModal() : ""}
       ${state.recycleBinOpen ? renderRecycleBinModal() : ""}
       ${state.toast ? renderToast() : ""}
     </div>
@@ -3996,6 +4090,12 @@ function renderProfileSafetyPanel() {
         <button class="button ghost" type="button" data-open-privacy-settings ${state.saving ? "disabled" : ""}>
           ${icon("settings")}隐私设置
         </button>
+        <button class="button ghost" type="button" data-open-diagnostics ${state.saving ? "disabled" : ""}>
+          ${icon("check-circle")}系统自检
+        </button>
+        <button class="button ghost" type="button" data-open-audit-log ${state.saving ? "disabled" : ""}>
+          ${icon("file-text")}最近操作
+        </button>
         <button class="button ghost" type="button" data-open-recycle-bin ${state.saving ? "disabled" : ""}>
           ${icon("refresh")}回收站${deletedCount ? ` ${deletedCount}` : ""}
         </button>
@@ -5207,6 +5307,262 @@ function renderPrivacySettingsModal() {
       </section>
     </div>
   `;
+}
+
+function renderDiagnosticsModal() {
+  const diagnostics = state.diagnostics;
+  const issues = diagnostics?.issues ?? [];
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal diagnostics-modal" role="dialog" aria-modal="true" aria-labelledby="diagnostics-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="diagnostics-title">系统自检</h2>
+            <p class="section-note">读取后端数据质量诊断，帮助发现隐私、附件、候选记录和待办风险。</p>
+          </div>
+          <div class="diagnostics-modal-actions">
+            <button class="button ghost" type="button" data-refresh-diagnostics
+              ${state.diagnosticsLoading ? "disabled" : ""}>
+              ${icon("refresh")}${state.diagnosticsLoading ? "刷新中..." : "刷新"}
+            </button>
+            <button class="button ghost" type="button" data-close-diagnostics aria-label="关闭">
+              ${icon("close")}
+            </button>
+          </div>
+        </div>
+        <div class="diagnostics-body">
+          ${state.diagnosticsLoading && !diagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
+          ${diagnostics ? `
+            <div class="diagnostics-summary">
+              ${diagnosticMetric("状态", diagnosticsStatusLabel(diagnostics.status), diagnostics.status)}
+              ${diagnosticMetric("需处理", diagnostics.action_required_count ?? 0, "action_required")}
+              ${diagnosticMetric("警告", diagnostics.warning_count ?? 0, "warning")}
+              ${diagnosticMetric("提示", diagnostics.info_count ?? 0, "info")}
+            </div>
+            ${issues.length ? `
+              <div class="diagnostics-list">
+                ${issues.map(renderDiagnosticIssue).join("")}
+              </div>
+            ` : `<p class="diagnostics-empty">没有发现需要处理的问题。</p>`}
+            ${diagnostics.truncated ? `<p class="diagnostics-note">问题较多，当前只展示前 ${diagnostics.issue_limit} 条。</p>` : ""}
+            <p class="diagnostics-note">生成时间：${formatDate(diagnostics.generated_at)}</p>
+          ` : ""}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function diagnosticMetric(label, value, tone) {
+  return `
+    <div class="diagnostic-metric ${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function renderDiagnosticIssue(issue) {
+  const severity = issue.severity || "info";
+  return `
+    <article class="diagnostic-issue ${escapeHtml(severity)}">
+      <span>${escapeHtml(diagnosticSeverityLabel(severity))}</span>
+      <div>
+        <strong>${escapeHtml(diagnosticIssueTitle(issue))}</strong>
+        <p>${escapeHtml(diagnosticIssueMessage(issue))}</p>
+        ${diagnosticIssueMeta(issue) ? `<small>${escapeHtml(diagnosticIssueMeta(issue))}</small>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function diagnosticsStatusLabel(status) {
+  return {
+    ok: "状态良好",
+    warning: "有风险提醒",
+    action_required: "需要处理",
+  }[status] ?? "未知";
+}
+
+function diagnosticSeverityLabel(severity) {
+  return {
+    action_required: "需处理",
+    warning: "警告",
+    info: "提示",
+  }[severity] ?? "提示";
+}
+
+function diagnosticIssueTitle(issue) {
+  return {
+    ai_text_processing_disabled: "AI 文本处理已关闭",
+    original_attachment_retention_enabled: "默认保存原始附件",
+    attachment_missing_ocr_text: "附件缺少 OCR 文本",
+    duplicate_attachment: "发现重复附件",
+    pending_bill_candidates: "有待确认账单候选",
+    pending_task_candidates: "有待确认待办候选",
+    bill_candidate_missing_required_fields: "账单候选缺少必要字段",
+    task_candidate_missing_required_fields: "待办候选缺少必要字段",
+    possible_duplicate_bill: "可能存在重复账单",
+    unscheduled_pending_task: "待办未设置时间",
+    overdue_task: "待办已逾期",
+    deleted_bills_in_recycle_bin: "回收站中有已删除账单",
+    deleted_tasks_in_recycle_bin: "回收站中有已删除待办",
+  }[issue.code] ?? issue.code ?? "诊断问题";
+}
+
+function diagnosticIssueMessage(issue) {
+  return {
+    ai_text_processing_disabled: "聊天解析、图片识别后的 AI 解析会受限，可在隐私设置中重新开启。",
+    original_attachment_retention_enabled: "这会增加本地存储占用，也会提高原始图片暴露风险。",
+    attachment_missing_ocr_text: "该附件可能需要重新识别，或手动补充成账单/日记内容。",
+    duplicate_attachment: "多个附件的校验值相同，可以后续清理重复文件。",
+    pending_bill_candidates: "助手识别出的账单还没有确认保存。",
+    pending_task_candidates: "助手识别出的待办还没有确认保存。",
+    bill_candidate_missing_required_fields: "缺少金额或商户，暂时不能确认保存。",
+    task_candidate_missing_required_fields: "缺少标题或提醒时间，暂时不能确认保存。",
+    possible_duplicate_bill: "两条账单商户、金额、类型和时间都很接近，建议核对。",
+    unscheduled_pending_task: "待办没有到期或提醒时间，可能难以及时触达。",
+    overdue_task: "这条待办已经超过目标时间，需要处理或延后。",
+    deleted_bills_in_recycle_bin: "可以在回收站查看并恢复误删账单。",
+    deleted_tasks_in_recycle_bin: "可以在回收站查看并恢复误删待办。",
+  }[issue.code] ?? issue.message ?? "";
+}
+
+function diagnosticIssueMeta(issue) {
+  const metadata = issue.metadata ?? {};
+  if (metadata.filename) return `文件：${metadata.filename}`;
+  if (metadata.title) return `标题：${metadata.title}`;
+  if (metadata.merchant) return `商户：${metadata.merchant}，金额：${metadata.amount ?? "未知"}`;
+  if (metadata.candidate_count) return `候选数量：${metadata.candidate_count}`;
+  if (metadata.deleted_bill_count) return `已删除账单：${metadata.deleted_bill_count}`;
+  if (metadata.deleted_task_count) return `已删除待办：${metadata.deleted_task_count}`;
+  return issue.entity_type ? `类型：${issue.entity_type}` : "";
+}
+
+function renderAuditLogModal() {
+  const log = state.auditLog;
+  const events = log?.items ?? [];
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal audit-modal" role="dialog" aria-modal="true" aria-labelledby="audit-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="audit-title">最近操作</h2>
+            <p class="section-note">展示后端最近 20 条审计记录，便于追踪关键数据变化。</p>
+          </div>
+          <div class="audit-modal-actions">
+            <button class="button ghost" type="button" data-refresh-audit-log
+              ${state.auditLogLoading ? "disabled" : ""}>
+              ${icon("refresh")}${state.auditLogLoading ? "刷新中..." : "刷新"}
+            </button>
+            <button class="button ghost" type="button" data-close-audit-log aria-label="关闭">
+              ${icon("close")}
+            </button>
+          </div>
+        </div>
+        <div class="audit-body">
+          ${state.auditLogLoading && !log ? `<p class="audit-empty">正在读取操作记录...</p>` : ""}
+          ${!state.auditLogLoading && !events.length ? `<p class="audit-empty">暂无操作记录。</p>` : ""}
+          ${events.length ? `
+            <div class="audit-list">
+              ${events.map(renderAuditEvent).join("")}
+            </div>
+            <p class="audit-note">共 ${Number(log?.total ?? events.length)} 条记录，当前显示最近 ${events.length} 条。</p>
+          ` : ""}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderAuditEvent(event) {
+  return `
+    <article class="audit-event">
+      <span>${icon(auditEventIcon(event))}</span>
+      <div class="audit-event-main">
+        <strong>${escapeHtml(auditActionLabel(event.action))}</strong>
+        <small>${escapeHtml(auditEventMeta(event))}</small>
+      </div>
+      <time>${escapeHtml(formatDate(event.occurred_at))}</time>
+    </article>
+  `;
+}
+
+function auditEventIcon(event) {
+  const action = event.action || "";
+  if (action.includes("deleted")) return "trash";
+  if (action.includes("restored") || action.includes("loaded") || action.includes("imported")) return "upload";
+  if (action.includes("exported") || action.includes("saved")) return "download";
+  if (action.includes("updated")) return "edit";
+  if (action.includes("created") || action.includes("seeded")) return "plus";
+  return "file-text";
+}
+
+function auditActionLabel(action) {
+  return {
+    bill_created: "创建账单",
+    bill_updated: "更新账单",
+    bill_deleted: "删除账单",
+    bill_restored: "恢复账单",
+    task_created: "创建待办",
+    task_updated: "更新待办",
+    task_completed: "完成待办",
+    task_snoozed: "延后待办",
+    task_deleted: "删除待办",
+    task_restored: "恢复待办",
+    diary_created: "创建日记",
+    diary_upserted: "保存日记",
+    diary_updated: "更新日记",
+    diary_deleted: "删除日记",
+    diary_restored: "恢复日记",
+    attachment_uploaded: "上传附件",
+    attachment_deleted: "删除附件",
+    attachment_ocr_recognized: "识别附件文字",
+    attachment_bill_parsed: "解析附件账单",
+    bill_candidate_confirmed: "确认账单候选",
+    bill_candidate_deleted: "删除账单候选",
+    task_candidate_confirmed: "确认待办候选",
+    task_candidate_deleted: "删除待办候选",
+    chat_message_processed: "处理助手消息",
+    privacy_settings_updated: "更新隐私设置",
+    data_exported: "导出数据",
+    data_imported: "导入数据",
+    data_import_dry_run: "预览导入数据",
+    data_snapshot_saved: "保存本地快照",
+    data_snapshot_loaded: "加载本地快照",
+    data_snapshot_load_dry_run: "预览加载快照",
+    data_snapshot_deleted: "删除本地快照",
+    data_cleared: "清除本地数据",
+    demo_data_seeded: "生成演示数据",
+  }[action] ?? action ?? "未知操作";
+}
+
+function auditEventMeta(event) {
+  const parts = [];
+  if (event.entity_type) {
+    parts.push(auditEntityLabel(event.entity_type));
+  }
+  if (event.method && event.path) {
+    parts.push(`${event.method} ${event.path}`);
+  }
+  if (event.request_id) {
+    parts.push(`请求 ${String(event.request_id).slice(0, 8)}`);
+  }
+  return parts.join(" · ") || "本地操作记录";
+}
+
+function auditEntityLabel(entityType) {
+  return {
+    bill: "账单",
+    task: "待办",
+    diary: "日记",
+    attachment: "附件",
+    bill_candidate: "账单候选",
+    task_candidate: "待办候选",
+    settings: "设置",
+    data: "数据",
+    chat: "助手",
+  }[entityType] ?? entityType;
 }
 
 function privacySettingRow(key, title, note, enabled) {
