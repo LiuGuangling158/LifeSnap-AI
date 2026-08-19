@@ -29,7 +29,7 @@ const routes = [
     icon: "book",
     eyebrow: "生活记录",
     title: "日记",
-    subtitle: "记录生活点滴的入口先占位，后续接入真实日记数据。",
+    subtitle: "记录文字、心情和图片片段；数据保存到当前后端。",
   },
   {
     id: "assistant",
@@ -245,7 +245,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-diary-photo-placeholder]")) {
-    showToast("图片上传会在后续接入附件与相册能力。");
+    app.querySelector("[data-diary-image-input]")?.click();
     return;
   }
 
@@ -482,6 +482,11 @@ document.addEventListener("change", async (event) => {
 
   if (event.target.matches("[data-bill-image-input]")) {
     await importBillImage(event.target.files?.[0]);
+    event.target.value = "";
+  }
+
+  if (event.target.matches("[data-diary-image-input]")) {
+    await uploadDiaryImages(event.target.files);
     event.target.value = "";
   }
 });
@@ -799,6 +804,7 @@ async function submitDiary(formData) {
     mood: String(formData.get("mood") || "happy"),
     weather: String(formData.get("weather") || "").trim() || null,
     source: "manual",
+    attachment_ids: diaryAttachmentIdsForDate(dateKey),
   };
 
   state.saving = true;
@@ -821,6 +827,63 @@ async function submitDiary(formData) {
   } catch (error) {
     state.toast = error.message || "日记保存失败";
     render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function uploadDiaryImages(fileList) {
+  const files = Array.from(fileList || []).filter((file) => file.type.startsWith("image/"));
+  if (!files.length) {
+    showToast("请选择日记图片。");
+    return;
+  }
+
+  const dateKey = state.diarySelectedDateKey || todayDateKey();
+  const existing = diaryEntryForDate(dateKey);
+  const currentAttachmentIds = diaryAttachmentIdsForDate(dateKey);
+
+  state.saving = true;
+  render();
+  try {
+    const uploadedIds = [];
+    for (const file of files) {
+      const payload = new FormData();
+      payload.append("file", file);
+      payload.append("source", "album");
+      payload.append("save_original", "true");
+      const uploaded = await api("/attachments/upload", {
+        method: "POST",
+        body: payload,
+      });
+      uploadedIds.push(uploaded.id);
+    }
+
+    const attachmentIds = uniqueValues([...currentAttachmentIds, ...uploadedIds]);
+    const saved = await api(`/diaries/by-date/${dateKey}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entry_date: dateKey,
+        title: existing?.title || `${diaryDateLabel(dateKey)}的图片日记`,
+        content: existing?.content || `保存了 ${files.length} 张生活片段。`,
+        mood: existing?.mood || "happy",
+        weather: existing?.weather || null,
+        source: existing?.source || "manual",
+        attachment_ids: attachmentIds,
+      }),
+    });
+
+    state.diaryEntries = upsertDiaryEntry(state.diaryEntries, normalizeDiaryEntry(saved));
+    state.toast = `已添加 ${uploadedIds.length} 张日记图片`;
+    await loadData();
+    window.setTimeout(() => {
+      state.toast = "";
+      render();
+    }, 2200);
+  } catch (error) {
+    state.toast = error.message || "日记图片上传失败";
   } finally {
     state.saving = false;
     render();
@@ -1507,7 +1570,16 @@ function normalizeDiaryEntry(item) {
     created_at: item.created_at,
     updated_at: item.updated_at,
     source: item.source || "manual",
+    attachment_ids: uniqueValues(item.attachment_ids || []),
   };
+}
+
+function diaryAttachmentIdsForDate(dateKey) {
+  return uniqueValues(diaryEntryForDate(dateKey)?.attachment_ids || []);
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values.filter(Boolean).map(String)));
 }
 
 function upsertDiaryEntry(entries, entry) {
@@ -1575,6 +1647,7 @@ function render() {
         ${renderMobileTabbar()}
       </main>
       <input type="file" accept="image/*" data-bill-image-input hidden />
+      <input type="file" accept="image/*" data-diary-image-input multiple hidden />
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
@@ -2546,7 +2619,7 @@ function renderDiaryMobilePage() {
 
       ${renderDiaryMoodSummary(diary)}
       ${renderDiaryEntry(diary)}
-      ${renderDiaryGallery()}
+      ${renderDiaryGallery(diary)}
       ${renderDiaryAiAssistant()}
       ${renderDiaryActionDock()}
     </div>
@@ -2576,6 +2649,7 @@ function getDiarySnapshot() {
     hasEntry: Boolean(entry),
     streakDays,
     monthEntries: diaryEntriesInMonth(selectedDateKey),
+    attachmentIds: diaryAttachmentIdsForDate(selectedDateKey),
     body: entry?.content || [
       `${diaryDateLabel(selectedDateKey)}还没有保存日记，可以先留下一点生活记录。`,
       recentBills.length
@@ -2675,6 +2749,7 @@ function renderDiaryMoodRing(percent) {
 
 function renderDiaryEntry(diary) {
   const lines = diary.body.split("\n").filter(Boolean);
+  const attachmentCount = diary.attachmentIds?.length || 0;
   return `
     <section class="surface diary-entry-section">
       <div class="diary-entry-header">
@@ -2687,6 +2762,7 @@ function renderDiaryEntry(diary) {
           <span>${icon("clock")}${formatDiaryTime(diary.createdAt)}</span>
           <span>${icon("sun")}${escapeHtml(diary.weather)}</span>
           <span class="is-soft">${icon("smile")}${escapeHtml(diary.moodLabel)}</span>
+          ${attachmentCount ? `<span>${icon("image")}${attachmentCount} 张图片</span>` : ""}
           <button class="diary-more" type="button" data-diary-placeholder aria-label="编辑日记">
             ${icon("more-horizontal")}
           </button>
@@ -2766,12 +2842,15 @@ function renderDiaryCalendarDay(day, monthDate, selectedKey) {
   `;
 }
 
-function renderDiaryGallery() {
-  const photos = [
-    ["coffee", "晨间咖啡"],
-    ["window", "窗边时刻"],
-    ["desk", "夜晚书桌"],
-  ];
+function renderDiaryGallery(diary) {
+  const attachmentIds = diary.attachmentIds || [];
+  const photos = attachmentIds.length
+    ? attachmentIds.slice(0, 3).map((id, index) => ["saved", `已保存图片 ${index + 1}`, id])
+    : [
+        ["coffee", "晨间咖啡", ""],
+        ["window", "窗边时刻", ""],
+        ["desk", "夜晚书桌", ""],
+      ];
   return `
     <section class="surface diary-gallery-section">
       <div class="diary-section-header">
@@ -2779,20 +2858,21 @@ function renderDiaryGallery() {
           <span class="panel-icon">${icon("image")}</span>
           <h2 class="section-title">今日片段</h2>
         </div>
-        <button class="button ghost" type="button" data-diary-photo-placeholder>
-          查看全部 ${icon("chevron-right")}
+        <button class="button ghost" type="button" data-diary-photo-placeholder ${state.saving ? "disabled" : ""}>
+          ${state.saving ? "上传中..." : attachmentIds.length ? "继续添加" : "添加图片"} ${icon("chevron-right")}
         </button>
       </div>
       <div class="diary-photo-grid">
-        ${photos.map(([tone, label]) => renderDiaryPhotoCard(tone, label)).join("")}
+        ${photos.map(([tone, label, id]) => renderDiaryPhotoCard(tone, label, id)).join("")}
       </div>
     </section>
   `;
 }
 
-function renderDiaryPhotoCard(tone, label) {
+function renderDiaryPhotoCard(tone, label, attachmentId = "") {
   return `
-    <button class="diary-photo-card ${tone}" type="button" data-diary-photo-placeholder aria-label="${escapeHtml(label)}">
+    <button class="diary-photo-card ${tone}" type="button" data-diary-photo-placeholder
+      aria-label="${escapeHtml(label)}" ${attachmentId ? `title="附件 ${escapeHtml(attachmentId)}"` : ""}>
       <span class="photo-scene" aria-hidden="true"></span>
       <span>${escapeHtml(label)}</span>
     </button>
@@ -2845,8 +2925,8 @@ function renderDiaryActionDock() {
       <button class="diary-dock-main" type="button" data-open-diary-modal>
         ${icon("plus")}写日记
       </button>
-      <button class="diary-dock-side" type="button" data-diary-photo-placeholder>
-        ${icon("image")}添加图片
+      <button class="diary-dock-side" type="button" data-diary-photo-placeholder ${state.saving ? "disabled" : ""}>
+        ${icon("image")}${state.saving ? "上传中..." : "添加图片"}
       </button>
     </section>
   `;

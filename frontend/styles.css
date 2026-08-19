@@ -1710,6 +1710,10 @@ button {
   transform: translateY(-1px);
 }
 
+.diary-photo-card.saved {
+  background: #eaf8f2;
+}
+
 .diary-photo-card > span:last-child {
   position: absolute;
   left: 8px;
@@ -1802,6 +1806,27 @@ button {
   background: #d7bc73;
   content: "";
   box-shadow: 5px -15px 0 #8a9d7a, 54px -38px 0 -16px #86d8b6;
+}
+
+.diary-photo-card.saved .photo-scene::before {
+  position: absolute;
+  inset: 18px 24px 30px;
+  border: 3px solid #65c8ac;
+  border-radius: var(--radius);
+  background: #f8fffb;
+  content: "";
+}
+
+.diary-photo-card.saved .photo-scene::after {
+  position: absolute;
+  left: 38px;
+  bottom: 35px;
+  width: 34px;
+  height: 21px;
+  border-radius: 18px 18px 8px 8px;
+  background: #b7ead9;
+  content: "";
+  box-shadow: 32px -16px 0 -8px #59caa6, 46px 10px 0 -7px #f2cf73;
 }
 
 .ai-diary-panel {

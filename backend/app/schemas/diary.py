@@ -26,6 +26,7 @@ class DiaryCreate(BaseModel):
     mood: DiaryMood = DiaryMood.happy
     weather: str | None = Field(default=None, max_length=40)
     source: DiarySource = DiarySource.manual
+    attachment_ids: list[UUID] = Field(default_factory=list)
 
 
 class DiaryUpdate(BaseModel):
@@ -35,6 +36,7 @@ class DiaryUpdate(BaseModel):
     mood: DiaryMood | None = None
     weather: str | None = Field(default=None, max_length=40)
     source: DiarySource | None = None
+    attachment_ids: list[UUID] | None = None
 
 
 class DiaryRead(DiaryCreate):
