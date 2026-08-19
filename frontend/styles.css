@@ -5445,6 +5445,107 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.recycle-modal {
+  width: min(620px, 100%);
+}
+
+.recycle-modal-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.recycle-body {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.recycle-section {
+  display: grid;
+  gap: 8px;
+}
+
+.recycle-section h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #24332b;
+  font-size: 14px;
+}
+
+.recycle-section h3 span {
+  display: inline-flex;
+  min-width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #edf7f2;
+  color: #0f8f71;
+  font-size: 12px;
+}
+
+.recycle-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.recycle-item {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 11px 0;
+}
+
+.recycle-item-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf7f2;
+  color: #10a37f;
+}
+
+.recycle-item-main {
+  min-width: 0;
+}
+
+.recycle-item-main strong,
+.recycle-item-main small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recycle-item-main strong {
+  color: #17243a;
+  font-size: 14px;
+}
+
+.recycle-item-main small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recycle-empty {
+  margin: 0;
+  border: 1px dashed #cfdbd3;
+  border-radius: var(--radius);
+  background: #fbfdfa;
+  padding: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
 .toast {
   position: fixed;
   right: 22px;
@@ -5606,6 +5707,19 @@ button:focus-visible {
 
   .home-page .section-header {
     display: flex;
+  }
+
+  .recycle-modal-actions {
+    justify-content: flex-start;
+  }
+
+  .recycle-item {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .recycle-item > .button {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .home-hero {

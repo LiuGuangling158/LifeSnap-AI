@@ -70,6 +70,13 @@ const state = {
   snoozeTarget: null,
   settingsConfirm: null,
   dataImportPreview: null,
+  recycleBinOpen: false,
+  recycleBinLoading: false,
+  recycleBin: {
+    bills: [],
+    tasks: [],
+    diaries: [],
+  },
   chatMessages: [],
   chatDraft: "",
   chatAttachments: [],
@@ -396,6 +403,7 @@ document.addEventListener("click", (event) => {
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     state.dataImportPreview = null;
+    state.recycleBinOpen = false;
     render();
     return;
   }
@@ -485,6 +493,31 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-open-recycle-bin]")) {
+    openRecycleBin();
+    return;
+  }
+
+  if (event.target.closest("[data-close-recycle-bin]")) {
+    state.recycleBinOpen = false;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-refresh-recycle-bin]")) {
+    refreshRecycleBin();
+    return;
+  }
+
+  const recycleRestoreButton = event.target.closest("[data-restore-recycle]");
+  if (recycleRestoreButton) {
+    restoreRecycleItem(
+      recycleRestoreButton.dataset.restoreRecycle,
+      recycleRestoreButton.dataset.recycleId,
+    );
+    return;
+  }
+
   const settingsActionButton = event.target.closest("[data-settings-action]");
   if (settingsActionButton) {
     openSettingsConfirm(settingsActionButton.dataset.settingsAction);
@@ -543,6 +576,7 @@ document.addEventListener("keydown", (event) => {
       || state.snoozeTarget
       || state.settingsConfirm
       || state.dataImportPreview
+      || state.recycleBinOpen
     )
   ) {
     state.modalOpen = false;
@@ -557,6 +591,7 @@ document.addEventListener("keydown", (event) => {
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     state.dataImportPreview = null;
+    state.recycleBinOpen = false;
     render();
   }
 });
@@ -1039,6 +1074,88 @@ async function restoreDeletedTask() {
     state.saving = false;
     render();
   }
+}
+
+async function openRecycleBin() {
+  if (state.saving) {
+    return;
+  }
+  state.recycleBinOpen = true;
+  state.recycleBin = emptyRecycleBin();
+  await refreshRecycleBin();
+}
+
+async function refreshRecycleBin() {
+  state.recycleBinLoading = true;
+  render();
+  try {
+    const [billList, taskList, diaryList] = await Promise.all([
+      api("/bills?deleted_only=true&page_size=50"),
+      api("/tasks?deleted_only=true&page_size=50"),
+      api("/diaries?deleted_only=true&page_size=50"),
+    ]);
+    state.recycleBin = {
+      bills: billList.items ?? [],
+      tasks: taskList.items ?? [],
+      diaries: diaryList.items ?? [],
+    };
+  } catch (error) {
+    state.toast = error.message || "回收站加载失败";
+  } finally {
+    state.recycleBinLoading = false;
+    render();
+  }
+}
+
+async function restoreRecycleItem(type, id) {
+  if (!id || state.saving) {
+    return;
+  }
+
+  const config = recycleRestoreConfig(type);
+  if (!config) {
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const restored = await api(`/${config.collection}/${id}/restore`, {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": `web-recycle-${type}-${id}-${crypto.randomUUID()}`,
+      },
+    });
+    if (type === "diary") {
+      state.diarySelectedDateKey = restored.entry_date || todayDateKey();
+      state.diaryCalendarMonthKey = monthKeyFromDate(dateFromDateKey(state.diarySelectedDateKey));
+    }
+    state.toast = `${config.label}已恢复`;
+    await loadData();
+    await refreshRecycleBin();
+  } catch (error) {
+    state.toast = error.message || `${config.label}恢复失败`;
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+function emptyRecycleBin() {
+  return {
+    bills: [],
+    tasks: [],
+    diaries: [],
+  };
+}
+
+function recycleRestoreConfig(type) {
+  return {
+    bill: { collection: "bills", label: "账单" },
+    task: { collection: "tasks", label: "待办" },
+    diary: { collection: "diaries", label: "日记" },
+  }[type] ?? null;
 }
 
 async function submitTask(formData) {
@@ -2103,6 +2220,7 @@ function render() {
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.dataImportPreview ? renderDataImportModal() : ""}
+      ${state.recycleBinOpen ? renderRecycleBinModal() : ""}
       ${state.toast ? renderToast() : ""}
     </div>
   `;
@@ -3812,7 +3930,9 @@ function profileDataCard(iconName, label, value, unit, note, tone) {
 
 function renderProfileSafetyPanel() {
   const privacy = state.bootstrap?.privacy_settings ?? {};
+  const summary = state.bootstrap?.data_summary ?? {};
   const snapshot = state.snapshotStatus;
+  const deletedCount = deletedDataCount(summary);
   return `
     <section class="surface profile-safety-panel">
       <div>
@@ -3820,6 +3940,9 @@ function renderProfileSafetyPanel() {
         <p>${privacy.local_only_mode ? "本地体验已开启" : "本地体验未开启"} · ${escapeHtml(snapshotText(snapshot))}</p>
       </div>
       <div class="profile-safety-actions">
+        <button class="button ghost" type="button" data-open-recycle-bin ${state.saving ? "disabled" : ""}>
+          ${icon("refresh")}回收站${deletedCount ? ` ${deletedCount}` : ""}
+        </button>
         <button class="button ghost" type="button" data-settings-action="loadSnapshot"
           ${!snapshot?.exists || state.saving ? "disabled" : ""}>
           ${icon("upload")}加载快照
@@ -3889,6 +4012,15 @@ function renderSettingsPage() {
             <button class="button danger" type="button" data-settings-action="deleteSnapshot"
               ${!snapshot?.exists || state.saving ? "disabled" : ""}>
               ${icon("trash")}删除
+            </button>
+          `,
+        )}
+        ${settingsRow(
+          "回收站",
+          recycleBinText(summary),
+          `
+            <button class="button ghost" type="button" data-open-recycle-bin ${state.saving ? "disabled" : ""}>
+              ${icon("refresh")}查看回收站
             </button>
           `,
         )}
@@ -4957,6 +5089,96 @@ function importPreviewMetric(label, value, note) {
   `;
 }
 
+function renderRecycleBinModal() {
+  const recycle = state.recycleBin ?? emptyRecycleBin();
+  const total = recycle.bills.length + recycle.tasks.length + recycle.diaries.length;
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal recycle-modal" role="dialog" aria-modal="true" aria-labelledby="recycle-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="recycle-title">回收站</h2>
+            <p class="section-note">这里展示最近 50 条软删除数据，可以按条恢复到原页面。</p>
+          </div>
+          <div class="recycle-modal-actions">
+            <button class="button ghost" type="button" data-refresh-recycle-bin
+              ${state.recycleBinLoading || state.saving ? "disabled" : ""}>
+              ${icon("refresh")}${state.recycleBinLoading ? "刷新中..." : "刷新"}
+            </button>
+            <button class="button ghost" type="button" data-close-recycle-bin aria-label="关闭">
+              ${icon("close")}
+            </button>
+          </div>
+        </div>
+        <div class="recycle-body">
+          ${state.recycleBinLoading ? `<p class="recycle-empty">正在加载已删除数据...</p>` : ""}
+          ${!state.recycleBinLoading && !total ? `<p class="recycle-empty">暂无已删除数据。</p>` : ""}
+          ${!state.recycleBinLoading ? `
+            ${renderRecycleGroup("账单", "bill", recycle.bills)}
+            ${renderRecycleGroup("待办", "task", recycle.tasks)}
+            ${renderRecycleGroup("日记", "diary", recycle.diaries)}
+          ` : ""}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderRecycleGroup(title, type, items) {
+  if (!items.length) {
+    return "";
+  }
+  return `
+    <section class="recycle-section">
+      <h3>${escapeHtml(title)} <span>${items.length}</span></h3>
+      <div class="recycle-list">
+        ${items.map((item) => renderRecycleItem(type, item)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderRecycleItem(type, item) {
+  const config = recycleItemDisplay(type, item);
+  return `
+    <article class="recycle-item">
+      <span class="recycle-item-icon">${icon(config.iconName)}</span>
+      <div class="recycle-item-main">
+        <strong>${escapeHtml(config.title)}</strong>
+        <small>${escapeHtml(config.meta)}</small>
+      </div>
+      <button class="button ghost" type="button"
+        data-restore-recycle="${escapeHtml(type)}"
+        data-recycle-id="${escapeHtml(item.id)}"
+        ${state.saving ? "disabled" : ""}>
+        ${icon("upload")}${state.saving ? "恢复中..." : "恢复"}
+      </button>
+    </article>
+  `;
+}
+
+function recycleItemDisplay(type, item) {
+  if (type === "bill") {
+    return {
+      iconName: iconForBill(item),
+      title: `${item.merchant || "未命名账单"} · ${money(item.amount)}`,
+      meta: `${labelTransaction(item.transaction_type)} · ${item.category || "未分类"} · 删除于 ${formatDate(item.deleted_at)}`,
+    };
+  }
+  if (type === "task") {
+    return {
+      iconName: item.task_type === "reminder" ? "bell" : "check",
+      title: item.title || "未命名待办",
+      meta: `${labelTaskStatus(item.status)} · ${item.category || "未分类"} · 删除于 ${formatDate(item.deleted_at)}`,
+    };
+  }
+  return {
+    iconName: "notebook",
+    title: item.title || "今天的日记",
+    meta: `${item.entry_date || "未设置日期"} · ${diaryMoodLabel(item.mood)} · 删除于 ${formatDate(item.deleted_at)}`,
+  };
+}
+
 function metric(label, value, tone = "") {
   return `
     <div class="metric">
@@ -4987,12 +5209,29 @@ function snapshotText(snapshot) {
   if (summary) {
     parts.push(`${summary.bill_count} 条账单`);
     parts.push(`${summary.task_count} 条待办`);
-    if (summary.deleted_bill_count || summary.deleted_task_count) {
+    if (deletedDataCount(summary)) {
       parts.push("含软删除记录");
     }
   }
   const updatedAt = snapshot.updated_at ? `更新于 ${formatDate(snapshot.updated_at)}` : "已保存";
   return `${updatedAt}${parts.length ? `，${parts.join("，")}` : ""}`;
+}
+
+function recycleBinText(summary = {}) {
+  const parts = [];
+  const deletedBills = Number(summary.deleted_bill_count ?? 0);
+  const deletedTasks = Number(summary.deleted_task_count ?? 0);
+  const deletedDiaries = Number(summary.deleted_diary_count ?? 0);
+  if (deletedBills) parts.push(`${deletedBills} 条账单`);
+  if (deletedTasks) parts.push(`${deletedTasks} 条待办`);
+  if (deletedDiaries) parts.push(`${deletedDiaries} 篇日记`);
+  return parts.length ? `可恢复：${parts.join("，")}` : "暂无已删除数据。";
+}
+
+function deletedDataCount(summary = {}) {
+  return Number(summary.deleted_bill_count ?? 0)
+    + Number(summary.deleted_task_count ?? 0)
+    + Number(summary.deleted_diary_count ?? 0);
 }
 
 function empty(message) {
