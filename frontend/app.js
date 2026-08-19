@@ -70,6 +70,7 @@ const state = {
   snoozeTarget: null,
   settingsConfirm: null,
   dataImportPreview: null,
+  privacySettingsOpen: false,
   recycleBinOpen: false,
   recycleBinLoading: false,
   recycleBin: {
@@ -278,8 +279,9 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-profile-preferences]")) {
-    showToast("个性化设置会在后续接入账号与偏好配置。");
+  if (event.target.closest("[data-profile-preferences], [data-open-privacy-settings]")) {
+    state.privacySettingsOpen = true;
+    render();
     return;
   }
 
@@ -403,6 +405,7 @@ document.addEventListener("click", (event) => {
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     state.dataImportPreview = null;
+    state.privacySettingsOpen = false;
     state.recycleBinOpen = false;
     render();
     return;
@@ -535,6 +538,18 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-close-privacy-settings]")) {
+    state.privacySettingsOpen = false;
+    render();
+    return;
+  }
+
+  const privacyToggleButton = event.target.closest("[data-privacy-toggle]");
+  if (privacyToggleButton) {
+    updatePrivacySetting(privacyToggleButton.dataset.privacyToggle);
+    return;
+  }
+
   if (event.target.closest("[data-cancel-settings-action]")) {
     state.settingsConfirm = null;
     render();
@@ -576,6 +591,7 @@ document.addEventListener("keydown", (event) => {
       || state.snoozeTarget
       || state.settingsConfirm
       || state.dataImportPreview
+      || state.privacySettingsOpen
       || state.recycleBinOpen
     )
   ) {
@@ -591,6 +607,7 @@ document.addEventListener("keydown", (event) => {
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     state.dataImportPreview = null;
+    state.privacySettingsOpen = false;
     state.recycleBinOpen = false;
     render();
   }
@@ -1973,6 +1990,40 @@ async function importPreviewedData() {
   }
 }
 
+async function updatePrivacySetting(key) {
+  const allowedKeys = new Set([
+    "local_only_mode",
+    "allow_ai_text_processing",
+    "save_original_attachments_by_default",
+    "keep_ocr_text",
+  ]);
+  if (!allowedKeys.has(key) || state.saving) {
+    return;
+  }
+
+  const current = Boolean(state.bootstrap?.privacy_settings?.[key]);
+  state.saving = true;
+  render();
+
+  try {
+    const updated = await api("/settings/privacy", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [key]: !current }),
+    });
+    state.bootstrap = {
+      ...(state.bootstrap ?? {}),
+      privacy_settings: updated,
+    };
+    state.toast = "隐私设置已更新";
+  } catch (error) {
+    state.toast = error.message || "隐私设置更新失败";
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 function openSettingsConfirm(action) {
   const configs = {
     clear: {
@@ -2220,6 +2271,7 @@ function render() {
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.dataImportPreview ? renderDataImportModal() : ""}
+      ${state.privacySettingsOpen ? renderPrivacySettingsModal() : ""}
       ${state.recycleBinOpen ? renderRecycleBinModal() : ""}
       ${state.toast ? renderToast() : ""}
     </div>
@@ -3938,8 +3990,12 @@ function renderProfileSafetyPanel() {
       <div>
         <h2 class="section-title">数据与隐私</h2>
         <p>${privacy.local_only_mode ? "本地体验已开启" : "本地体验未开启"} · ${escapeHtml(snapshotText(snapshot))}</p>
+        ${renderPrivacySummary(privacy)}
       </div>
       <div class="profile-safety-actions">
+        <button class="button ghost" type="button" data-open-privacy-settings ${state.saving ? "disabled" : ""}>
+          ${icon("settings")}隐私设置
+        </button>
         <button class="button ghost" type="button" data-open-recycle-bin ${state.saving ? "disabled" : ""}>
           ${icon("refresh")}回收站${deletedCount ? ` ${deletedCount}` : ""}
         </button>
@@ -3953,6 +4009,32 @@ function renderProfileSafetyPanel() {
       </div>
     </section>
   `;
+}
+
+function renderPrivacySummary(privacy = {}) {
+  return `
+    <div class="privacy-summary" aria-label="隐私状态">
+      ${privacySummaryChip("AI", Boolean(privacy.allow_ai_text_processing))}
+      ${privacySummaryChip("原件", Boolean(privacy.save_original_attachments_by_default))}
+      ${privacySummaryChip("OCR", Boolean(privacy.keep_ocr_text))}
+    </div>
+  `;
+}
+
+function privacySummaryChip(label, enabled) {
+  return `
+    <span class="privacy-chip ${enabled ? "is-on" : "is-off"}">
+      ${escapeHtml(label)} ${enabled ? "开" : "关"}
+    </span>
+  `;
+}
+
+function privacySummaryText(privacy = {}) {
+  const localText = privacy.local_only_mode ? "本地体验已开启" : "本地体验未开启";
+  const aiText = privacy.allow_ai_text_processing ? "AI 解析开启" : "AI 解析关闭";
+  const attachmentText = privacy.save_original_attachments_by_default ? "默认保存原始附件" : "默认不保存原始附件";
+  const ocrText = privacy.keep_ocr_text ? "保留 OCR 文本" : "不保留 OCR 文本";
+  return `${localText}，${aiText}，${attachmentText}，${ocrText}。`;
 }
 
 function renderSettingsPage() {
@@ -3978,8 +4060,11 @@ function renderSettingsPage() {
       <div class="settings-list">
         ${settingsRow(
           "隐私模式",
-          privacy.local_only_mode ? "本地体验已开启" : "本地体验未开启",
+          privacySummaryText(privacy),
           `
+            <button class="button ghost" type="button" data-open-privacy-settings ${state.saving ? "disabled" : ""}>
+              ${icon("settings")}隐私设置
+            </button>
             <span class="muted-value">OCR: ${escapeHtml(caps.ocr_provider ?? "unknown")}</span>
             <span class="muted-value">AI: ${escapeHtml(caps.ai_text_parser ?? "unknown")}</span>
           `,
@@ -5075,6 +5160,70 @@ function renderDataImportModal() {
           </button>
         </div>
       </section>
+    </div>
+  `;
+}
+
+function renderPrivacySettingsModal() {
+  const privacy = state.bootstrap?.privacy_settings ?? {};
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="privacy-settings-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="privacy-settings-title">隐私设置</h2>
+            <p class="section-note">这些开关会保存到后端本地 JSON，并影响 AI 解析和附件处理。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-privacy-settings aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="privacy-settings-list">
+          ${privacySettingRow(
+            "local_only_mode",
+            "本地体验模式",
+            "开启后明确标记当前数据以本地存储为主。",
+            Boolean(privacy.local_only_mode),
+          )}
+          ${privacySettingRow(
+            "allow_ai_text_processing",
+            "允许 AI 文本处理",
+            "关闭后，聊天解析、图片识别后的 AI 解析会被后端拦截。",
+            Boolean(privacy.allow_ai_text_processing),
+          )}
+          ${privacySettingRow(
+            "save_original_attachments_by_default",
+            "默认保存原始附件",
+            "开启后上传图片会保留原文件；关闭时只保存识别所需的本地数据。",
+            Boolean(privacy.save_original_attachments_by_default),
+          )}
+          ${privacySettingRow(
+            "keep_ocr_text",
+            "保留 OCR 文本",
+            "关闭后识别完成不会长期保留 OCR 原文。",
+            Boolean(privacy.keep_ocr_text),
+          )}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function privacySettingRow(key, title, note, enabled) {
+  return `
+    <div class="privacy-setting-row">
+      <div>
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(note)}</small>
+      </div>
+      <button class="privacy-switch ${enabled ? "is-on" : ""}" type="button"
+        role="switch"
+        aria-checked="${enabled ? "true" : "false"}"
+        data-privacy-toggle="${escapeHtml(key)}"
+        ${state.saving ? "disabled" : ""}>
+        <span></span>
+        <b>${enabled ? "开" : "关"}</b>
+      </button>
     </div>
   `;
 }
