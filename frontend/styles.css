@@ -5409,6 +5409,42 @@ button:focus-visible {
   padding: 16px 18px 18px;
 }
 
+.import-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 18px 18px 10px;
+}
+
+.import-preview-card {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #dbe7df;
+  border-radius: var(--radius);
+  background: #fbfdfa;
+  padding: 10px 12px;
+}
+
+.import-preview-card span,
+.import-preview-card small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.import-preview-card strong {
+  color: #17243a;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.import-warning {
+  margin: 0;
+  padding: 0 18px 14px;
+  color: #9a6815;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .toast {
   position: fixed;
   right: 22px;

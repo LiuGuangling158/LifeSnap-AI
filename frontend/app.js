@@ -45,7 +45,7 @@ const routes = [
     icon: "settings",
     eyebrow: "隐私与数据",
     title: "设置",
-    subtitle: "先展示本地模式和后端能力，后续接入清除、导出、快照操作。",
+    subtitle: "管理本地数据、导入导出和快照恢复。",
   },
 ];
 
@@ -69,6 +69,7 @@ const state = {
   diaryRestoreTarget: null,
   snoozeTarget: null,
   settingsConfirm: null,
+  dataImportPreview: null,
   chatMessages: [],
   chatDraft: "",
   chatAttachments: [],
@@ -394,6 +395,7 @@ document.addEventListener("click", (event) => {
     state.diaryDeleteTarget = null;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
+    state.dataImportPreview = null;
     render();
     return;
   }
@@ -476,9 +478,27 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-import-json]")) {
+    if (!state.saving) {
+      app.querySelector("[data-import-json-input]")?.click();
+    }
+    return;
+  }
+
   const settingsActionButton = event.target.closest("[data-settings-action]");
   if (settingsActionButton) {
     openSettingsConfirm(settingsActionButton.dataset.settingsAction);
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-data-import]")) {
+    state.dataImportPreview = null;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-confirm-data-import]")) {
+    importPreviewedData();
     return;
   }
 
@@ -522,6 +542,7 @@ document.addEventListener("keydown", (event) => {
       || state.diaryDeleteTarget
       || state.snoozeTarget
       || state.settingsConfirm
+      || state.dataImportPreview
     )
   ) {
     state.modalOpen = false;
@@ -535,6 +556,7 @@ document.addEventListener("keydown", (event) => {
     state.diaryDeleteTarget = null;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
+    state.dataImportPreview = null;
     render();
   }
 });
@@ -558,6 +580,11 @@ document.addEventListener("change", async (event) => {
 
   if (event.target.matches("[data-diary-image-input]")) {
     await uploadDiaryImages(event.target.files);
+    event.target.value = "";
+  }
+
+  if (event.target.matches("[data-import-json-input]")) {
+    await previewDataImport(event.target.files?.[0]);
     event.target.value = "";
   }
 });
@@ -1761,6 +1788,74 @@ async function saveSnapshot() {
   }
 }
 
+async function previewDataImport(file) {
+  if (!file || state.saving) {
+    return;
+  }
+
+  state.saving = true;
+  state.dataImportPreview = null;
+  render();
+
+  try {
+    const text = await file.text();
+    const snapshot = JSON.parse(text);
+    const result = await api("/data/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dry_run: true,
+        reset_existing: true,
+        snapshot,
+      }),
+    });
+    state.dataImportPreview = {
+      fileName: file.name || "lifesnap-export.json",
+      snapshot,
+      result,
+    };
+    state.toast = "导入预览已生成";
+  } catch (error) {
+    state.toast = error instanceof SyntaxError
+      ? "JSON 文件格式不正确"
+      : error.message || "导入预览失败";
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function importPreviewedData() {
+  if (!state.dataImportPreview?.snapshot || state.saving) {
+    return;
+  }
+
+  const { snapshot } = state.dataImportPreview;
+  state.saving = true;
+  render();
+
+  try {
+    await api("/data/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        confirm: true,
+        reset_existing: true,
+        snapshot,
+      }),
+    });
+    state.dataImportPreview = null;
+    state.toast = "JSON 数据已导入";
+    await loadData();
+  } catch (error) {
+    state.toast = error.message || "导入失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 function openSettingsConfirm(action) {
   const configs = {
     clear: {
@@ -1997,6 +2092,7 @@ function render() {
       </main>
       <input type="file" accept="image/*" data-bill-image-input hidden />
       <input type="file" accept="image/*" data-diary-image-input multiple hidden />
+      <input type="file" accept="application/json,.json" data-import-json-input hidden />
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskDeleteTarget ? renderDeleteTaskModal() : ""}
@@ -2006,6 +2102,7 @@ function render() {
       ${state.diaryCalendarOpen ? renderDiaryCalendarModal() : ""}
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
+      ${state.dataImportPreview ? renderDataImportModal() : ""}
       ${state.toast ? renderToast() : ""}
     </div>
   `;
@@ -3656,7 +3753,7 @@ function renderProfileTools() {
     <section class="surface profile-tools-panel">
       <div class="profile-section-header">
         <h2 class="section-title">我的工具</h2>
-        <button class="button ghost" type="button" data-profile-placeholder>
+        <button class="button ghost" type="button" data-route="settings">
           全部工具 ${icon("chevron-right")}
         </button>
       </div>
@@ -3666,6 +3763,7 @@ function renderProfileTools() {
         ${profileTool("grid", "分类管理", "data-profile-placeholder", "orange")}
         ${profileTool("tag", "标签管理", "data-profile-placeholder", "mint")}
         ${profileTool("cloud", "数据备份", "data-snapshot-save", "blue")}
+        ${profileTool("upload", "数据导入", "data-import-json", "mint")}
       </div>
     </section>
   `;
@@ -3687,7 +3785,7 @@ function renderProfileDataPanel(summary, completedTasks, diaryCount) {
     <section class="surface profile-data-panel">
       <div class="profile-section-header">
         <h2 class="section-title">我的数据</h2>
-        <button class="button ghost" type="button" data-profile-placeholder>
+        <button class="button ghost" type="button" data-route="settings">
           查看全部 ${icon("chevron-right")}
         </button>
       </div>
@@ -3765,10 +3863,13 @@ function renderSettingsPage() {
         )}
         ${settingsRow(
           "数据导出",
-          "导出当前活跃账单、待办、日记、附件元数据和候选记录。",
+          "导出当前活跃账单、待办、日记、附件元数据和候选记录；也可导入此前导出的 JSON。",
           `
             <button class="button" type="button" data-export-json ${state.saving ? "disabled" : ""}>
               ${icon("download")}JSON
+            </button>
+            <button class="button ghost" type="button" data-import-json ${state.saving ? "disabled" : ""}>
+              ${icon("upload")}导入 JSON
             </button>
             <a class="button ghost" href="/data/export/bills.csv" download>${icon("download")}账单 CSV</a>
             <a class="button ghost" href="/data/export/tasks.csv" download>${icon("download")}待办 CSV</a>
@@ -4803,6 +4904,55 @@ function renderSettingsConfirmModal() {
           </button>
         </div>
       </section>
+    </div>
+  `;
+}
+
+function renderDataImportModal() {
+  const preview = state.dataImportPreview;
+  const result = preview?.result ?? {};
+  const before = result.before ?? {};
+  const candidateCount = Number(result.imported_bill_candidate_count ?? 0)
+    + Number(result.imported_task_candidate_count ?? 0);
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="data-import-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="data-import-title">确认导入 JSON</h2>
+            <p class="section-note">
+              ${escapeHtml(preview?.fileName ?? "lifesnap-export.json")} 已通过后端预览校验。导入会先清空当前本地数据，再写入文件内容。
+            </p>
+          </div>
+          <button class="button ghost" type="button" data-cancel-data-import aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="import-preview-grid">
+          ${importPreviewMetric("账单", result.imported_bill_count ?? 0, `${before.bill_count ?? 0} 条当前记录`)}
+          ${importPreviewMetric("待办", result.imported_task_count ?? 0, `${before.task_count ?? 0} 条当前记录`)}
+          ${importPreviewMetric("日记", result.imported_diary_count ?? 0, `${before.diary_count ?? 0} 篇当前记录`)}
+          ${importPreviewMetric("附件", result.imported_attachment_count ?? 0, `${before.attachment_count ?? 0} 个当前附件`)}
+          ${importPreviewMetric("候选", candidateCount, "AI 待确认记录")}
+        </div>
+        <p class="import-warning">建议确认已有数据已导出或保存快照后再导入。</p>
+        <div class="form-actions modal-actions">
+          <button class="button ghost" type="button" data-cancel-data-import>取消</button>
+          <button class="button danger" type="button" data-confirm-data-import ${state.saving ? "disabled" : ""}>
+            ${icon("upload")}${state.saving ? "导入中..." : "确认导入"}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function importPreviewMetric(label, value, note) {
+  return `
+    <div class="import-preview-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${Number(value ?? 0)}</strong>
+      <small>${escapeHtml(note)}</small>
     </div>
   `;
 }
