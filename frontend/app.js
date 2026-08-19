@@ -62,6 +62,7 @@ const state = {
   taskModalOpen: false,
   diaryModalOpen: false,
   diaryCalendarOpen: false,
+  diaryDeleteTarget: null,
   snoozeTarget: null,
   settingsConfirm: null,
   chatMessages: [],
@@ -361,6 +362,16 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const diaryDeleteButton = event.target.closest("[data-delete-diary]");
+  if (diaryDeleteButton) {
+    state.diaryDeleteTarget = state.diaryEntries.find(
+      (entry) => entry.dateKey === diaryDeleteButton.dataset.deleteDiary,
+    ) ?? null;
+    state.diaryModalOpen = false;
+    render();
+    return;
+  }
+
   if (event.target.closest("[data-close-modal]")) {
     state.modalOpen = false;
     state.editingBill = null;
@@ -368,6 +379,7 @@ document.addEventListener("click", (event) => {
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
+    state.diaryDeleteTarget = null;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
@@ -395,6 +407,17 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-confirm-delete]")) {
     deleteBill();
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-diary-delete]")) {
+    state.diaryDeleteTarget = null;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-confirm-diary-delete]")) {
+    deleteDiary();
     return;
   }
 
@@ -457,6 +480,7 @@ document.addEventListener("keydown", (event) => {
       || state.taskModalOpen
       || state.diaryModalOpen
       || state.diaryCalendarOpen
+      || state.diaryDeleteTarget
       || state.snoozeTarget
       || state.settingsConfirm
     )
@@ -468,6 +492,7 @@ document.addEventListener("keydown", (event) => {
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
+    state.diaryDeleteTarget = null;
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     render();
@@ -744,6 +769,34 @@ async function deleteBill() {
     }, 2200);
   } catch (error) {
     state.toast = error.message || "删除失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function deleteDiary() {
+  if (!state.diaryDeleteTarget?.id) {
+    return;
+  }
+
+  const diary = state.diaryDeleteTarget;
+  state.saving = true;
+  render();
+  try {
+    await api(`/diaries/${diary.id}`, { method: "DELETE" });
+    state.diaryDeleteTarget = null;
+    state.diaryModalOpen = false;
+    state.diaryDraft = null;
+    state.toast = "日记已删除";
+    await loadData();
+    window.setTimeout(() => {
+      state.toast = "";
+      render();
+    }, 2200);
+  } catch (error) {
+    state.toast = error.message || "日记删除失败";
     render();
   } finally {
     state.saving = false;
@@ -1729,6 +1782,7 @@ function render() {
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
       ${state.diaryModalOpen ? renderDiaryModal() : ""}
+      ${state.diaryDeleteTarget ? renderDeleteDiaryModal() : ""}
       ${state.diaryCalendarOpen ? renderDiaryCalendarModal() : ""}
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
@@ -3916,6 +3970,35 @@ function renderDeleteBillModal() {
   `;
 }
 
+function renderDeleteDiaryModal() {
+  const diary = state.diaryDeleteTarget;
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="delete-diary-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="delete-diary-title">删除日记</h2>
+            <p class="section-note">这会将当前日记移入软删除状态，后续可通过后端恢复能力接回。</p>
+          </div>
+          <button class="button ghost" type="button" data-cancel-diary-delete aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="confirm-body">
+          <p class="item-title">${escapeHtml(diary?.title ?? "日记")}</p>
+          <p class="item-meta">${escapeHtml(diaryDateLabel(diary?.dateKey || todayDateKey()))} · ${escapeHtml(diary?.mood ? diaryMoodLabel(diary.mood) : "未标记心情")}</p>
+        </div>
+        <div class="form-actions modal-actions">
+          <button class="button ghost" type="button" data-cancel-diary-delete>取消</button>
+          <button class="button danger" type="button" data-confirm-diary-delete ${state.saving ? "disabled" : ""}>
+            ${icon("trash")}${state.saving ? "删除中..." : "确认删除"}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function renderTaskModal() {
   return `
     <div class="modal-backdrop" role="presentation">
@@ -4028,6 +4111,12 @@ function renderDiaryModal() {
             </div>
           </div>
           <div class="form-actions">
+            ${diary.hasEntry ? `
+              <button class="button danger" type="button" data-delete-diary="${escapeHtml(diary.dateKey)}"
+                ${state.saving ? "disabled" : ""}>
+                ${icon("trash")}删除日记
+              </button>
+            ` : ""}
             <button class="button ghost" type="button" data-close-modal>取消</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
               ${icon("save")}${state.saving ? "保存中..." : actionLabel}
