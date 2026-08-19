@@ -5399,7 +5399,10 @@ button:focus-visible {
   right: 22px;
   bottom: 22px;
   z-index: 30;
+  display: flex;
   max-width: min(420px, calc(100vw - 44px));
+  align-items: center;
+  gap: 12px;
   border: 1px solid #cbd6cc;
   border-radius: var(--radius);
   background: #fffefa;
@@ -5407,6 +5410,37 @@ button:focus-visible {
   padding: 12px 14px;
   color: var(--text);
   animation: modal-in 180ms ease;
+}
+
+.toast span {
+  min-width: 0;
+}
+
+.toast-action {
+  flex: 0 0 auto;
+  border: 1px solid #bcd4c3;
+  border-radius: var(--radius);
+  background: #f4faf6;
+  color: var(--accent-dark);
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 720;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.toast-action:hover {
+  border-color: #9cc3ad;
+  background: #edf7f1;
+  transform: translateY(-1px);
+}
+
+.toast-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
 }
 
 @keyframes fade-in {

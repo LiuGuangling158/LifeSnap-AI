@@ -63,6 +63,7 @@ const state = {
   diaryModalOpen: false,
   diaryCalendarOpen: false,
   diaryDeleteTarget: null,
+  diaryRestoreTarget: null,
   snoozeTarget: null,
   settingsConfirm: null,
   chatMessages: [],
@@ -418,6 +419,11 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-confirm-diary-delete]")) {
     deleteDiary();
+    return;
+  }
+
+  if (event.target.closest("[data-restore-diary]")) {
+    restoreDeletedDiary();
     return;
   }
 
@@ -789,14 +795,63 @@ async function deleteDiary() {
     state.diaryDeleteTarget = null;
     state.diaryModalOpen = false;
     state.diaryDraft = null;
+    state.diaryRestoreTarget = {
+      id: diary.id,
+      dateKey: diary.dateKey,
+      title: diary.title,
+    };
     state.toast = "日记已删除";
     await loadData();
     window.setTimeout(() => {
-      state.toast = "";
-      render();
+      if (
+        !state.saving
+        && state.diaryRestoreTarget?.id === diary.id
+        && state.toast === "日记已删除"
+      ) {
+        state.diaryRestoreTarget = null;
+        state.toast = "";
+        render();
+      }
     }, 2200);
   } catch (error) {
+    state.diaryRestoreTarget = null;
     state.toast = error.message || "日记删除失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function restoreDeletedDiary() {
+  if (!state.diaryRestoreTarget?.id || state.saving) {
+    return;
+  }
+
+  const diary = state.diaryRestoreTarget;
+  state.saving = true;
+  render();
+  try {
+    const restored = await api(`/diaries/${diary.id}/restore`, {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": `web-diary-restore-${diary.id}-${crypto.randomUUID()}`,
+      },
+    });
+    state.diaryRestoreTarget = null;
+    state.diarySelectedDateKey = restored.entry_date || diary.dateKey || todayDateKey();
+    state.diaryCalendarMonthKey = monthKeyFromDate(dateFromDateKey(state.diarySelectedDateKey));
+    state.toast = "日记已恢复";
+    await loadData();
+    window.setTimeout(() => {
+      if (state.toast === "日记已恢复") {
+        state.toast = "";
+        render();
+      }
+    }, 2200);
+  } catch (error) {
+    state.diaryRestoreTarget = null;
+    state.toast = error.message || "日记恢复失败";
     render();
   } finally {
     state.saving = false;
@@ -866,6 +921,7 @@ async function submitDiary(formData) {
     attachment_ids: diaryAttachmentIdsForDate(dateKey),
   };
 
+  state.diaryRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -903,6 +959,7 @@ async function uploadDiaryImages(fileList) {
   const existing = diaryEntryForDate(dateKey);
   const currentAttachmentIds = diaryAttachmentIdsForDate(dateKey);
 
+  state.diaryRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -959,6 +1016,7 @@ async function removeDiaryImage(attachmentId) {
   const remainingAttachmentIds = diaryAttachmentIdsForDate(dateKey).filter((id) => id !== String(attachmentId));
   const isReferencedElsewhere = isAttachmentReferencedOutsideDiaryDate(attachmentId, dateKey);
 
+  state.diaryRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -1750,6 +1808,7 @@ async function api(path, options = {}) {
 }
 
 function showToast(message) {
+  state.diaryRestoreTarget = null;
   state.toast = message;
   render();
   window.setTimeout(() => {
@@ -1786,10 +1845,25 @@ function render() {
       ${state.diaryCalendarOpen ? renderDiaryCalendarModal() : ""}
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
-      ${state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""}
+      ${state.toast ? renderToast() : ""}
     </div>
   `;
   afterRender();
+}
+
+function renderToast() {
+  const canRestoreDiary = state.toast === "日记已删除" && state.diaryRestoreTarget?.id;
+  return `
+    <div class="toast ${canRestoreDiary ? "has-action" : ""}" role="status" aria-live="polite">
+      <span>${escapeHtml(state.toast)}</span>
+      ${canRestoreDiary ? `
+        <button class="toast-action" type="button" data-restore-diary="${escapeHtml(state.diaryRestoreTarget.id)}"
+          ${state.saving ? "disabled" : ""}>
+          ${state.saving ? "恢复中..." : "撤销"}
+        </button>
+      ` : ""}
+    </div>
+  `;
 }
 
 function afterRender() {
