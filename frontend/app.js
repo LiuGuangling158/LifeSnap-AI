@@ -59,6 +59,9 @@ const state = {
   editingBill: null,
   billDraft: null,
   deleteTarget: null,
+  billRestoreTarget: null,
+  taskDeleteTarget: null,
+  taskRestoreTarget: null,
   taskModalOpen: false,
   diaryModalOpen: false,
   diaryCalendarOpen: false,
@@ -363,6 +366,13 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const taskDeleteButton = event.target.closest("[data-delete-task]");
+  if (taskDeleteButton) {
+    state.taskDeleteTarget = state.tasks.find((task) => task.id === taskDeleteButton.dataset.deleteTask) ?? null;
+    render();
+    return;
+  }
+
   const diaryDeleteButton = event.target.closest("[data-delete-diary]");
   if (diaryDeleteButton) {
     state.diaryDeleteTarget = state.diaryEntries.find(
@@ -377,6 +387,7 @@ document.addEventListener("click", (event) => {
     state.modalOpen = false;
     state.editingBill = null;
     state.billDraft = null;
+    state.taskDeleteTarget = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
@@ -411,6 +422,22 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-restore-bill]")) {
+    restoreDeletedBill();
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-task-delete]")) {
+    state.taskDeleteTarget = null;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-confirm-task-delete]")) {
+    deleteTask();
+    return;
+  }
+
   if (event.target.closest("[data-cancel-diary-delete]")) {
     state.diaryDeleteTarget = null;
     render();
@@ -424,6 +451,11 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-restore-diary]")) {
     restoreDeletedDiary();
+    return;
+  }
+
+  if (event.target.closest("[data-restore-task]")) {
+    restoreDeletedTask();
     return;
   }
 
@@ -483,6 +515,7 @@ document.addEventListener("keydown", (event) => {
     && (
       state.modalOpen
       || state.deleteTarget
+      || state.taskDeleteTarget
       || state.taskModalOpen
       || state.diaryModalOpen
       || state.diaryCalendarOpen
@@ -495,6 +528,7 @@ document.addEventListener("keydown", (event) => {
     state.editingBill = null;
     state.billDraft = null;
     state.deleteTarget = null;
+    state.taskDeleteTarget = null;
     state.taskModalOpen = false;
     state.diaryModalOpen = false;
     state.diaryCalendarOpen = false;
@@ -645,6 +679,7 @@ async function submitBill(formData) {
     payload.source = state.billDraft?.source || "manual";
   }
 
+  state.billRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -683,6 +718,7 @@ async function importBillImage(file) {
     return;
   }
 
+  state.billRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -767,14 +803,61 @@ async function deleteBill() {
   try {
     await api(`/bills/${bill.id}`, { method: "DELETE" });
     state.deleteTarget = null;
+    state.billRestoreTarget = {
+      id: bill.id,
+      merchant: bill.merchant,
+      amount: bill.amount,
+    };
     state.toast = "账单已删除";
     await loadData();
     window.setTimeout(() => {
-      state.toast = "";
-      render();
+      if (
+        !state.saving
+        && state.billRestoreTarget?.id === bill.id
+        && state.toast === "账单已删除"
+      ) {
+        state.billRestoreTarget = null;
+        state.toast = "";
+        render();
+      }
     }, 2200);
   } catch (error) {
+    state.billRestoreTarget = null;
     state.toast = error.message || "删除失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function restoreDeletedBill() {
+  if (!state.billRestoreTarget?.id || state.saving) {
+    return;
+  }
+
+  const bill = state.billRestoreTarget;
+  state.saving = true;
+  render();
+  try {
+    await api(`/bills/${bill.id}/restore`, {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": `web-bill-restore-${bill.id}-${crypto.randomUUID()}`,
+      },
+    });
+    state.billRestoreTarget = null;
+    state.toast = "账单已恢复";
+    await loadData();
+    window.setTimeout(() => {
+      if (state.toast === "账单已恢复") {
+        state.toast = "";
+        render();
+      }
+    }, 2200);
+  } catch (error) {
+    state.billRestoreTarget = null;
+    state.toast = error.message || "账单恢复失败";
     render();
   } finally {
     state.saving = false;
@@ -823,6 +906,44 @@ async function deleteDiary() {
   }
 }
 
+async function deleteTask() {
+  if (!state.taskDeleteTarget?.id) {
+    return;
+  }
+
+  const task = state.taskDeleteTarget;
+  state.saving = true;
+  render();
+  try {
+    await api(`/tasks/${task.id}`, { method: "DELETE" });
+    state.taskDeleteTarget = null;
+    state.taskRestoreTarget = {
+      id: task.id,
+      title: task.title,
+    };
+    state.toast = "待办已删除";
+    await loadData();
+    window.setTimeout(() => {
+      if (
+        !state.saving
+        && state.taskRestoreTarget?.id === task.id
+        && state.toast === "待办已删除"
+      ) {
+        state.taskRestoreTarget = null;
+        state.toast = "";
+        render();
+      }
+    }, 2200);
+  } catch (error) {
+    state.taskRestoreTarget = null;
+    state.toast = error.message || "待办删除失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 async function restoreDeletedDiary() {
   if (!state.diaryRestoreTarget?.id || state.saving) {
     return;
@@ -859,6 +980,40 @@ async function restoreDeletedDiary() {
   }
 }
 
+async function restoreDeletedTask() {
+  if (!state.taskRestoreTarget?.id || state.saving) {
+    return;
+  }
+
+  const task = state.taskRestoreTarget;
+  state.saving = true;
+  render();
+  try {
+    await api(`/tasks/${task.id}/restore`, {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": `web-task-restore-${task.id}-${crypto.randomUUID()}`,
+      },
+    });
+    state.taskRestoreTarget = null;
+    state.toast = "待办已恢复";
+    await loadData();
+    window.setTimeout(() => {
+      if (state.toast === "待办已恢复") {
+        state.toast = "";
+        render();
+      }
+    }, 2200);
+  } catch (error) {
+    state.taskRestoreTarget = null;
+    state.toast = error.message || "待办恢复失败";
+    render();
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 async function submitTask(formData) {
   const taskType = String(formData.get("task_type") || "todo");
   const dueAt = formData.get("due_at");
@@ -874,6 +1029,7 @@ async function submitTask(formData) {
     source: "manual",
   };
 
+  state.taskRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -1512,6 +1668,7 @@ async function completeTask(taskId) {
     return;
   }
 
+  state.taskRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -1540,6 +1697,7 @@ async function submitSnooze(formData) {
   }
   const minutes = Number(formData.get("minutes") || 0);
 
+  state.taskRestoreTarget = null;
   state.saving = true;
   render();
   try {
@@ -1808,6 +1966,8 @@ async function api(path, options = {}) {
 }
 
 function showToast(message) {
+  state.billRestoreTarget = null;
+  state.taskRestoreTarget = null;
   state.diaryRestoreTarget = null;
   state.toast = message;
   render();
@@ -1839,6 +1999,7 @@ function render() {
       <input type="file" accept="image/*" data-diary-image-input multiple hidden />
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
+      ${state.taskDeleteTarget ? renderDeleteTaskModal() : ""}
       ${state.taskModalOpen ? renderTaskModal() : ""}
       ${state.diaryModalOpen ? renderDiaryModal() : ""}
       ${state.diaryDeleteTarget ? renderDeleteDiaryModal() : ""}
@@ -1852,12 +2013,18 @@ function render() {
 }
 
 function renderToast() {
+  const canRestoreBill = state.toast === "账单已删除" && state.billRestoreTarget?.id;
   const canRestoreDiary = state.toast === "日记已删除" && state.diaryRestoreTarget?.id;
+  const canRestoreTask = state.toast === "待办已删除" && state.taskRestoreTarget?.id;
+  const canRestore = canRestoreBill || canRestoreDiary || canRestoreTask;
   return `
-    <div class="toast ${canRestoreDiary ? "has-action" : ""}" role="status" aria-live="polite">
+    <div class="toast ${canRestore ? "has-action" : ""}" role="status" aria-live="polite">
       <span>${escapeHtml(state.toast)}</span>
-      ${canRestoreDiary ? `
-        <button class="toast-action" type="button" data-restore-diary="${escapeHtml(state.diaryRestoreTarget.id)}"
+      ${canRestore ? `
+        <button class="toast-action" type="button"
+          ${canRestoreBill ? `data-restore-bill="${escapeHtml(state.billRestoreTarget.id)}"` : ""}
+          ${canRestoreDiary ? `data-restore-diary="${escapeHtml(state.diaryRestoreTarget.id)}"` : ""}
+          ${canRestoreTask ? `data-restore-task="${escapeHtml(state.taskRestoreTarget.id)}"` : ""}
           ${state.saving ? "disabled" : ""}>
           ${state.saving ? "恢复中..." : "撤销"}
         </button>
@@ -2618,6 +2785,10 @@ function renderReminderTaskItem(task) {
         aria-label="完成 ${escapeHtml(task.title)}"
         ${done || state.saving ? "disabled" : ""}>
         ${done ? icon("check") : ""}
+      </button>
+      <button class="reminder-delete" type="button" data-delete-task="${task.id}"
+        aria-label="删除 ${escapeHtml(task.title)}" ${state.saving ? "disabled" : ""}>
+        ${icon("trash")}
       </button>
     </article>
   `;
@@ -3934,6 +4105,11 @@ function renderTaskList(tasks) {
                   ${task.status !== "pending" || state.saving ? "disabled" : ""}>
                   ${icon("clock")}
                 </button>
+                <button class="icon-button danger" type="button" data-delete-task="${task.id}"
+                  aria-label="删除 ${escapeHtml(task.title)}" title="删除"
+                  ${state.saving ? "disabled" : ""}>
+                  ${icon("trash")}
+                </button>
               </div>
             </div>
           `,
@@ -4036,6 +4212,35 @@ function renderDeleteBillModal() {
         <div class="form-actions modal-actions">
           <button class="button ghost" type="button" data-cancel-delete>取消</button>
           <button class="button danger" type="button" data-confirm-delete ${state.saving ? "disabled" : ""}>
+            ${icon("trash")}${state.saving ? "删除中..." : "确认删除"}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderDeleteTaskModal() {
+  const task = state.taskDeleteTarget;
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="delete-task-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="delete-task-title">删除待办</h2>
+            <p class="section-note">这会将待办移入软删除状态，删除后短时间内可以撤销。</p>
+          </div>
+          <button class="button ghost" type="button" data-cancel-task-delete aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="confirm-body">
+          <p class="item-title">${escapeHtml(task?.title ?? "待办")}</p>
+          <p class="item-meta">${escapeHtml(task?.category ?? "生活")} · ${labelTaskStatus(task?.status)} · ${taskTargetText(task)}</p>
+        </div>
+        <div class="form-actions modal-actions">
+          <button class="button ghost" type="button" data-cancel-task-delete>取消</button>
+          <button class="button danger" type="button" data-confirm-task-delete ${state.saving ? "disabled" : ""}>
             ${icon("trash")}${state.saving ? "删除中..." : "确认删除"}
           </button>
         </div>
