@@ -57,6 +57,7 @@ const state = {
   toast: "",
   modalOpen: false,
   billRangeOpen: false,
+  notificationOpen: false,
   editingBill: null,
   billDraft: null,
   deleteTarget: null,
@@ -296,7 +297,8 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-profile-notification]")) {
-    showToast("通知中心会在后续接入提醒聚合。");
+    state.notificationOpen = true;
+    render();
     return;
   }
 
@@ -437,14 +439,15 @@ document.addEventListener("click", (event) => {
 
   const taskDeleteButton = event.target.closest("[data-delete-task]");
   if (taskDeleteButton) {
-    state.taskDeleteTarget = state.tasks.find((task) => task.id === taskDeleteButton.dataset.deleteTask) ?? null;
+    state.taskDeleteTarget = findTaskById(taskDeleteButton.dataset.deleteTask);
     render();
     return;
   }
 
   const taskEditButton = event.target.closest("[data-edit-task]");
   if (taskEditButton) {
-    state.editingTask = state.tasks.find((task) => task.id === taskEditButton.dataset.editTask) ?? null;
+    state.editingTask = findTaskById(taskEditButton.dataset.editTask);
+    state.notificationOpen = false;
     state.taskModalOpen = Boolean(state.editingTask);
     render();
     return;
@@ -463,6 +466,7 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("[data-close-modal]")) {
     state.modalOpen = false;
     state.billRangeOpen = false;
+    state.notificationOpen = false;
     state.editingBill = null;
     state.billDraft = null;
     state.taskDeleteTarget = null;
@@ -493,7 +497,7 @@ document.addEventListener("click", (event) => {
 
   const snoozeTaskButton = event.target.closest("[data-snooze-task]");
   if (snoozeTaskButton) {
-    state.snoozeTarget = state.tasks.find((task) => task.id === snoozeTaskButton.dataset.snoozeTask) ?? null;
+    state.snoozeTarget = findTaskById(snoozeTaskButton.dataset.snoozeTask);
     render();
     return;
   }
@@ -684,6 +688,7 @@ document.addEventListener("keydown", (event) => {
     && (
       state.modalOpen
       || state.billRangeOpen
+      || state.notificationOpen
       || state.deleteTarget
       || state.taskDeleteTarget
       || state.taskSortOpen
@@ -704,6 +709,7 @@ document.addEventListener("keydown", (event) => {
   ) {
     state.modalOpen = false;
     state.billRangeOpen = false;
+    state.notificationOpen = false;
     state.editingBill = null;
     state.billDraft = null;
     state.deleteTarget = null;
@@ -2732,6 +2738,7 @@ function render() {
       <input type="file" accept="application/json,.json" data-import-json-input hidden />
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.billRangeOpen ? renderBillRangeModal() : ""}
+      ${state.notificationOpen ? renderNotificationModal() : ""}
       ${state.deleteTarget ? renderDeleteBillModal() : ""}
       ${state.taskDeleteTarget ? renderDeleteTaskModal() : ""}
       ${state.taskSortOpen ? renderTaskSortModal() : ""}
@@ -3387,6 +3394,20 @@ function getReminderTaskGroups() {
     upcoming: pending.filter((task) => !isTodayTask(task)),
     important: pending.filter((task) => task.priority === "high"),
   };
+}
+
+function allLoadedTasks() {
+  const overview = state.taskOverview ?? {};
+  return uniqueTasks([
+    ...state.tasks,
+    ...(overview.overdue_tasks ?? []),
+    ...(overview.today_tasks ?? []),
+    ...(overview.upcoming_reminders ?? []),
+  ]);
+}
+
+function findTaskById(taskId) {
+  return allLoadedTasks().find((task) => task.id === taskId) ?? null;
 }
 
 function uniqueTasks(tasks) {
@@ -4376,6 +4397,7 @@ function renderProfilePage() {
     state.taskOverview?.done_count ?? state.tasks.filter((task) => task.status === "done").length,
   );
   const diaryCount = Number(summary.diary_count ?? state.diaryEntries.length ?? 0);
+  const notificationCount = getProfileNotificationCount();
 
   return `
     <div class="mobile-page profile-mobile-page profile-page">
@@ -4385,6 +4407,7 @@ function renderProfilePage() {
           <div class="profile-top-actions">
             <button class="profile-icon-button" type="button" data-profile-notification aria-label="通知中心">
               ${icon("bell")}
+              ${notificationCount ? `<span class="profile-notification-badge">${notificationCount > 99 ? "99+" : notificationCount}</span>` : ""}
             </button>
             <button class="profile-icon-button" type="button" data-profile-preferences aria-label="个人设置">
               ${icon("settings")}
@@ -4419,6 +4442,137 @@ function renderProfilePage() {
       ${renderProfileTools()}
       ${renderProfileDataPanel(summary, completedTasks, diaryCount)}
       ${renderProfileSafetyPanel()}
+    </div>
+  `;
+}
+
+function renderNotificationModal() {
+  const groups = getNotificationGroups();
+  const total = groups.overdue.length + groups.today.length + groups.upcoming.length;
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal notification-modal" role="dialog" aria-modal="true" aria-labelledby="notification-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="notification-title">通知中心</h2>
+            <p class="section-note">聚合后端待办统计里的逾期、今日和即将到来的提醒。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="notification-summary" aria-label="提醒摘要">
+          ${notificationMetric("逾期", groups.overdue.length, "danger")}
+          ${notificationMetric("今日", groups.today.length, "mint")}
+          ${notificationMetric("即将到来", groups.upcoming.length, "blue")}
+        </div>
+        <div class="notification-body">
+          ${total ? `
+            ${renderNotificationSection("逾期待处理", groups.overdue, "danger")}
+            ${renderNotificationSection("今天要处理", groups.today, "mint")}
+            ${renderNotificationSection("未来提醒", groups.upcoming, "blue")}
+          ` : renderNotificationEmpty()}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function getProfileNotificationCount() {
+  const overview = state.taskOverview ?? {};
+  const overdue = Number(overview.overdue_count ?? 0);
+  const today = Number(overview.due_today_count ?? 0);
+  const upcoming = Number(overview.upcoming_reminder_count ?? 0);
+  const total = overdue + today + upcoming;
+  if (total) {
+    return total;
+  }
+  return allLoadedTasks().filter((task) => task.status === "pending" && taskTargetDate(task)).length;
+}
+
+function getNotificationGroups() {
+  const overview = state.taskOverview ?? {};
+  const now = new Date();
+  const seen = new Set();
+  const take = (tasks) => uniqueTasks(tasks)
+    .filter((task) => task.status === "pending")
+    .filter((task) => {
+      if (!task?.id || seen.has(task.id)) {
+        return false;
+      }
+      seen.add(task.id);
+      return true;
+    })
+    .sort(compareReminderTasks)
+    .slice(0, 5);
+
+  const overdue = take(overview.overdue_tasks ?? []);
+  const today = take([...(overview.today_tasks ?? []), ...allLoadedTasks().filter(isTodayTask)]);
+  const upcoming = take([
+    ...(overview.upcoming_reminders ?? []),
+    ...allLoadedTasks().filter((task) => {
+      const target = taskTargetDate(task);
+      return target && target > now && !isTodayTask(task);
+    }),
+  ]);
+
+  return { overdue, today, upcoming };
+}
+
+function notificationMetric(label, value, tone) {
+  return `
+    <div class="notification-metric ${tone}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${value}</strong>
+    </div>
+  `;
+}
+
+function renderNotificationSection(title, items, tone) {
+  if (!items.length) {
+    return "";
+  }
+  return `
+    <section class="notification-section">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="notification-list">
+        ${items.map((task) => renderNotificationItem(task, tone)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderNotificationItem(task, tone) {
+  return `
+    <article class="notification-item ${tone}">
+      <span class="notification-icon">${icon(iconForTask(task))}</span>
+      <div class="notification-main">
+        <strong>${escapeHtml(task.title || "未命名提醒")}</strong>
+        <small>${escapeHtml(task.category || "生活")} · ${shortTaskTime(task)} · ${labelTaskPriority(task.priority)}</small>
+      </div>
+      <div class="notification-actions">
+        <button class="icon-button" type="button" data-edit-task="${escapeHtml(task.id)}"
+          aria-label="编辑 ${escapeHtml(task.title || "提醒")}" ${state.saving ? "disabled" : ""}>
+          ${icon("edit")}
+        </button>
+        <button class="icon-button" type="button" data-complete-task="${escapeHtml(task.id)}"
+          aria-label="完成 ${escapeHtml(task.title || "提醒")}" ${state.saving ? "disabled" : ""}>
+          ${icon("check-circle")}
+        </button>
+      </div>
+    </article>
+  `;
+}
+
+function renderNotificationEmpty() {
+  return `
+    <div class="notification-empty">
+      <span>${icon("bell")}</span>
+      <div>
+        <strong>当前没有待处理提醒</strong>
+        <small>新的待办、提醒和重复提醒会自动出现在这里。</small>
+      </div>
+      <button class="button ghost" type="button" data-close-modal>${icon("check")}知道了</button>
     </div>
   `;
 }

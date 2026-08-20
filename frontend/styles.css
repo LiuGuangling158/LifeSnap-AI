@@ -4040,6 +4040,182 @@ button {
   box-shadow: 0 4px 14px rgba(31, 39, 35, 0.06);
 }
 
+.notification-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 16px 18px 0;
+}
+
+.notification-metric {
+  min-width: 0;
+  border: 1px solid #e1e9e4;
+  border-radius: var(--radius);
+  background: #fbfdfb;
+  padding: 10px;
+}
+
+.notification-metric span,
+.notification-metric strong {
+  display: block;
+}
+
+.notification-metric span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.notification-metric strong {
+  margin-top: 4px;
+  color: #17243a;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.notification-metric.danger strong {
+  color: #d44848;
+}
+
+.notification-metric.mint strong {
+  color: #10a37f;
+}
+
+.notification-metric.blue strong {
+  color: #2f6fd6;
+}
+
+.notification-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 18px;
+}
+
+.notification-section {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-section h3 {
+  margin: 0;
+  color: #17243a;
+  font-size: 14px;
+}
+
+.notification-list {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-item {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e0e9e4;
+  border-radius: var(--radius);
+  background: #ffffff;
+  padding: 9px 10px;
+  transition:
+    border-color var(--motion),
+    background-color var(--motion),
+    transform var(--motion);
+}
+
+.notification-item:hover {
+  border-color: #c8ded2;
+  background: #f8fcf9;
+  transform: translateY(-1px);
+}
+
+.notification-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: var(--radius);
+  background: #edf7f4;
+  color: #10a37f;
+}
+
+.notification-item.danger .notification-icon {
+  background: #fff0f0;
+  color: #d44848;
+}
+
+.notification-item.blue .notification-icon {
+  background: #edf5ff;
+  color: #2f6fd6;
+}
+
+.notification-main {
+  min-width: 0;
+}
+
+.notification-main strong,
+.notification-main small {
+  display: block;
+}
+
+.notification-main strong {
+  overflow: hidden;
+  color: #17243a;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-main small {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.notification-empty {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  border: 1px solid #e0e9e4;
+  border-radius: var(--radius);
+  background: #fbfdfb;
+  padding: 12px;
+}
+
+.notification-empty > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf7f4;
+  color: #10a37f;
+}
+
+.notification-empty strong,
+.notification-empty small {
+  display: block;
+}
+
+.notification-empty strong {
+  color: #17243a;
+  font-size: 14px;
+}
+
+.notification-empty small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .profile-hero {
   position: relative;
   min-height: 274px;
@@ -4086,8 +4262,28 @@ button {
 }
 
 .profile-icon-button {
+  position: relative;
   width: 42px;
   height: 42px;
+}
+
+.profile-notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  background: #d44848;
+  color: white;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 780;
+  line-height: 1;
 }
 
 .profile-icon-button .icon {
@@ -5314,6 +5510,10 @@ td {
   display: grid;
   width: min(620px, 100%);
   max-height: min(780px, calc(100vh - 40px));
+}
+
+.notification-modal {
+  width: min(520px, 100%);
 }
 
 .modal-header {
@@ -6590,7 +6790,7 @@ button:focus-visible {
   }
 
   .reminder-item {
-    grid-template-columns: 44px minmax(0, 1fr) auto 32px 32px;
+    grid-template-columns: 44px minmax(0, 1fr) auto 32px 32px 32px;
     gap: 8px;
   }
 
@@ -6633,6 +6833,33 @@ button:focus-visible {
   .reminder-dock-main {
     min-height: 44px;
     font-size: 13px;
+  }
+
+  .notification-summary {
+    gap: 6px;
+    padding-inline: 14px;
+  }
+
+  .notification-body {
+    padding: 14px;
+  }
+
+  .notification-item {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .notification-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .notification-empty {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .notification-empty .button {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .diary-hero {
