@@ -407,6 +407,46 @@ $env:LIFESNAP_AI_PARSE_PROVIDER = "external_http"
 $env:LIFESNAP_AI_PARSE_TIMEOUT_SECONDS = "20"
 ```
 
+For local end-to-end testing without a real provider, run the bundled mock
+provider in a separate terminal:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe scripts\mock_ai_provider.py --host 127.0.0.1 --port 8787
+```
+
+Then set the provider environment variables before starting the FastAPI backend:
+
+```powershell
+$env:LIFESNAP_OCR_ENDPOINT = "http://127.0.0.1:8787/recognize"
+$env:LIFESNAP_OCR_PROVIDER = "lifesnap_mock_ocr"
+$env:LIFESNAP_AI_PARSE_ENDPOINT = "http://127.0.0.1:8787/parse"
+$env:LIFESNAP_AI_PARSE_PROVIDER = "lifesnap_mock_ai"
+uvicorn app.main:app --reload
+```
+
+The mock provider supports `/health`, `/recognize`, and `/parse`. `/parse`
+handles `kind: "bill"`, `kind: "task"`, and `kind: "chat_intent"`.
+Because privacy defaults to local-only mode, external calls remain blocked until
+you update privacy settings:
+
+```http
+PATCH /settings/privacy
+Content-Type: application/json
+
+{
+  "local_only_mode": false,
+  "allow_ai_text_processing": true,
+  "save_original_attachments_by_default": true
+}
+```
+
+You can validate the mock provider itself with:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\mock_ai_provider.py --self-test
+```
+
 The backend sends this JSON payload to the endpoint:
 
 ```json
