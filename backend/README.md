@@ -6,7 +6,8 @@ FastAPI backend for LifeSnap AI.
 
 The backend currently provides the MVP shell, health check, bill management,
 task/reminder management, attachment metadata, dashboard summary, and rule-based
-AI candidate flows for bills and tasks.
+AI candidate flows for bills and tasks. OCR and AI parsing can also delegate to
+configured external HTTP providers while keeping local fallback behavior.
 
 ## Local Run
 
@@ -244,7 +245,9 @@ Content-Type: application/json
 }
 ```
 
-This endpoint returns a candidate only. It does not create a saved bill. The user still needs to confirm or edit the result before saving through `POST /bills`.
+This endpoint returns a candidate only. It does not create a saved bill. The
+user still needs to confirm or edit the result before saving through
+`POST /bills`.
 
 Get a bill candidate:
 
@@ -360,6 +363,82 @@ Discard a pending task candidate:
 ```text
 DELETE /agent/task-candidates/{candidate_id}
 ```
+
+## AI Parser
+
+Bill and task parsing can use either the built-in rule-based parser or a
+configured external HTTP AI parser. When no external parser is configured, all
+parse endpoints keep the current rule-based fallback behavior.
+
+Configure an external AI parser:
+
+```powershell
+$env:LIFESNAP_AI_PARSE_ENDPOINT = "https://your-ai-service.example.com/parse"
+$env:LIFESNAP_AI_PARSE_API_KEY = "optional-secret"
+$env:LIFESNAP_AI_PARSE_PROVIDER = "external_http"
+$env:LIFESNAP_AI_PARSE_TIMEOUT_SECONDS = "20"
+```
+
+The backend sends this JSON payload to the endpoint:
+
+```json
+{
+  "schema_version": "lifesnap.ai.parse.v1",
+  "kind": "bill",
+  "text": "记一笔 18 元早餐",
+  "source": "ai_chat",
+  "locale": "zh-CN",
+  "current_datetime": "2026-08-20T09:30:00+07:00"
+}
+```
+
+For bills, the provider should return either top-level candidate fields or a
+`data` object containing fields compatible with `BillCandidateData`:
+
+```json
+{
+  "confidence": 0.92,
+  "data": {
+    "amount": "18.00",
+    "currency": "CNY",
+    "merchant": "早餐店",
+    "category": "餐饮",
+    "payment_method": "微信支付",
+    "transaction_type": "expense",
+    "note": "AI 解析生成的候选账单"
+  },
+  "field_confidence": {
+    "amount": 0.95,
+    "merchant": 0.8,
+    "category": 0.9,
+    "payment_method": 0.85
+  },
+  "warnings": []
+}
+```
+
+For tasks, return fields compatible with `TaskCandidateData`:
+
+```json
+{
+  "confidence": 0.9,
+  "data": {
+    "title": "去医院复诊",
+    "description": "带医保卡和检查报告",
+    "category": "医疗",
+    "task_type": "reminder",
+    "remind_at": "2026-08-21T15:00:00+08:00",
+    "priority": "high"
+  },
+  "warnings": []
+}
+```
+
+The backend always keeps the original request `source`, validates the provider
+response against current schemas, and still requires user confirmation before
+creating formal bills or tasks. If the external parser fails, returns invalid
+JSON, or is blocked by local-only privacy mode, parsing falls back to the
+rule-based parser with a warning such as `external_ai_parser_failed`.
 
 ## Chat
 
@@ -593,7 +672,8 @@ Parse attachment OCR text into a bill candidate:
 POST /attachments/{attachment_id}/parse-bill
 ```
 
-This currently uses stored OCR text and the rule-based bill parser. It does not run a real OCR engine yet.
+This uses stored OCR text and the configured bill parser. If no external AI
+parser is configured, it falls back to the rule-based bill parser.
 
 Recognize an attachment and parse it into a bill candidate when text is
 available:

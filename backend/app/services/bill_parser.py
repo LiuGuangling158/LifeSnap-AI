@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from app.schemas.agent import BillCandidateData, ParseBillRequest, ParseBillResponse
 from app.schemas.bill import TransactionType
+from app.services.external_ai_parser import external_ai_parser
 
 
 class RuleBasedBillParser:
@@ -142,5 +143,25 @@ class RuleBasedBillParser:
         return round(score, 2)
 
 
-bill_parser = RuleBasedBillParser()
+class ConfigurableBillParser:
+    def __init__(self) -> None:
+        self._rule_based_parser = RuleBasedBillParser()
 
+    def parse_bill(self, payload: ParseBillRequest) -> ParseBillResponse:
+        external_candidate, fallback_warnings = external_ai_parser.parse_bill(payload)
+        if external_candidate is not None:
+            return external_candidate
+
+        candidate = self._rule_based_parser.parse_bill(payload)
+        candidate.warnings = self._dedupe(candidate.warnings + fallback_warnings)
+        return candidate
+
+    def _dedupe(self, warnings: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for warning in warnings:
+            if warning not in deduped:
+                deduped.append(warning)
+        return deduped
+
+
+bill_parser = ConfigurableBillParser()

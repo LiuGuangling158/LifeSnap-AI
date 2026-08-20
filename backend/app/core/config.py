@@ -37,6 +37,18 @@ class Settings:
     external_ocr_timeout_seconds: float = field(
         default_factory=lambda: _env_float("LIFESNAP_OCR_TIMEOUT_SECONDS", 15.0)
     )
+    external_ai_parser_endpoint: str | None = field(
+        default_factory=lambda: os.getenv("LIFESNAP_AI_PARSE_ENDPOINT")
+    )
+    external_ai_parser_api_key: str | None = field(
+        default_factory=lambda: os.getenv("LIFESNAP_AI_PARSE_API_KEY")
+    )
+    external_ai_parser_provider: str = field(
+        default_factory=lambda: os.getenv("LIFESNAP_AI_PARSE_PROVIDER", "external_http")
+    )
+    external_ai_parser_timeout_seconds: float = field(
+        default_factory=lambda: _env_float("LIFESNAP_AI_PARSE_TIMEOUT_SECONDS", 20.0)
+    )
 
     @property
     def real_ocr_enabled(self) -> bool:
@@ -45,6 +57,14 @@ class Settings:
     @property
     def ocr_provider_name(self) -> str:
         return self.external_ocr_provider if self.real_ocr_enabled else "stored_text_stub"
+
+    @property
+    def real_ai_parser_enabled(self) -> bool:
+        return bool(self.external_ai_parser_endpoint)
+
+    @property
+    def ai_parser_provider_name(self) -> str:
+        return self.external_ai_parser_provider if self.real_ai_parser_enabled else "rule_based"
 
 
 settings = Settings()

@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from app.schemas.agent import ParseTaskRequest, ParseTaskResponse, TaskCandidateData
 from app.schemas.task import TaskPriority, TaskType
+from app.services.external_ai_parser import external_ai_parser
 
 
 class RuleBasedTaskParser:
@@ -217,4 +218,38 @@ class RuleBasedTaskParser:
         return None
 
 
-task_parser = RuleBasedTaskParser()
+class ConfigurableTaskParser:
+    def __init__(self) -> None:
+        self._rule_based_parser = RuleBasedTaskParser()
+
+    def parse_task(self, payload: ParseTaskRequest) -> ParseTaskResponse:
+        external_candidate, fallback_warnings = external_ai_parser.parse_task(payload)
+        if external_candidate is not None:
+            return external_candidate
+
+        candidate = self._rule_based_parser.parse_task(payload)
+        candidate.warnings = self._dedupe(candidate.warnings + fallback_warnings)
+        return candidate
+
+    def warnings_for_data(self, data: TaskCandidateData) -> list[str]:
+        return self._rule_based_parser.warnings_for_data(data)
+
+    def field_confidence_for_data(self, data: TaskCandidateData) -> dict[str, float]:
+        return self._rule_based_parser.field_confidence_for_data(data)
+
+    def overall_confidence(
+        self,
+        field_confidence: dict[str, float],
+        task_type: TaskType,
+    ) -> float:
+        return self._rule_based_parser.overall_confidence(field_confidence, task_type)
+
+    def _dedupe(self, warnings: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for warning in warnings:
+            if warning not in deduped:
+                deduped.append(warning)
+        return deduped
+
+
+task_parser = ConfigurableTaskParser()
