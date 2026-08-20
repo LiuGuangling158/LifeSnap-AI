@@ -11,10 +11,11 @@ from app.schemas.chat import (
 )
 from app.schemas.task import TaskSource
 from app.services.bill_candidate_store import bill_candidate_store
-from app.services.bill_parser import bill_parser
+from app.services.bill_parser import RuleBasedBillParser, bill_parser
+from app.services.external_ai_parser import ExternalChatRoute, external_ai_parser
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
-from app.services.task_parser import task_parser
+from app.services.task_parser import RuleBasedTaskParser, task_parser
 
 
 class RuleBasedChatService:
@@ -55,6 +56,10 @@ class RuleBasedChatService:
         "统计": "复杂统计问答暂时不在 MVP 范围内，可以先查看月度统计。",
     }
 
+    def __init__(self) -> None:
+        self._rule_bill_parser = RuleBasedBillParser()
+        self._rule_task_parser = RuleBasedTaskParser()
+
     def handle_message(self, payload: ChatMessageRequest) -> ChatMessageResponse:
         text = payload.message.strip()
         if not settings_store.get_privacy_settings().allow_ai_text_processing:
@@ -69,64 +74,149 @@ class RuleBasedChatService:
                 need_user_confirmation=False,
             )
 
+        external_route, fallback_warnings = external_ai_parser.route_chat(text)
+        if external_route is not None:
+            return self._response_from_external_route(text, external_route)
+
         unsupported_reply = self._unsupported_reply(text)
         if unsupported_reply is not None and not self._looks_like_simple_bill(text):
-            return ChatMessageResponse(
-                message_id=uuid4(),
+            return self._unsupported_response(
                 reply=unsupported_reply,
-                intent=ChatIntent.unsupported,
                 confidence=0.75,
-                action_type=ChatActionType.none,
-                candidate=None,
-                warnings=["unsupported_mvp_intent"],
-                need_user_confirmation=False,
+                warnings=["unsupported_mvp_intent"] + fallback_warnings,
             )
 
+        force_rule_based = self._should_force_rule_based_parser(fallback_warnings)
         if self._looks_like_task(text):
-            candidate = task_candidate_store.save(
-                task_parser.parse_task(
-                    ParseTaskRequest(text=text, source=TaskSource.ai_chat)
-                )
-            )
-            return ChatMessageResponse(
-                message_id=uuid4(),
-                reply="我先整理成一个待确认事项，你确认或修改后再保存。",
-                intent=ChatIntent.create_task,
-                confidence=candidate.confidence,
-                action_type=ChatActionType.task_candidate,
-                candidate_id=candidate.candidate_id,
-                candidate=candidate,
-                warnings=candidate.warnings,
-                need_user_confirmation=True,
+            return self._task_candidate_response(
+                text,
+                fallback_warnings=fallback_warnings,
+                force_rule_based=force_rule_based,
             )
 
         if self._looks_like_bill(text):
-            candidate = bill_candidate_store.save(
-                bill_parser.parse_bill(
-                    ParseBillRequest(text=text, source=BillSource.ai_chat)
-                )
-            )
-            return ChatMessageResponse(
-                message_id=uuid4(),
-                reply="我先整理成一个待确认账单，你确认或修改后再保存。",
-                intent=ChatIntent.create_bill,
-                confidence=candidate.confidence,
-                action_type=ChatActionType.bill_candidate,
-                candidate_id=candidate.candidate_id,
-                candidate=candidate,
-                warnings=candidate.warnings,
-                need_user_confirmation=True,
+            return self._bill_candidate_response(
+                text,
+                fallback_warnings=fallback_warnings,
+                force_rule_based=force_rule_based,
             )
 
+        return self._unsupported_response(
+            reply="这条消息还没有足够信息生成账单或提醒。你可以补充金额、事项或提醒时间。",
+            confidence=0.45,
+            warnings=["intent_low_confidence"] + fallback_warnings,
+        )
+
+    def _response_from_external_route(
+        self,
+        text: str,
+        route: ExternalChatRoute,
+    ) -> ChatMessageResponse:
+        if route.intent == ChatIntent.create_task:
+            return self._task_candidate_response(
+                text,
+                reply=route.reply,
+                route_confidence=route.confidence,
+                fallback_warnings=route.warnings,
+            )
+        if route.intent == ChatIntent.create_bill:
+            return self._bill_candidate_response(
+                text,
+                reply=route.reply,
+                route_confidence=route.confidence,
+                fallback_warnings=route.warnings,
+            )
+
+        return self._unsupported_response(
+            reply=route.reply or "这条消息暂时不能直接转换成账单或提醒。",
+            confidence=route.confidence,
+            warnings=route.warnings,
+        )
+
+    def _task_candidate_response(
+        self,
+        text: str,
+        reply: str | None = None,
+        route_confidence: float | None = None,
+        fallback_warnings: list[str] | None = None,
+        force_rule_based: bool = False,
+    ) -> ChatMessageResponse:
+        parser = self._rule_task_parser if force_rule_based else task_parser
+        candidate = task_candidate_store.save(
+            parser.parse_task(ParseTaskRequest(text=text, source=TaskSource.ai_chat))
+        )
         return ChatMessageResponse(
             message_id=uuid4(),
-            reply="这条消息还没有足够信息生成账单或提醒。你可以补充金额、事项或提醒时间。",
+            reply=reply or "我先整理成一个待确认事项，你确认或修改后再保存。",
+            intent=ChatIntent.create_task,
+            confidence=self._combined_confidence(candidate.confidence, route_confidence),
+            action_type=ChatActionType.task_candidate,
+            candidate_id=candidate.candidate_id,
+            candidate=candidate,
+            warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
+            need_user_confirmation=True,
+        )
+
+    def _bill_candidate_response(
+        self,
+        text: str,
+        reply: str | None = None,
+        route_confidence: float | None = None,
+        fallback_warnings: list[str] | None = None,
+        force_rule_based: bool = False,
+    ) -> ChatMessageResponse:
+        parser = self._rule_bill_parser if force_rule_based else bill_parser
+        candidate = bill_candidate_store.save(
+            parser.parse_bill(ParseBillRequest(text=text, source=BillSource.ai_chat))
+        )
+        return ChatMessageResponse(
+            message_id=uuid4(),
+            reply=reply or "我先整理成一个待确认账单，你确认或修改后再保存。",
+            intent=ChatIntent.create_bill,
+            confidence=self._combined_confidence(candidate.confidence, route_confidence),
+            action_type=ChatActionType.bill_candidate,
+            candidate_id=candidate.candidate_id,
+            candidate=candidate,
+            warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
+            need_user_confirmation=True,
+        )
+
+    def _unsupported_response(
+        self,
+        reply: str,
+        confidence: float,
+        warnings: list[str],
+    ) -> ChatMessageResponse:
+        return ChatMessageResponse(
+            message_id=uuid4(),
+            reply=reply,
             intent=ChatIntent.unsupported,
-            confidence=0.45,
+            confidence=confidence,
             action_type=ChatActionType.none,
             candidate=None,
-            warnings=["intent_low_confidence"],
+            warnings=self._dedupe(warnings),
             need_user_confirmation=False,
+        )
+
+    def _combined_confidence(
+        self,
+        candidate_confidence: float,
+        route_confidence: float | None,
+    ) -> float:
+        if route_confidence is None:
+            return candidate_confidence
+        return round(min(candidate_confidence, route_confidence), 2)
+
+    def _should_force_rule_based_parser(self, warnings: list[str]) -> bool:
+        return any(
+            warning
+            in {
+                "external_ai_parser_failed",
+                "external_ai_parser_invalid_response",
+                "external_ai_parser_skipped",
+                "external_chat_intent_invalid_response",
+            }
+            for warning in warnings
         )
 
     def _looks_like_bill(self, text: str) -> bool:
@@ -145,6 +235,13 @@ class RuleBasedChatService:
             if keyword in text:
                 return reply
         return None
+
+    def _dedupe(self, warnings: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for warning in warnings:
+            if warning not in deduped:
+                deduped.append(warning)
+        return deduped
 
 
 chat_service = RuleBasedChatService()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -18,11 +19,47 @@ from app.schemas.agent import (
     ParseTaskResponse,
     TaskCandidateData,
 )
+from app.schemas.chat import ChatIntent
 from app.schemas.task import TaskPriority, TaskType
 from app.services.settings_store import settings_store
 
 
+@dataclass(frozen=True)
+class ExternalChatRoute:
+    intent: ChatIntent
+    confidence: float
+    reply: str | None
+    warnings: list[str]
+
+
 class ExternalAiParserService:
+    def route_chat(self, text: str) -> tuple[ExternalChatRoute | None, list[str]]:
+        if not settings.real_ai_parser_enabled:
+            return None, []
+
+        skipped_warnings = self._privacy_skip_warnings()
+        if skipped_warnings:
+            return None, skipped_warnings
+
+        response_body, request_warnings = self._request("chat_intent", text, "ai_chat")
+        if response_body is None:
+            return None, request_warnings
+
+        try:
+            intent = ChatIntent(str(response_body.get("intent")))
+        except ValueError:
+            return None, ["external_chat_intent_invalid_response"]
+
+        return (
+            ExternalChatRoute(
+                intent=intent,
+                confidence=self._confidence(response_body.get("confidence"), 0.65),
+                reply=self._optional_text(response_body.get("reply")),
+                warnings=self._response_warnings(response_body),
+            ),
+            [],
+        )
+
     def parse_bill(
         self,
         payload: ParseBillRequest,
@@ -191,6 +228,12 @@ class ExternalAiParserService:
         if not isinstance(warnings, list):
             return []
         return [str(warning) for warning in warnings if str(warning).strip()]
+
+    def _optional_text(self, raw_value: Any) -> str | None:
+        if not isinstance(raw_value, str):
+            return None
+        text = raw_value.strip()
+        return text or None
 
     def _field_confidence(
         self,

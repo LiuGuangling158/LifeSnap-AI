@@ -53,6 +53,7 @@ class BootstrapService:
                 "bill_candidates": True,
                 "task_candidates": True,
                 "chat_actions": True,
+                "external_chat_intent_routing": settings.real_ai_parser_enabled,
                 "dashboard_bootstrap": True,
                 "diaries": True,
                 "demo_data_seed": True,
@@ -84,7 +85,8 @@ class BootstrapService:
                 ),
                 (
                     "AI parsing uses the configured external HTTP provider when "
-                    "LIFESNAP_AI_PARSE_ENDPOINT is set; otherwise it falls back to rule-based parsing."
+                    "LIFESNAP_AI_PARSE_ENDPOINT is set; otherwise it falls back to rule-based parsing. "
+                    "Chat intent routing uses the same provider with kind=chat_intent."
                 ),
                 "Local JSON storage is intended for single-user local use, not concurrent multi-user production traffic.",
                 "Authentication and multi-user accounts are not implemented yet.",

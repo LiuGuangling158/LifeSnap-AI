@@ -392,6 +392,11 @@ The backend sends this JSON payload to the endpoint:
 }
 ```
 
+Supported `kind` values are `bill`, `task`, and `chat_intent`. `bill` and
+`task` return structured candidate fields. `chat_intent` only routes a chat
+message to `create_bill`, `create_task`, or `unsupported`; the backend then
+reuses the bill/task parser and candidate confirmation flow.
+
 For bills, the provider should return either top-level candidate fields or a
 `data` object containing fields compatible with `BillCandidateData`:
 
@@ -434,11 +439,24 @@ For tasks, return fields compatible with `TaskCandidateData`:
 }
 ```
 
+For chat intent routing, return an intent and optional reply:
+
+```json
+{
+  "intent": "create_task",
+  "confidence": 0.88,
+  "reply": "我先整理成一个待确认事项，你确认或修改后再保存。",
+  "warnings": []
+}
+```
+
 The backend always keeps the original request `source`, validates the provider
 response against current schemas, and still requires user confirmation before
 creating formal bills or tasks. If the external parser fails, returns invalid
 JSON, or is blocked by local-only privacy mode, parsing falls back to the
-rule-based parser with a warning such as `external_ai_parser_failed`.
+rule-based parser with a warning such as `external_ai_parser_failed`. Chat
+intent routing also falls back to the local keyword router with warnings such as
+`external_chat_intent_invalid_response`.
 
 ## Chat
 
@@ -458,6 +476,11 @@ The endpoint returns one of three outcomes:
 - a bill candidate
 - a task or reminder candidate
 - an MVP fallback message for unsupported intents
+
+When `LIFESNAP_AI_PARSE_ENDPOINT` is configured and privacy settings allow
+external processing, chat intent routing first calls the external provider with
+`kind: "chat_intent"`. If that call fails or local-only mode is enabled, the
+backend falls back to the built-in keyword router.
 
 Example bill input:
 
