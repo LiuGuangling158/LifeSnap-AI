@@ -19,7 +19,7 @@ class BootstrapService:
             api_status="ok",
             generated_at=datetime.now(timezone.utc),
             storage_backend="local_json_for_app_state",
-            ocr_provider="stored_text_stub",
+            ocr_provider=settings.ocr_provider_name,
             ai_text_parser="rule_based",
             max_attachment_file_size_bytes=attachment_store.max_file_size,
             supported_attachment_content_types=sorted(
@@ -66,7 +66,7 @@ class BootstrapService:
                 "original_attachment_file_persistence": True,
                 "audit_json_persistence": True,
                 "idempotency_json_persistence": True,
-                "real_ocr_engine": False,
+                "real_ocr_engine": settings.real_ocr_enabled,
                 "real_llm_parser": False,
                 "persistent_database": False,
                 "user_accounts": False,
@@ -78,7 +78,10 @@ class BootstrapService:
                 "Attachment metadata and retained original files are persisted under backend/data.",
                 "Idempotency keys are persisted to local JSON for retry protection across restarts.",
                 "Snapshot export includes attachment metadata but not retained original file bytes.",
-                "OCR uses stored text fallback and manual entry, not a real OCR engine.",
+                (
+                    "OCR uses the configured external HTTP provider when LIFESNAP_OCR_ENDPOINT is set; "
+                    "otherwise it falls back to stored text and manual entry."
+                ),
                 "AI parsing is rule-based and returns candidates for user confirmation.",
                 "Local JSON storage is intended for single-user local use, not concurrent multi-user production traffic.",
                 "Authentication and multi-user accounts are not implemented yet.",

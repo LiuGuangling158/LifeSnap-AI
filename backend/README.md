@@ -626,8 +626,9 @@ Content-Type: application/json
 }
 ```
 
-This increment does not run a real OCR engine yet. It returns stored OCR text
-when available. If the attachment has no OCR text, it returns:
+OCR can use either stored OCR text or a configured external HTTP provider. When
+`LIFESNAP_OCR_ENDPOINT` is not set, the backend returns stored OCR text when
+available. If the attachment has no OCR text, it returns:
 
 ```json
 {
@@ -637,6 +638,44 @@ when available. If the attachment has no OCR text, it returns:
   "warnings": ["ocr_engine_not_configured", "manual_entry_required"]
 }
 ```
+
+Configure an external OCR provider:
+
+```powershell
+$env:LIFESNAP_OCR_ENDPOINT = "https://your-ocr-service.example.com/recognize"
+$env:LIFESNAP_OCR_API_KEY = "optional-secret"
+$env:LIFESNAP_OCR_PROVIDER = "external_http"
+$env:LIFESNAP_OCR_TIMEOUT_SECONDS = "15"
+```
+
+The backend sends this JSON payload to the endpoint:
+
+```json
+{
+  "attachment_id": "00000000-0000-0000-0000-000000000000",
+  "filename": "payment.png",
+  "content_type": "image/png",
+  "content_base64": "..."
+}
+```
+
+The provider should return:
+
+```json
+{
+  "text": "瑞幸咖啡\n微信支付\n实付 18.50 元",
+  "confidence": 0.93,
+  "provider": "your_ocr_provider",
+  "warnings": []
+}
+```
+
+External OCR requires the original attachment bytes. With the default privacy
+setting `save_original_attachments_by_default=false`, uploads are not retained
+for external OCR. Enable original attachment retention before upload, or send
+OCR text manually through `PATCH /attachments/{attachment_id}/ocr-text`.
+External OCR is also blocked while local-only mode or AI text processing
+privacy switches are disabled.
 
 The fallback flow is:
 
