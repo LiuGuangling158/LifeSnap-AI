@@ -79,6 +79,7 @@ const state = {
   diagnosticsOpen: false,
   diagnosticsLoading: false,
   diagnostics: null,
+  integrationDiagnostics: null,
   auditLogOpen: false,
   auditLogLoading: false,
   auditLog: null,
@@ -2298,7 +2299,12 @@ async function refreshDiagnostics() {
   state.diagnosticsLoading = true;
   render();
   try {
-    state.diagnostics = await api("/diagnostics/data-quality?issue_limit=20");
+    const [dataQuality, integrations] = await Promise.all([
+      api("/diagnostics/data-quality?issue_limit=20"),
+      api("/diagnostics/integrations"),
+    ]);
+    state.diagnostics = dataQuality;
+    state.integrationDiagnostics = integrations;
   } catch (error) {
     state.toast = error.message || "系统自检失败";
   } finally {
@@ -6195,6 +6201,7 @@ function renderPrivacySettingsModal() {
 
 function renderDiagnosticsModal() {
   const diagnostics = state.diagnostics;
+  const integrationDiagnostics = state.integrationDiagnostics;
   const issues = diagnostics?.issues ?? [];
   return `
     <div class="modal-backdrop" role="presentation">
@@ -6202,7 +6209,7 @@ function renderDiagnosticsModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="diagnostics-title">系统自检</h2>
-            <p class="section-note">读取后端数据质量诊断，帮助发现隐私、附件、候选记录和待办风险。</p>
+            <p class="section-note">读取后端数据质量和 AI/OCR 接入状态，帮助定位配置、隐私和数据风险。</p>
           </div>
           <div class="diagnostics-modal-actions">
             <button class="button ghost" type="button" data-refresh-diagnostics
@@ -6215,26 +6222,166 @@ function renderDiagnosticsModal() {
           </div>
         </div>
         <div class="diagnostics-body">
-          ${state.diagnosticsLoading && !diagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
+          ${state.diagnosticsLoading && !diagnostics && !integrationDiagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
+          ${integrationDiagnostics ? renderIntegrationDiagnostics(integrationDiagnostics) : ""}
           ${diagnostics ? `
-            <div class="diagnostics-summary">
-              ${diagnosticMetric("状态", diagnosticsStatusLabel(diagnostics.status), diagnostics.status)}
-              ${diagnosticMetric("需处理", diagnostics.action_required_count ?? 0, "action_required")}
-              ${diagnosticMetric("警告", diagnostics.warning_count ?? 0, "warning")}
-              ${diagnosticMetric("提示", diagnostics.info_count ?? 0, "info")}
-            </div>
-            ${issues.length ? `
-              <div class="diagnostics-list">
-                ${issues.map(renderDiagnosticIssue).join("")}
+            <section class="diagnostics-section">
+              <div class="diagnostics-section-head">
+                <h3>数据质量</h3>
+                <span>${escapeHtml(formatDate(diagnostics.generated_at))}</span>
               </div>
-            ` : `<p class="diagnostics-empty">没有发现需要处理的问题。</p>`}
-            ${diagnostics.truncated ? `<p class="diagnostics-note">问题较多，当前只展示前 ${diagnostics.issue_limit} 条。</p>` : ""}
-            <p class="diagnostics-note">生成时间：${formatDate(diagnostics.generated_at)}</p>
+              <div class="diagnostics-summary">
+                ${diagnosticMetric("状态", diagnosticsStatusLabel(diagnostics.status), diagnostics.status)}
+                ${diagnosticMetric("需处理", diagnostics.action_required_count ?? 0, "action_required")}
+                ${diagnosticMetric("警告", diagnostics.warning_count ?? 0, "warning")}
+                ${diagnosticMetric("提示", diagnostics.info_count ?? 0, "info")}
+              </div>
+              ${issues.length ? `
+                <div class="diagnostics-list">
+                  ${issues.map(renderDiagnosticIssue).join("")}
+                </div>
+              ` : `<p class="diagnostics-empty">没有发现需要处理的问题。</p>`}
+              ${diagnostics.truncated ? `<p class="diagnostics-note">问题较多，当前只展示前 ${diagnostics.issue_limit} 条。</p>` : ""}
+            </section>
           ` : ""}
         </div>
       </section>
     </div>
   `;
+}
+
+function renderIntegrationDiagnostics(integrations) {
+  const checks = integrations.checks ?? [];
+  return `
+    <section class="diagnostics-section">
+      <div class="diagnostics-section-head">
+        <h3>AI/OCR 接入状态</h3>
+        <span>${escapeHtml(formatDate(integrations.generated_at))}</span>
+      </div>
+      <div class="diagnostics-summary integration-summary">
+        ${diagnosticMetric("状态", integrationStatusLabel(integrations.status), integrations.status)}
+        ${diagnosticMetric("可用", integrations.ready_count ?? 0, "ok")}
+        ${diagnosticMetric("回落", integrations.fallback_count ?? 0, "fallback")}
+        ${diagnosticMetric("阻断", integrations.blocked_count ?? 0, "blocked")}
+      </div>
+      ${checks.length ? `
+        <div class="integration-list">
+          ${checks.map(renderIntegrationCheck).join("")}
+        </div>
+      ` : `<p class="diagnostics-empty">暂无集成检查结果。</p>`}
+    </section>
+  `;
+}
+
+function renderIntegrationCheck(check) {
+  const status = check.status || "fallback";
+  const warningText = integrationWarningText(check);
+  return `
+    <article class="integration-check ${escapeHtml(status)}">
+      <span>${icon(integrationIcon(check.name))}</span>
+      <div class="integration-check-main">
+        <div class="integration-check-title">
+          <strong>${escapeHtml(integrationNameLabel(check.name))}</strong>
+          <small>${escapeHtml(check.provider || "unknown")}</small>
+        </div>
+        <p>${escapeHtml(warningText)}</p>
+        <small>${escapeHtml(integrationMetaText(check))}</small>
+      </div>
+      <div class="integration-check-status">
+        <strong>${escapeHtml(integrationCheckStatusLabel(status))}</strong>
+        <span>${escapeHtml(integrationNextAction(check))}</span>
+      </div>
+    </article>
+  `;
+}
+
+function integrationIcon(name) {
+  return {
+    ocr: "camera",
+    ai_parser: "spark",
+    chat_intent: "send",
+  }[name] ?? "settings";
+}
+
+function integrationNameLabel(name) {
+  return {
+    ocr: "OCR 文字识别",
+    ai_parser: "AI 账单/待办解析",
+    chat_intent: "聊天意图识别",
+  }[name] ?? name ?? "集成服务";
+}
+
+function integrationStatusLabel(status) {
+  return {
+    ready: "外部服务可用",
+    blocked: "隐私阻断",
+    fallback: "本地兜底",
+  }[status] ?? "未知";
+}
+
+function integrationCheckStatusLabel(status) {
+  return {
+    ready: "可用",
+    blocked: "阻断",
+    fallback: "回落",
+  }[status] ?? "未知";
+}
+
+function integrationWarningText(check) {
+  const tokens = [
+    ...(check.privacy_blockers ?? []),
+    ...(check.warnings ?? []),
+  ].map(integrationCodeLabel).filter(Boolean);
+  if (!tokens.length) {
+    return "当前配置可用，相关流程会优先使用外部服务。";
+  }
+  return tokens.join("；");
+}
+
+function integrationMetaText(check) {
+  const endpointText = check.endpoint_configured ? "接口已配置" : "接口未配置";
+  const keyText = check.api_key_configured ? "密钥已配置" : "密钥未配置";
+  const capabilities = (check.capabilities ?? [])
+    .map(integrationCapabilityLabel)
+    .filter(Boolean)
+    .join("、");
+  return [endpointText, keyText, capabilities].filter(Boolean).join(" · ");
+}
+
+function integrationNextAction(check) {
+  if (check.status === "ready") {
+    return "当前流程可使用";
+  }
+  if ((check.privacy_blockers ?? []).length) {
+    return "检查隐私设置";
+  }
+  return {
+    ocr: "配置 OCR 服务",
+    ai_parser: "配置 AI 解析服务",
+    chat_intent: "配置 AI 解析服务",
+  }[check.name] ?? "补充配置";
+}
+
+function integrationCodeLabel(code) {
+  return {
+    local_only_mode_enabled: "本地模式开启，外部服务不会被调用",
+    ai_text_processing_disabled: "AI 文本处理已关闭",
+    ocr_engine_not_configured: "未配置外部 OCR，图片识别会使用手动兜底",
+    original_attachment_required_for_external_ocr: "外部 OCR 需要保留原始附件文件",
+    rule_based_parser_fallback: "未配置外部 AI 解析，账单/待办使用规则解析",
+    keyword_router_fallback: "未配置外部聊天路由，助手使用关键词判断意图",
+  }[code] ?? code;
+}
+
+function integrationCapabilityLabel(value) {
+  return {
+    attachment_text_recognition: "附件识别",
+    stored_text_fallback: "文本兜底",
+    bill_candidate_parsing: "账单候选",
+    task_candidate_parsing: "待办候选",
+    chat_intent_routing: "聊天路由",
+    chat_candidate_flow: "候选确认",
+  }[value] ?? value;
 }
 
 function diagnosticMetric(label, value, tone) {

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from app.schemas.diagnostics import DataQualityDiagnostics
+from app.schemas.diagnostics import DataQualityDiagnostics, IntegrationDiagnostics
 from app.services.diagnostics_service import diagnostics_service
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
@@ -15,3 +15,8 @@ def get_data_quality_diagnostics(
         duplicate_time_window_minutes=duplicate_time_window_minutes,
         issue_limit=issue_limit,
     )
+
+
+@router.get("/integrations", response_model=IntegrationDiagnostics)
+def get_integration_diagnostics() -> IntegrationDiagnostics:
+    return diagnostics_service.integrations()

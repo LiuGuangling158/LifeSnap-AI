@@ -5941,6 +5941,29 @@ button:focus-visible {
   padding: 18px;
 }
 
+.diagnostics-section {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnostics-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.diagnostics-section-head h3 {
+  margin: 0;
+  color: #17243a;
+  font-size: 15px;
+}
+
+.diagnostics-section-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .diagnostics-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -5979,9 +6002,117 @@ button:focus-visible {
   color: #9a6815;
 }
 
+.diagnostic-metric.fallback strong {
+  color: #6f7785;
+}
+
+.diagnostic-metric.blocked strong {
+  color: #d44848;
+}
+
+.diagnostic-metric.ready strong,
 .diagnostic-metric.info strong,
 .diagnostic-metric.ok strong {
   color: #0f8f71;
+}
+
+.integration-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.integration-check {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(96px, auto);
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+  transition:
+    background-color var(--motion),
+    transform var(--motion);
+}
+
+.integration-check:hover {
+  background: #fbfdfa;
+  transform: translateY(-1px);
+}
+
+.integration-check > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf7f2;
+  color: var(--accent-dark);
+}
+
+.integration-check.blocked > span {
+  background: #fff0f0;
+  color: #d44848;
+}
+
+.integration-check.fallback > span {
+  background: #f3f5f2;
+  color: #6f7785;
+}
+
+.integration-check-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.integration-check-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.integration-check-title strong {
+  color: #17243a;
+  font-size: 14px;
+}
+
+.integration-check-title small,
+.integration-check-main p,
+.integration-check-main small,
+.integration-check-status span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.integration-check-main p {
+  margin: 0;
+}
+
+.integration-check-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.integration-check-status {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  text-align: right;
+}
+
+.integration-check-status strong {
+  color: #0f8f71;
+  font-size: 13px;
+}
+
+.integration-check.blocked .integration-check-status strong {
+  color: #d44848;
+}
+
+.integration-check.fallback .integration-check-status strong {
+  color: #6f7785;
 }
 
 .diagnostics-list {
@@ -6431,6 +6562,11 @@ button:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .diagnostics-section-head {
+    display: grid;
+    gap: 4px;
+  }
+
   .diagnostic-metric:nth-child(2) {
     border-right: 0;
   }
@@ -6447,6 +6583,16 @@ button:focus-visible {
   .diagnostic-issue > span {
     width: max-content;
     padding: 0 9px;
+  }
+
+  .integration-check {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .integration-check-status {
+    grid-column: 2;
+    justify-items: start;
+    text-align: left;
   }
 
   .audit-modal-actions {

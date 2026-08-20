@@ -118,6 +118,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_standard_error_responses(client)
     _check_demo_data_seed(client)
     _check_app_bootstrap(client)
+    _check_integration_diagnostics(client)
     _check_bill_statistics_overview(client)
     _check_task_statistics_overview(client)
     _check_candidate_discard_flow(client)
@@ -274,6 +275,36 @@ def _check_app_bootstrap(client: ApiClient) -> None:
     _assert(
         bootstrap["capabilities"]["app_version"] == capabilities["app_version"],
         "App bootstrap should include the same capabilities version",
+    )
+
+
+def _check_integration_diagnostics(client: ApiClient) -> None:
+    status, diagnostics = client.request("GET", "/diagnostics/integrations")
+    _assert(status == 200, "GET /diagnostics/integrations should return 200")
+    _assert(
+        diagnostics["status"] == "fallback",
+        "Integration diagnostics should report local fallback by default",
+    )
+    _assert(
+        diagnostics["check_count"] == 3,
+        "Integration diagnostics should include OCR, AI parser and chat intent checks",
+    )
+    checks = {check["name"]: check for check in diagnostics["checks"]}
+    _assert(
+        set(checks) == {"ocr", "ai_parser", "chat_intent"},
+        "Integration diagnostics should expose expected integration names",
+    )
+    _assert(
+        checks["ocr"]["warnings"] == ["ocr_engine_not_configured"],
+        "Integration diagnostics should explain missing OCR provider",
+    )
+    _assert(
+        checks["ai_parser"]["warnings"] == ["rule_based_parser_fallback"],
+        "Integration diagnostics should explain parser fallback",
+    )
+    _assert(
+        checks["chat_intent"]["warnings"] == ["keyword_router_fallback"],
+        "Integration diagnostics should explain chat routing fallback",
     )
 
 

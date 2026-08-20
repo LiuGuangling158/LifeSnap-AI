@@ -34,3 +34,28 @@ class DataQualityDiagnostics(BaseModel):
     issue_limit: int
     truncated: bool
     issues: list[DiagnosticIssue]
+
+
+class IntegrationCheck(BaseModel):
+    name: str
+    provider: str
+    status: str
+    configured: bool
+    ready: bool
+    endpoint_configured: bool
+    api_key_configured: bool
+    timeout_seconds: float | None = None
+    capabilities: list[str] = Field(default_factory=list)
+    privacy_blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_action: str | None = None
+
+
+class IntegrationDiagnostics(BaseModel):
+    generated_at: datetime
+    status: str
+    check_count: int
+    ready_count: int
+    blocked_count: int
+    fallback_count: int
+    checks: list[IntegrationCheck]

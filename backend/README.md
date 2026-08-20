@@ -189,11 +189,39 @@ Diagnostics:
 ```text
 GET /diagnostics/data-quality
 GET /diagnostics/data-quality?duplicate_time_window_minutes=10&issue_limit=50
+GET /diagnostics/integrations
 ```
 
 Data-quality diagnostics surface frontend-friendly issues such as possible
 duplicate bills, missing OCR text, pending candidates, overdue tasks,
 unscheduled pending tasks, recycle-bin counts, and privacy setting warnings.
+
+Integration diagnostics show the current OCR, AI parser, and chat intent routing
+state without exposing secrets:
+
+```json
+{
+  "status": "fallback",
+  "ready_count": 0,
+  "checks": [
+    {
+      "name": "ai_parser",
+      "provider": "rule_based",
+      "status": "fallback",
+      "configured": false,
+      "ready": false,
+      "endpoint_configured": false,
+      "api_key_configured": false,
+      "warnings": ["rule_based_parser_fallback"]
+    }
+  ]
+}
+```
+
+`status: "blocked"` means privacy settings currently prevent external
+processing. `status: "fallback"` means the external provider is not configured
+and the backend is using local fallback behavior. The endpoint does not call the
+external provider, so it is safe to run from the frontend system self-check.
 
 ## Idempotency
 

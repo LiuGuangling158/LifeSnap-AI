@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from app.core.config import settings
 from app.schemas.agent import ParseBillResponse, ParseTaskResponse
 from app.schemas.attachment import AttachmentRead
 from app.schemas.bill import BillRead
@@ -9,6 +10,8 @@ from app.schemas.diagnostics import (
     DataQualityDiagnostics,
     DiagnosticIssue,
     DiagnosticSeverity,
+    IntegrationCheck,
+    IntegrationDiagnostics,
 )
 from app.schemas.task import TaskRead, TaskStatus, TaskType
 from app.services.attachment_store import attachment_store
@@ -21,6 +24,26 @@ from app.services.task_store import task_store
 
 
 class DiagnosticsService:
+    def integrations(self) -> IntegrationDiagnostics:
+        now = datetime.now(timezone.utc)
+        checks = [
+            self._ocr_integration_check(),
+            self._ai_parser_integration_check(),
+            self._chat_intent_integration_check(),
+        ]
+        blocked_count = len([check for check in checks if check.status == "blocked"])
+        fallback_count = len([check for check in checks if check.status == "fallback"])
+        ready_count = len([check for check in checks if check.ready])
+        return IntegrationDiagnostics(
+            generated_at=now,
+            status=self._integration_status(blocked_count, fallback_count),
+            check_count=len(checks),
+            ready_count=ready_count,
+            blocked_count=blocked_count,
+            fallback_count=fallback_count,
+            checks=checks,
+        )
+
     def data_quality(
         self,
         *,
@@ -56,6 +79,112 @@ class DiagnosticsService:
             truncated=len(issues) > issue_limit,
             issues=limited_issues,
         )
+
+    def _ocr_integration_check(self) -> IntegrationCheck:
+        configured = settings.real_ocr_enabled
+        blockers = self._external_ai_privacy_blockers()
+        warnings: list[str] = []
+        next_action: str | None = None
+
+        if not configured:
+            warnings.append("ocr_engine_not_configured")
+            next_action = "Set LIFESNAP_OCR_ENDPOINT to enable external OCR."
+        elif blockers:
+            next_action = "Disable local-only mode and allow AI text processing before using external OCR."
+        if configured:
+            warnings.append("original_attachment_required_for_external_ocr")
+
+        return IntegrationCheck(
+            name="ocr",
+            provider=settings.ocr_provider_name,
+            status=self._integration_check_status(configured, blockers),
+            configured=configured,
+            ready=configured and not blockers,
+            endpoint_configured=bool(settings.external_ocr_endpoint),
+            api_key_configured=bool(settings.external_ocr_api_key),
+            timeout_seconds=settings.external_ocr_timeout_seconds,
+            capabilities=["attachment_text_recognition", "stored_text_fallback"],
+            privacy_blockers=blockers,
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _ai_parser_integration_check(self) -> IntegrationCheck:
+        configured = settings.real_ai_parser_enabled
+        blockers = self._external_ai_privacy_blockers()
+        warnings: list[str] = []
+        next_action: str | None = None
+
+        if not configured:
+            warnings.append("rule_based_parser_fallback")
+            next_action = "Set LIFESNAP_AI_PARSE_ENDPOINT to enable external bill and task parsing."
+        elif blockers:
+            next_action = "Disable local-only mode and allow AI text processing before using external AI parsing."
+
+        return IntegrationCheck(
+            name="ai_parser",
+            provider=settings.ai_parser_provider_name,
+            status=self._integration_check_status(configured, blockers),
+            configured=configured,
+            ready=configured and not blockers,
+            endpoint_configured=bool(settings.external_ai_parser_endpoint),
+            api_key_configured=bool(settings.external_ai_parser_api_key),
+            timeout_seconds=settings.external_ai_parser_timeout_seconds,
+            capabilities=["bill_candidate_parsing", "task_candidate_parsing"],
+            privacy_blockers=blockers,
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _chat_intent_integration_check(self) -> IntegrationCheck:
+        configured = settings.real_ai_parser_enabled
+        blockers = self._external_ai_privacy_blockers()
+        warnings: list[str] = []
+        next_action: str | None = None
+
+        if not configured:
+            warnings.append("keyword_router_fallback")
+            next_action = "Set LIFESNAP_AI_PARSE_ENDPOINT to enable external chat intent routing."
+        elif blockers:
+            next_action = "Disable local-only mode and allow AI text processing before using external chat intent routing."
+
+        return IntegrationCheck(
+            name="chat_intent",
+            provider=settings.ai_parser_provider_name,
+            status=self._integration_check_status(configured, blockers),
+            configured=configured,
+            ready=configured and not blockers,
+            endpoint_configured=bool(settings.external_ai_parser_endpoint),
+            api_key_configured=bool(settings.external_ai_parser_api_key),
+            timeout_seconds=settings.external_ai_parser_timeout_seconds,
+            capabilities=["chat_intent_routing", "chat_candidate_flow"],
+            privacy_blockers=blockers,
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _external_ai_privacy_blockers(self) -> list[str]:
+        privacy_settings = settings_store.get_privacy_settings()
+        blockers: list[str] = []
+        if privacy_settings.local_only_mode:
+            blockers.append("local_only_mode_enabled")
+        if not privacy_settings.allow_ai_text_processing:
+            blockers.append("ai_text_processing_disabled")
+        return blockers
+
+    def _integration_check_status(self, configured: bool, blockers: list[str]) -> str:
+        if not configured:
+            return "fallback"
+        if blockers:
+            return "blocked"
+        return "ready"
+
+    def _integration_status(self, blocked_count: int, fallback_count: int) -> str:
+        if blocked_count:
+            return "blocked"
+        if fallback_count:
+            return "fallback"
+        return "ready"
 
     def _privacy_issues(self) -> list[DiagnosticIssue]:
         privacy_settings = settings_store.get_privacy_settings()
