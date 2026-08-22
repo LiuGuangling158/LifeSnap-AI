@@ -1,23 +1,37 @@
 from __future__ import annotations
 
+import json
+import time
 from datetime import datetime, timezone
+from typing import Any
+from urllib.error import HTTPError, URLError
+from uuid import UUID
 
 from app.core.config import settings
-from app.schemas.agent import ParseBillResponse, ParseTaskResponse
+from app.schemas.agent import (
+    ParseBillRequest,
+    ParseBillResponse,
+    ParseTaskRequest,
+    ParseTaskResponse,
+)
 from app.schemas.attachment import AttachmentRead
-from app.schemas.bill import BillRead
+from app.schemas.bill import BillRead, BillSource
 from app.schemas.diagnostics import (
     DataQualityDiagnostics,
     DiagnosticIssue,
     DiagnosticSeverity,
     IntegrationCheck,
     IntegrationDiagnostics,
+    IntegrationProbeResponse,
+    IntegrationProbeResult,
 )
-from app.schemas.task import TaskRead, TaskStatus, TaskType
+from app.schemas.task import TaskRead, TaskSource, TaskStatus, TaskType
 from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
 from app.services.data_management_service import data_management_service
+from app.services.external_ai_parser import external_ai_parser
+from app.services.ocr_service import ocr_service
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
 from app.services.task_store import task_store
@@ -42,6 +56,27 @@ class DiagnosticsService:
             blocked_count=blocked_count,
             fallback_count=fallback_count,
             checks=checks,
+        )
+
+    def probe_integrations(self) -> IntegrationProbeResponse:
+        now = datetime.now(timezone.utc)
+        results = [
+            self._probe_ocr(),
+            self._probe_ai_bill_parser(),
+            self._probe_ai_task_parser(),
+            self._probe_chat_intent(),
+        ]
+        success_count = len([result for result in results if result.status == "success"])
+        failed_count = len([result for result in results if result.status == "failed"])
+        skipped_count = len([result for result in results if result.status == "skipped"])
+        return IntegrationProbeResponse(
+            generated_at=now,
+            status=self._probe_status(success_count, failed_count),
+            probe_count=len(results),
+            success_count=success_count,
+            failed_count=failed_count,
+            skipped_count=skipped_count,
+            results=results,
         )
 
     def data_quality(
@@ -163,6 +198,259 @@ class DiagnosticsService:
             next_action=next_action,
         )
 
+    def _probe_ocr(self) -> IntegrationProbeResult:
+        configured = settings.real_ocr_enabled
+        blockers = self._external_ai_privacy_blockers()
+        if not configured:
+            return self._skipped_probe(
+                name="ocr",
+                provider=settings.ocr_provider_name,
+                configured=False,
+                warnings=["ocr_engine_not_configured"],
+            )
+        if blockers:
+            return self._skipped_probe(
+                name="ocr",
+                provider=settings.ocr_provider_name,
+                configured=True,
+                warnings=["external_processing_blocked", *blockers],
+                privacy_blockers=blockers,
+            )
+
+        started = time.perf_counter()
+        try:
+            response = ocr_service._call_external_ocr(
+                attachment_id=UUID("00000000-0000-0000-0000-000000000001"),
+                filename="lifesnap-probe-receipt.png",
+                content_type="image/png",
+                content=b"lifesnap-probe-receipt",
+            )
+            latency_ms = self._elapsed_ms(started)
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
+            return self._failed_probe(
+                name="ocr",
+                provider=settings.ocr_provider_name,
+                latency_ms=self._elapsed_ms(started),
+                warnings=["external_ocr_failed"],
+                error=type(error).__name__,
+            )
+
+        if not isinstance(response, dict):
+            return self._failed_probe(
+                name="ocr",
+                provider=settings.ocr_provider_name,
+                latency_ms=latency_ms,
+                warnings=["external_ocr_invalid_response"],
+                error="InvalidResponse",
+            )
+
+        warnings = self._warning_list(response.get("warnings"))
+        if "text" not in response:
+            return self._failed_probe(
+                name="ocr",
+                provider=settings.ocr_provider_name,
+                latency_ms=latency_ms,
+                warnings=[*warnings, "external_ocr_invalid_response"],
+                error="MissingText",
+            )
+
+        text = str(response.get("text") or "").strip()
+        if not text:
+            warnings.append("external_ocr_empty_text")
+        return self._successful_probe(
+            name="ocr",
+            provider=str(response.get("provider") or settings.ocr_provider_name),
+            latency_ms=latency_ms,
+            warnings=warnings,
+            response_preview={
+                "text_sample": self._preview_text(text),
+                "text_length": len(text),
+                "confidence": self._optional_float(response.get("confidence")),
+            },
+        )
+
+    def _probe_ai_bill_parser(self) -> IntegrationProbeResult:
+        configured = settings.real_ai_parser_enabled
+        blockers = self._external_ai_privacy_blockers()
+        if not configured:
+            return self._skipped_probe(
+                name="ai_bill_parser",
+                provider=settings.ai_parser_provider_name,
+                configured=False,
+                warnings=["rule_based_parser_fallback"],
+            )
+        if blockers:
+            return self._skipped_probe(
+                name="ai_bill_parser",
+                provider=settings.ai_parser_provider_name,
+                configured=True,
+                warnings=["external_processing_blocked", *blockers],
+                privacy_blockers=blockers,
+            )
+
+        started = time.perf_counter()
+        try:
+            candidate, warnings = external_ai_parser.parse_bill(
+                ParseBillRequest(
+                    text="瑞幸咖啡\n微信支付\n实付 18.50 元",
+                    source=BillSource.ai_chat,
+                )
+            )
+            latency_ms = self._elapsed_ms(started)
+        except Exception as error:
+            return self._failed_probe(
+                name="ai_bill_parser",
+                provider=settings.ai_parser_provider_name,
+                latency_ms=self._elapsed_ms(started),
+                warnings=["external_ai_parser_failed"],
+                error=type(error).__name__,
+            )
+
+        if candidate is None:
+            return self._failed_probe(
+                name="ai_bill_parser",
+                provider=settings.ai_parser_provider_name,
+                latency_ms=latency_ms,
+                warnings=warnings or ["external_ai_parser_failed"],
+                error="NoCandidate",
+            )
+
+        return self._successful_probe(
+            name="ai_bill_parser",
+            provider=settings.ai_parser_provider_name,
+            latency_ms=latency_ms,
+            warnings=candidate.warnings,
+            response_preview={
+                "intent": candidate.intent,
+                "confidence": candidate.confidence,
+                "amount": str(candidate.data.amount) if candidate.data.amount else None,
+                "merchant": candidate.data.merchant,
+                "category": candidate.data.category,
+            },
+        )
+
+    def _probe_ai_task_parser(self) -> IntegrationProbeResult:
+        configured = settings.real_ai_parser_enabled
+        blockers = self._external_ai_privacy_blockers()
+        if not configured:
+            return self._skipped_probe(
+                name="ai_task_parser",
+                provider=settings.ai_parser_provider_name,
+                configured=False,
+                warnings=["rule_based_parser_fallback"],
+            )
+        if blockers:
+            return self._skipped_probe(
+                name="ai_task_parser",
+                provider=settings.ai_parser_provider_name,
+                configured=True,
+                warnings=["external_processing_blocked", *blockers],
+                privacy_blockers=blockers,
+            )
+
+        started = time.perf_counter()
+        try:
+            candidate, warnings = external_ai_parser.parse_task(
+                ParseTaskRequest(
+                    text="明天下午 3 点提醒我开项目会，准备周报",
+                    source=TaskSource.ai_chat,
+                )
+            )
+            latency_ms = self._elapsed_ms(started)
+        except Exception as error:
+            return self._failed_probe(
+                name="ai_task_parser",
+                provider=settings.ai_parser_provider_name,
+                latency_ms=self._elapsed_ms(started),
+                warnings=["external_ai_parser_failed"],
+                error=type(error).__name__,
+            )
+
+        if candidate is None:
+            return self._failed_probe(
+                name="ai_task_parser",
+                provider=settings.ai_parser_provider_name,
+                latency_ms=latency_ms,
+                warnings=warnings or ["external_ai_parser_failed"],
+                error="NoCandidate",
+            )
+
+        return self._successful_probe(
+            name="ai_task_parser",
+            provider=settings.ai_parser_provider_name,
+            latency_ms=latency_ms,
+            warnings=candidate.warnings,
+            response_preview={
+                "intent": candidate.intent,
+                "confidence": candidate.confidence,
+                "title": candidate.data.title,
+                "category": candidate.data.category,
+                "task_type": candidate.data.task_type.value,
+            },
+        )
+
+    def _probe_chat_intent(self) -> IntegrationProbeResult:
+        configured = settings.real_ai_parser_enabled
+        blockers = self._external_ai_privacy_blockers()
+        if not configured:
+            return self._skipped_probe(
+                name="chat_intent",
+                provider=settings.ai_parser_provider_name,
+                configured=False,
+                warnings=["keyword_router_fallback"],
+            )
+        if blockers:
+            return self._skipped_probe(
+                name="chat_intent",
+                provider=settings.ai_parser_provider_name,
+                configured=True,
+                warnings=["external_processing_blocked", *blockers],
+                privacy_blockers=blockers,
+            )
+
+        started = time.perf_counter()
+        try:
+            route, warnings = external_ai_parser.route_chat(
+                "明天下午 3 点提醒我开项目会"
+            )
+            latency_ms = self._elapsed_ms(started)
+        except Exception as error:
+            return self._failed_probe(
+                name="chat_intent",
+                provider=settings.ai_parser_provider_name,
+                latency_ms=self._elapsed_ms(started),
+                warnings=["external_ai_parser_failed"],
+                error=type(error).__name__,
+            )
+
+        if route is None:
+            return self._failed_probe(
+                name="chat_intent",
+                provider=settings.ai_parser_provider_name,
+                latency_ms=latency_ms,
+                warnings=warnings or ["external_chat_intent_invalid_response"],
+                error="NoRoute",
+            )
+
+        return self._successful_probe(
+            name="chat_intent",
+            provider=settings.ai_parser_provider_name,
+            latency_ms=latency_ms,
+            warnings=route.warnings,
+            response_preview={
+                "intent": route.intent.value,
+                "confidence": route.confidence,
+                "reply_sample": self._preview_text(route.reply or ""),
+            },
+        )
+
     def _external_ai_privacy_blockers(self) -> list[str]:
         privacy_settings = settings_store.get_privacy_settings()
         blockers: list[str] = []
@@ -185,6 +473,102 @@ class DiagnosticsService:
         if fallback_count:
             return "fallback"
         return "ready"
+
+    def _probe_status(self, success_count: int, failed_count: int) -> str:
+        if failed_count:
+            return "failed"
+        if success_count:
+            return "success"
+        return "skipped"
+
+    def _skipped_probe(
+        self,
+        *,
+        name: str,
+        provider: str,
+        configured: bool,
+        warnings: list[str],
+        privacy_blockers: list[str] | None = None,
+    ) -> IntegrationProbeResult:
+        return IntegrationProbeResult(
+            name=name,
+            provider=provider,
+            status="skipped",
+            configured=configured,
+            attempted=False,
+            success=False,
+            privacy_blockers=privacy_blockers or [],
+            warnings=self._dedupe(warnings),
+        )
+
+    def _failed_probe(
+        self,
+        *,
+        name: str,
+        provider: str,
+        latency_ms: float,
+        warnings: list[str],
+        error: str,
+    ) -> IntegrationProbeResult:
+        return IntegrationProbeResult(
+            name=name,
+            provider=provider,
+            status="failed",
+            configured=True,
+            attempted=True,
+            success=False,
+            latency_ms=latency_ms,
+            warnings=self._dedupe(warnings),
+            error=error,
+        )
+
+    def _successful_probe(
+        self,
+        *,
+        name: str,
+        provider: str,
+        latency_ms: float,
+        warnings: list[str],
+        response_preview: dict[str, Any],
+    ) -> IntegrationProbeResult:
+        return IntegrationProbeResult(
+            name=name,
+            provider=provider,
+            status="success",
+            configured=True,
+            attempted=True,
+            success=True,
+            latency_ms=latency_ms,
+            warnings=self._dedupe(warnings),
+            response_preview=response_preview,
+        )
+
+    def _elapsed_ms(self, started: float) -> float:
+        return round((time.perf_counter() - started) * 1000, 2)
+
+    def _warning_list(self, raw_value: Any) -> list[str]:
+        if not isinstance(raw_value, list):
+            return []
+        return [str(warning) for warning in raw_value if str(warning).strip()]
+
+    def _optional_float(self, raw_value: Any) -> float | None:
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+    def _preview_text(self, text: str, max_length: int = 80) -> str:
+        cleaned = " ".join(text.split())
+        if len(cleaned) <= max_length:
+            return cleaned
+        return cleaned[:max_length]
+
+    def _dedupe(self, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            if value and value not in deduped:
+                deduped.append(value)
+        return deduped
 
     def _privacy_issues(self) -> list[DiagnosticIssue]:
         privacy_settings = settings_store.get_privacy_settings()

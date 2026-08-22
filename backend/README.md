@@ -190,6 +190,7 @@ Diagnostics:
 GET /diagnostics/data-quality
 GET /diagnostics/data-quality?duplicate_time_window_minutes=10&issue_limit=50
 GET /diagnostics/integrations
+POST /diagnostics/integrations/probe
 ```
 
 Data-quality diagnostics surface frontend-friendly issues such as possible
@@ -222,6 +223,13 @@ state without exposing secrets:
 processing. `status: "fallback"` means the external provider is not configured
 and the backend is using local fallback behavior. The endpoint does not call the
 external provider, so it is safe to run from the frontend system self-check.
+
+`POST /diagnostics/integrations/probe` performs an explicit live connectivity
+probe for OCR, bill parsing, task parsing, and chat intent routing. It requires
+`{"confirm": true}` because configured external providers may be called and may
+incur provider-side cost. The probe uses fixed sample content, reports
+`success`, `failed`, or `skipped` for each integration, and does not persist
+attachments, OCR text, bill candidates, or task candidates.
 
 ## Idempotency
 

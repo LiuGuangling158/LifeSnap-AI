@@ -307,6 +307,37 @@ def _check_integration_diagnostics(client: ApiClient) -> None:
         "Integration diagnostics should explain chat routing fallback",
     )
 
+    status, body = client.request("POST", "/diagnostics/integrations/probe")
+    _assert(status == 400, "Integration probe should require explicit confirmation")
+    _assert(
+        "confirm=true" in body["detail"],
+        "Integration probe should explain the confirmation requirement",
+    )
+
+    status, probe = client.request(
+        "POST",
+        "/diagnostics/integrations/probe",
+        {"confirm": True},
+    )
+    _assert(status == 200, "Confirmed integration probe should return 200")
+    _assert(
+        probe["status"] == "skipped",
+        "Integration probe should skip external calls when providers are not configured",
+    )
+    _assert(
+        probe["probe_count"] == 4,
+        "Integration probe should include OCR, bill parser, task parser and chat intent",
+    )
+    probe_results = {result["name"]: result for result in probe["results"]}
+    _assert(
+        set(probe_results) == {"ocr", "ai_bill_parser", "ai_task_parser", "chat_intent"},
+        "Integration probe should expose expected probe names",
+    )
+    _assert(
+        all(not result["attempted"] for result in probe_results.values()),
+        "Integration probe should not attempt unconfigured providers",
+    )
+
 
 def _check_bill_statistics_overview(client: ApiClient) -> None:
     bills = [

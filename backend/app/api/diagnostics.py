@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas.diagnostics import DataQualityDiagnostics, IntegrationDiagnostics
+from app.schemas.diagnostics import (
+    DataQualityDiagnostics,
+    IntegrationDiagnostics,
+    IntegrationProbeRequest,
+    IntegrationProbeResponse,
+)
 from app.services.diagnostics_service import diagnostics_service
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
@@ -20,3 +25,16 @@ def get_data_quality_diagnostics(
 @router.get("/integrations", response_model=IntegrationDiagnostics)
 def get_integration_diagnostics() -> IntegrationDiagnostics:
     return diagnostics_service.integrations()
+
+
+@router.post("/integrations/probe", response_model=IntegrationProbeResponse)
+def probe_integration_diagnostics(
+    payload: IntegrationProbeRequest | None = None,
+) -> IntegrationProbeResponse:
+    payload = payload or IntegrationProbeRequest()
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Set confirm=true to run external integration probes.",
+        )
+    return diagnostics_service.probe_integrations()

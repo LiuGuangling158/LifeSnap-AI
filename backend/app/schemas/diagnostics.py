@@ -59,3 +59,31 @@ class IntegrationDiagnostics(BaseModel):
     blocked_count: int
     fallback_count: int
     checks: list[IntegrationCheck]
+
+
+class IntegrationProbeRequest(BaseModel):
+    confirm: bool = False
+
+
+class IntegrationProbeResult(BaseModel):
+    name: str
+    provider: str
+    status: str
+    configured: bool
+    attempted: bool
+    success: bool
+    latency_ms: float | None = None
+    privacy_blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    response_preview: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class IntegrationProbeResponse(BaseModel):
+    generated_at: datetime
+    status: str
+    probe_count: int
+    success_count: int
+    failed_count: int
+    skipped_count: int
+    results: list[IntegrationProbeResult]
