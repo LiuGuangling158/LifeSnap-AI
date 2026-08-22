@@ -634,6 +634,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const copyMockCommandButton = event.target.closest("[data-copy-mock-command]");
+  if (copyMockCommandButton) {
+    copyMockProviderCommand(copyMockCommandButton.dataset.copyMockCommand);
+    return;
+  }
+
   if (event.target.closest("[data-open-audit-log]")) {
     openAuditLog();
     return;
@@ -2311,6 +2317,63 @@ async function refreshDiagnostics() {
     state.diagnosticsLoading = false;
     render();
   }
+}
+
+async function copyMockProviderCommand(commandKey) {
+  const command = mockProviderCommandText(commandKey);
+  if (!command) {
+    showToast("没有可复制的命令");
+    return;
+  }
+  try {
+    await copyText(command);
+    showToast("已复制 mock 测试命令");
+  } catch (error) {
+    showToast(error.message || "复制失败，请手动选择命令");
+  }
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("当前浏览器不允许自动复制");
+  }
+}
+
+function mockProviderCommandText(commandKey) {
+  return {
+    start: [
+      "cd backend",
+      ".\\.venv\\Scripts\\python.exe scripts\\mock_ai_provider.py --host 127.0.0.1 --port 8787",
+    ].join("\n"),
+    env: [
+      "$env:LIFESNAP_OCR_ENDPOINT = \"http://127.0.0.1:8787/recognize\"",
+      "$env:LIFESNAP_OCR_PROVIDER = \"lifesnap_mock_ocr\"",
+      "$env:LIFESNAP_AI_PARSE_ENDPOINT = \"http://127.0.0.1:8787/parse\"",
+      "$env:LIFESNAP_AI_PARSE_PROVIDER = \"lifesnap_mock_ai\"",
+      "uvicorn app.main:app --reload",
+    ].join("\n"),
+    privacy: [
+      "{",
+      "  \"local_only_mode\": false,",
+      "  \"allow_ai_text_processing\": true,",
+      "  \"save_original_attachments_by_default\": true",
+      "}",
+    ].join("\n"),
+  }[commandKey] ?? "";
 }
 
 async function openAuditLog() {
@@ -6224,6 +6287,7 @@ function renderDiagnosticsModal() {
         <div class="diagnostics-body">
           ${state.diagnosticsLoading && !diagnostics && !integrationDiagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
           ${integrationDiagnostics ? renderIntegrationDiagnostics(integrationDiagnostics) : ""}
+          ${renderMockProviderGuide()}
           ${diagnostics ? `
             <section class="diagnostics-section">
               <div class="diagnostics-section-head">
@@ -6247,6 +6311,44 @@ function renderDiagnosticsModal() {
         </div>
       </section>
     </div>
+  `;
+}
+
+function renderMockProviderGuide() {
+  const items = [
+    ["start", "启动本地 mock Provider", "在单独终端运行，提供 /recognize 和 /parse。"],
+    ["env", "配置后端外部服务", "在启动 FastAPI 前运行，让后端走 mock 外部链路。"],
+    ["privacy", "隐私开关请求体", "关闭本地模式，并允许 AI 文本处理与原始附件保留。"],
+  ];
+  return `
+    <section class="diagnostics-section mock-provider-guide">
+      <div class="diagnostics-section-head">
+        <h3>本地 mock 测试</h3>
+        <span>无需真实供应商账号</span>
+      </div>
+      <p class="mock-provider-note">按顺序运行下面配置后，再刷新系统自检，应能看到 OCR、AI 解析和聊天意图路由进入外部服务链路。</p>
+      <div class="mock-command-list">
+        ${items.map(([key, title, note]) => renderMockCommand(key, title, note)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderMockCommand(key, title, note) {
+  const command = mockProviderCommandText(key);
+  return `
+    <article class="mock-command">
+      <div class="mock-command-head">
+        <div>
+          <strong>${escapeHtml(title)}</strong>
+          <span>${escapeHtml(note)}</span>
+        </div>
+        <button class="button ghost compact-button" type="button" data-copy-mock-command="${escapeHtml(key)}">
+          ${icon("copy")}复制
+        </button>
+      </div>
+      <pre><code>${escapeHtml(command)}</code></pre>
+    </article>
   `;
 }
 
@@ -6957,6 +7059,7 @@ function icon(name) {
     upload: '<path d="M12 21V9"></path><path d="M7 14l5-5 5 5"></path><path d="M5 3h14"></path>',
     close: '<path d="M6 6l12 12"></path><path d="M18 6L6 18"></path>',
     save: '<path d="M5 3h12l2 2v16H5V3z"></path><path d="M8 3v6h8"></path><path d="M8 17h8"></path>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>',
     spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"></path>',
   };
   return `<span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24">${paths[name] ?? paths.layout}</svg></span>`;

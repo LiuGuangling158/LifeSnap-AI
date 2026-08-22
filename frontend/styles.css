@@ -6115,6 +6115,80 @@ button:focus-visible {
   color: #6f7785;
 }
 
+.mock-provider-guide {
+  border-top: 1px solid var(--line);
+  padding-top: 2px;
+}
+
+.mock-provider-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.mock-command-list {
+  display: grid;
+  gap: 10px;
+}
+
+.mock-command {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfdfa;
+  padding: 11px;
+}
+
+.mock-command-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mock-command-head div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.mock-command-head strong {
+  color: #17243a;
+  font-size: 13px;
+}
+
+.mock-command-head span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.compact-button {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.mock-command pre {
+  overflow-x: auto;
+  margin: 0;
+  border: 1px solid #dfe8e2;
+  border-radius: 6px;
+  background: #f6faf7;
+  padding: 9px;
+}
+
+.mock-command code {
+  color: #25362d;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
 .diagnostics-list {
   display: grid;
   border-top: 1px solid var(--line);
@@ -6593,6 +6667,14 @@ button:focus-visible {
     grid-column: 2;
     justify-items: start;
     text-align: left;
+  }
+
+  .mock-command-head {
+    display: grid;
+  }
+
+  .compact-button {
+    justify-self: start;
   }
 
   .audit-modal-actions {
