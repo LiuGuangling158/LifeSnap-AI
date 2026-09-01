@@ -5948,9 +5948,15 @@ button:focus-visible {
 
 .diagnostics-section-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.diagnostics-section-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
 }
 
 .diagnostics-section-head h3 {
@@ -5959,7 +5965,8 @@ button:focus-visible {
   font-size: 15px;
 }
 
-.diagnostics-section-head span {
+.diagnostics-section-head > span,
+.diagnostics-section-head > div > span {
   color: var(--muted);
   font-size: 12px;
 }
@@ -6010,9 +6017,18 @@ button:focus-visible {
   color: #d44848;
 }
 
+.diagnostic-metric.failed strong {
+  color: #d44848;
+}
+
+.diagnostic-metric.skipped strong {
+  color: #6f7785;
+}
+
 .diagnostic-metric.ready strong,
 .diagnostic-metric.info strong,
-.diagnostic-metric.ok strong {
+.diagnostic-metric.ok strong,
+.diagnostic-metric.success strong {
   color: #0f8f71;
 }
 
@@ -6115,6 +6131,84 @@ button:focus-visible {
   color: #6f7785;
 }
 
+.integration-probe {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.integration-probe-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.integration-probe-head strong {
+  color: #17243a;
+  font-size: 14px;
+}
+
+.integration-probe-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.probe-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.integration-probe-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.integration-probe-result {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(82px, auto);
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 11px 0;
+  transition:
+    background-color var(--motion),
+    transform var(--motion);
+}
+
+.integration-probe-result:hover {
+  background: #fbfdfa;
+  transform: translateY(-1px);
+}
+
+.integration-probe-result > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf7f2;
+  color: var(--accent-dark);
+}
+
+.integration-probe-result.failed > span {
+  background: #fff0f0;
+  color: #d44848;
+}
+
+.integration-probe-result.skipped > span {
+  background: #f3f5f2;
+  color: #6f7785;
+}
+
+.integration-probe-result.failed .integration-check-status strong {
+  color: #d44848;
+}
+
+.integration-probe-result.skipped .integration-check-status strong {
+  color: #6f7785;
+}
+
 .mock-provider-guide {
   border-top: 1px solid var(--line);
   padding-top: 2px;
@@ -6182,6 +6276,78 @@ button:focus-visible {
 }
 
 .mock-command code {
+  color: #25362d;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.external-provider-guide {
+  border-top: 1px solid var(--line);
+  padding-top: 2px;
+}
+
+.external-guide-list {
+  display: grid;
+  gap: 8px;
+}
+
+.external-guide-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfdfa;
+  transition:
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.external-guide-item:hover {
+  border-color: #cfe4d8;
+  transform: translateY(-1px);
+}
+
+.external-guide-item summary {
+  display: flex;
+  min-height: 48px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+}
+
+.external-guide-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.external-guide-item summary > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.external-guide-item strong {
+  color: #17243a;
+  font-size: 13px;
+}
+
+.external-guide-item small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.external-guide-item pre {
+  overflow-x: auto;
+  margin: 0;
+  border-top: 1px solid #dfe8e2;
+  background: #f6faf7;
+  padding: 10px 11px;
+}
+
+.external-guide-item code {
   color: #25362d;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;

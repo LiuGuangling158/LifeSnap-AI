@@ -78,8 +78,10 @@ const state = {
   privacySettingsOpen: false,
   diagnosticsOpen: false,
   diagnosticsLoading: false,
+  integrationProbeLoading: false,
   diagnostics: null,
   integrationDiagnostics: null,
+  integrationProbe: null,
   auditLogOpen: false,
   auditLogLoading: false,
   auditLog: null,
@@ -634,9 +636,21 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-run-integration-probe]")) {
+    runIntegrationProbe();
+    return;
+  }
+
   const copyMockCommandButton = event.target.closest("[data-copy-mock-command]");
   if (copyMockCommandButton) {
-    copyMockProviderCommand(copyMockCommandButton.dataset.copyMockCommand);
+    copyIntegrationGuideText(copyMockCommandButton.dataset.copyMockCommand);
+    return;
+  }
+
+  const copyIntegrationGuideButton = event.target.closest("[data-copy-integration-guide]");
+  if (copyIntegrationGuideButton) {
+    event.preventDefault();
+    copyIntegrationGuideText(copyIntegrationGuideButton.dataset.copyIntegrationGuide);
     return;
   }
 
@@ -2319,17 +2333,38 @@ async function refreshDiagnostics() {
   }
 }
 
-async function copyMockProviderCommand(commandKey) {
-  const command = mockProviderCommandText(commandKey);
-  if (!command) {
-    showToast("没有可复制的命令");
+async function runIntegrationProbe() {
+  if (state.integrationProbeLoading) {
+    return;
+  }
+  state.integrationProbeLoading = true;
+  render();
+  try {
+    state.integrationProbe = await api("/diagnostics/integrations/probe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: true }),
+    });
+    state.toast = "真实连通性探测已完成";
+  } catch (error) {
+    state.toast = error.message || "真实连通性探测失败";
+  } finally {
+    state.integrationProbeLoading = false;
+    render();
+  }
+}
+
+async function copyIntegrationGuideText(commandKey) {
+  const text = integrationGuideText(commandKey);
+  if (!text) {
+    showToast("没有可复制的内容");
     return;
   }
   try {
-    await copyText(command);
-    showToast("已复制 mock 测试命令");
+    await copyText(text);
+    showToast("已复制接入说明");
   } catch (error) {
-    showToast(error.message || "复制失败，请手动选择命令");
+    showToast(error.message || "复制失败，请手动选择内容");
   }
 }
 
@@ -2353,7 +2388,7 @@ async function copyText(text) {
   }
 }
 
-function mockProviderCommandText(commandKey) {
+function integrationGuideText(commandKey) {
   return {
     start: [
       "cd backend",
@@ -2373,7 +2408,80 @@ function mockProviderCommandText(commandKey) {
       "  \"save_original_attachments_by_default\": true",
       "}",
     ].join("\n"),
+    realEnv: [
+      "$env:LIFESNAP_OCR_ENDPOINT = \"https://your-ocr-service.example.com/recognize\"",
+      "$env:LIFESNAP_OCR_API_KEY = \"optional-secret\"",
+      "$env:LIFESNAP_OCR_PROVIDER = \"external_http\"",
+      "$env:LIFESNAP_OCR_TIMEOUT_SECONDS = \"15\"",
+      "$env:LIFESNAP_AI_PARSE_ENDPOINT = \"https://your-ai-service.example.com/parse\"",
+      "$env:LIFESNAP_AI_PARSE_API_KEY = \"optional-secret\"",
+      "$env:LIFESNAP_AI_PARSE_PROVIDER = \"external_http\"",
+      "$env:LIFESNAP_AI_PARSE_TIMEOUT_SECONDS = \"20\"",
+      "uvicorn app.main:app --reload",
+    ].join("\n"),
+    aiContract: [
+      "POST /parse",
+      "request:",
+      "{",
+      "  \"schema_version\": \"lifesnap.ai.parse.v1\",",
+      "  \"kind\": \"bill | task | chat_intent\",",
+      "  \"text\": \"用户输入或 OCR 文本\",",
+      "  \"source\": \"ai_chat | screenshot | album | upload\",",
+      "  \"locale\": \"zh-CN\",",
+      "  \"current_datetime\": \"2026-09-01T10:00:00+08:00\"",
+      "}",
+      "",
+      "bill response:",
+      "{",
+      "  \"confidence\": 0.9,",
+      "  \"data\": {",
+      "    \"amount\": \"18.50\",",
+      "    \"currency\": \"CNY\",",
+      "    \"merchant\": \"瑞幸咖啡\",",
+      "    \"category\": \"餐饮\",",
+      "    \"payment_method\": \"微信支付\",",
+      "    \"transaction_type\": \"expense\"",
+      "  },",
+      "  \"warnings\": []",
+      "}",
+      "",
+      "chat_intent response:",
+      "{",
+      "  \"intent\": \"create_bill | create_task | unsupported\",",
+      "  \"confidence\": 0.88,",
+      "  \"reply\": \"我先整理成一个待确认事项。\",",
+      "  \"warnings\": []",
+      "}",
+    ].join("\n"),
+    ocrContract: [
+      "POST /recognize",
+      "request:",
+      "{",
+      "  \"attachment_id\": \"00000000-0000-0000-0000-000000000000\",",
+      "  \"filename\": \"payment.png\",",
+      "  \"content_type\": \"image/png\",",
+      "  \"content_base64\": \"...\"",
+      "}",
+      "",
+      "response:",
+      "{",
+      "  \"text\": \"瑞幸咖啡\\n微信支付\\n实付 18.50 元\",",
+      "  \"confidence\": 0.93,",
+      "  \"provider\": \"your_ocr_provider\",",
+      "  \"warnings\": []",
+      "}",
+    ].join("\n"),
+    probe: [
+      "Invoke-RestMethod -Method Post \\",
+      "  -Uri http://127.0.0.1:8010/diagnostics/integrations/probe \\",
+      "  -ContentType \"application/json\" \\",
+      "  -Body '{\"confirm\": true}'",
+    ].join("\n"),
   }[commandKey] ?? "";
+}
+
+function mockProviderCommandText(commandKey) {
+  return integrationGuideText(commandKey);
 }
 
 async function openAuditLog() {
@@ -6288,6 +6396,7 @@ function renderDiagnosticsModal() {
           ${state.diagnosticsLoading && !diagnostics && !integrationDiagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
           ${integrationDiagnostics ? renderIntegrationDiagnostics(integrationDiagnostics) : ""}
           ${renderMockProviderGuide()}
+          ${renderExternalProviderGuide()}
           ${diagnostics ? `
             <section class="diagnostics-section">
               <div class="diagnostics-section-head">
@@ -6311,6 +6420,46 @@ function renderDiagnosticsModal() {
         </div>
       </section>
     </div>
+  `;
+}
+
+function renderExternalProviderGuide() {
+  const items = [
+    ["realEnv", "外部服务环境变量", "替换 endpoint 和 key 后重启 FastAPI。"],
+    ["aiContract", "AI /parse 契约", "账单、待办和聊天意图共用同一个解析入口。"],
+    ["ocrContract", "OCR /recognize 契约", "图片文件会以 base64 传给外部 OCR 服务。"],
+    ["probe", "真实探测命令", "配置完成后可直接验证四段链路。"],
+  ];
+  return `
+    <section class="diagnostics-section external-provider-guide">
+      <div class="diagnostics-section-head">
+        <div>
+          <h3>真实供应商接入</h3>
+          <span>用于接入自建服务或第三方 OCR/AI 网关</span>
+        </div>
+      </div>
+      <div class="external-guide-list">
+        ${items.map(([key, title, note]) => renderExternalGuideItem(key, title, note)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderExternalGuideItem(key, title, note) {
+  const text = integrationGuideText(key);
+  return `
+    <details class="external-guide-item">
+      <summary>
+        <span>
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(note)}</small>
+        </span>
+        <button class="button ghost compact-button" type="button" data-copy-integration-guide="${escapeHtml(key)}">
+          ${icon("copy")}复制
+        </button>
+      </summary>
+      <pre><code>${escapeHtml(text)}</code></pre>
+    </details>
   `;
 }
 
@@ -6354,11 +6503,18 @@ function renderMockCommand(key, title, note) {
 
 function renderIntegrationDiagnostics(integrations) {
   const checks = integrations.checks ?? [];
+  const probe = state.integrationProbe;
   return `
     <section class="diagnostics-section">
       <div class="diagnostics-section-head">
-        <h3>AI/OCR 接入状态</h3>
-        <span>${escapeHtml(formatDate(integrations.generated_at))}</span>
+        <div>
+          <h3>AI/OCR 接入状态</h3>
+          <span>${escapeHtml(formatDate(integrations.generated_at))}</span>
+        </div>
+        <button class="button ghost compact-button" type="button" data-run-integration-probe
+          ${state.integrationProbeLoading ? "disabled" : ""}>
+          ${icon("refresh")}${state.integrationProbeLoading ? "探测中..." : "真实探测"}
+        </button>
       </div>
       <div class="diagnostics-summary integration-summary">
         ${diagnosticMetric("状态", integrationStatusLabel(integrations.status), integrations.status)}
@@ -6371,7 +6527,54 @@ function renderIntegrationDiagnostics(integrations) {
           ${checks.map(renderIntegrationCheck).join("")}
         </div>
       ` : `<p class="diagnostics-empty">暂无集成检查结果。</p>`}
+      ${probe ? renderIntegrationProbeResults(probe) : `
+        <p class="diagnostics-note">真实探测会调用已配置的外部 OCR/AI 服务，并返回最近一次连通性结果；未配置或隐私阻断时会跳过。</p>
+      `}
     </section>
+  `;
+}
+
+function renderIntegrationProbeResults(probe) {
+  const results = probe.results ?? [];
+  return `
+    <div class="integration-probe">
+      <div class="integration-probe-head">
+        <strong>真实探测结果</strong>
+        <span>${escapeHtml(formatDate(probe.generated_at))}</span>
+      </div>
+      <div class="diagnostics-summary integration-summary probe-summary">
+        ${diagnosticMetric("状态", integrationProbeStatusLabel(probe.status), probe.status)}
+        ${diagnosticMetric("成功", probe.success_count ?? 0, "success")}
+        ${diagnosticMetric("失败", probe.failed_count ?? 0, "failed")}
+        ${diagnosticMetric("跳过", probe.skipped_count ?? 0, "skipped")}
+      </div>
+      ${results.length ? `
+        <div class="integration-probe-list">
+          ${results.map(renderIntegrationProbeResult).join("")}
+        </div>
+      ` : `<p class="diagnostics-empty">暂无真实探测结果。</p>`}
+    </div>
+  `;
+}
+
+function renderIntegrationProbeResult(result) {
+  const status = result.status || "skipped";
+  return `
+    <article class="integration-probe-result ${escapeHtml(status)}">
+      <span>${icon(integrationIcon(result.name))}</span>
+      <div class="integration-check-main">
+        <div class="integration-check-title">
+          <strong>${escapeHtml(integrationNameLabel(result.name))}</strong>
+          <small>${escapeHtml(result.provider || "unknown")}</small>
+        </div>
+        <p>${escapeHtml(integrationProbeDetailText(result))}</p>
+        <small>${escapeHtml(integrationProbeMetaText(result))}</small>
+      </div>
+      <div class="integration-check-status">
+        <strong>${escapeHtml(integrationProbeResultLabel(status))}</strong>
+        <span>${escapeHtml(result.error || (result.attempted ? "已请求" : "未请求"))}</span>
+      </div>
+    </article>
   `;
 }
 
@@ -6401,6 +6604,8 @@ function integrationIcon(name) {
   return {
     ocr: "camera",
     ai_parser: "spark",
+    ai_bill_parser: "receipt",
+    ai_task_parser: "check",
     chat_intent: "send",
   }[name] ?? "settings";
 }
@@ -6409,6 +6614,8 @@ function integrationNameLabel(name) {
   return {
     ocr: "OCR 文字识别",
     ai_parser: "AI 账单/待办解析",
+    ai_bill_parser: "AI 账单解析",
+    ai_task_parser: "AI 待办解析",
     chat_intent: "聊天意图识别",
   }[name] ?? name ?? "集成服务";
 }
@@ -6426,6 +6633,22 @@ function integrationCheckStatusLabel(status) {
     ready: "可用",
     blocked: "阻断",
     fallback: "回落",
+  }[status] ?? "未知";
+}
+
+function integrationProbeStatusLabel(status) {
+  return {
+    success: "探测通过",
+    failed: "探测失败",
+    skipped: "已跳过",
+  }[status] ?? "未知";
+}
+
+function integrationProbeResultLabel(status) {
+  return {
+    success: "通过",
+    failed: "失败",
+    skipped: "跳过",
   }[status] ?? "未知";
 }
 
@@ -6464,6 +6687,41 @@ function integrationNextAction(check) {
   }[check.name] ?? "补充配置";
 }
 
+function integrationProbeDetailText(result) {
+  const warnings = [
+    ...(result.privacy_blockers ?? []),
+    ...(result.warnings ?? []),
+  ].map(integrationCodeLabel).filter(Boolean);
+  if (warnings.length) {
+    return warnings.join("；");
+  }
+  const preview = result.response_preview ?? {};
+  if (result.name === "ocr" && preview.text_sample) {
+    return `识别样例：${preview.text_sample}`;
+  }
+  if (result.name === "ai_bill_parser") {
+    return [preview.merchant, preview.amount ? `¥${preview.amount}` : "", preview.category]
+      .filter(Boolean)
+      .join(" · ") || "账单解析链路正常";
+  }
+  if (result.name === "ai_task_parser") {
+    return [preview.title, preview.category, preview.task_type]
+      .filter(Boolean)
+      .join(" · ") || "待办解析链路正常";
+  }
+  if (result.name === "chat_intent") {
+    return preview.intent ? `识别意图：${preview.intent}` : "聊天意图链路正常";
+  }
+  return result.success ? "连通性正常" : "等待探测结果";
+}
+
+function integrationProbeMetaText(result) {
+  const latency = result.latency_ms == null ? null : `${result.latency_ms}ms`;
+  const configured = result.configured ? "已配置" : "未配置";
+  const attempted = result.attempted ? "已调用" : "未调用";
+  return [configured, attempted, latency].filter(Boolean).join(" · ");
+}
+
 function integrationCodeLabel(code) {
   return {
     local_only_mode_enabled: "本地模式开启，外部服务不会被调用",
@@ -6472,6 +6730,13 @@ function integrationCodeLabel(code) {
     original_attachment_required_for_external_ocr: "外部 OCR 需要保留原始附件文件",
     rule_based_parser_fallback: "未配置外部 AI 解析，账单/待办使用规则解析",
     keyword_router_fallback: "未配置外部聊天路由，助手使用关键词判断意图",
+    external_processing_blocked: "隐私设置阻止外部处理",
+    external_ocr_failed: "外部 OCR 请求失败",
+    external_ocr_invalid_response: "外部 OCR 响应格式异常",
+    external_ocr_empty_text: "外部 OCR 未返回文字",
+    external_ai_parser_failed: "外部 AI 解析请求失败",
+    external_ai_parser_invalid_response: "外部 AI 解析响应格式异常",
+    external_chat_intent_invalid_response: "外部聊天意图响应格式异常",
   }[code] ?? code;
 }
 
