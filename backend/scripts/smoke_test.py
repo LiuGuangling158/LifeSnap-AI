@@ -123,6 +123,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_task_statistics_overview(client)
     _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
+    _check_chat_diary_reflection(client)
     _check_bill_idempotency(client)
     _check_soft_delete_and_restore(client)
     _check_bill_candidate_duplicate_detection(client)
@@ -712,6 +713,28 @@ def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     _assert(
         all(candidate["candidate_id"] != candidate_id for candidate in task_candidates["items"]),
         "Confirmed task candidate should leave the pending candidate list",
+    )
+
+
+def _check_chat_diary_reflection(client: ApiClient) -> None:
+    message = "\u65e5\u8bb0\u8ffd\u95ee\uff1a\u4eca\u5929\u6700\u5f00\u5fc3\u7684\u4e8b\u662f\u4ec0\u4e48\uff1f"
+    status, body = client.request("POST", "/chat/messages", {"message": message})
+    _assert(status == 200, "POST /chat/messages should support diary reflection")
+    _assert(
+        body["intent"] == "diary_reflection",
+        "Chat should recognize diary reflection prompts",
+    )
+    _assert(
+        body["action_type"] == "none",
+        "Diary reflection should not create a candidate action",
+    )
+    _assert(
+        body["need_user_confirmation"] is False,
+        "Diary reflection should not require candidate confirmation",
+    )
+    _assert(
+        "\u5f00\u5fc3" in body["reply"],
+        "Diary reflection reply should guide the selected prompt",
     )
 
 

@@ -11,6 +11,7 @@ from app.schemas.task import TaskRead
 class ChatIntent(str, Enum):
     create_bill = "create_bill"
     create_task = "create_task"
+    diary_reflection = "diary_reflection"
     unsupported = "unsupported"
 
 

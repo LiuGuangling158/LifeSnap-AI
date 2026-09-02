@@ -64,6 +64,14 @@ const defaultTagSettings = {
   tags: ["开心", "轻松", "成长", "工作", "学习", "健康", "朋友", "家庭", "旅行"],
 };
 
+const profileStorageKey = "lifesnap_profile_settings";
+
+const defaultProfileSettings = {
+  displayName: "今天也要加油呀",
+  signature: "记录生活，遇见更好的自己",
+  avatarTone: "warm",
+};
+
 const state = {
   route: getRoute(),
   loading: true,
@@ -90,6 +98,7 @@ const state = {
   snoozeTarget: null,
   settingsConfirm: null,
   dataImportPreview: null,
+  profileModalOpen: false,
   privacySettingsOpen: false,
   categorySettingsOpen: false,
   budgetSettingsOpen: false,
@@ -170,6 +179,7 @@ const state = {
   tagSettings: null,
   bills: [],
   tasks: [],
+  profile: loadProfileSettings(),
 };
 
 const app = document.querySelector("#app");
@@ -315,8 +325,9 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-diary-ai-prompt]")) {
-    showToast("AI 日记追问会在后续接入对话生成。");
+  const diaryAiPromptButton = event.target.closest("[data-diary-ai-prompt]");
+  if (diaryAiPromptButton) {
+    openDiaryAssistantPrompt(diaryAiPromptButton.dataset.diaryAiPrompt || "");
     return;
   }
 
@@ -351,7 +362,8 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-profile-placeholder]")) {
-    showToast("该个人工具会在后续接入详细配置页。");
+    state.profileModalOpen = true;
+    render();
     return;
   }
 
@@ -523,6 +535,7 @@ document.addEventListener("click", (event) => {
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     state.dataImportPreview = null;
+    state.profileModalOpen = false;
     state.privacySettingsOpen = false;
     state.categorySettingsOpen = false;
     state.budgetSettingsOpen = false;
@@ -680,6 +693,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-close-profile-settings]")) {
+    state.profileModalOpen = false;
+    render();
+    return;
+  }
+
   if (event.target.closest("[data-open-diagnostics]")) {
     openDiagnostics();
     return;
@@ -782,6 +801,7 @@ document.addEventListener("keydown", (event) => {
       || state.snoozeTarget
       || state.settingsConfirm
       || state.dataImportPreview
+      || state.profileModalOpen
       || state.privacySettingsOpen
       || state.categorySettingsOpen
       || state.budgetSettingsOpen
@@ -809,6 +829,7 @@ document.addEventListener("keydown", (event) => {
     state.snoozeTarget = null;
     state.settingsConfirm = null;
     state.dataImportPreview = null;
+    state.profileModalOpen = false;
     state.privacySettingsOpen = false;
     state.categorySettingsOpen = false;
     state.budgetSettingsOpen = false;
@@ -888,6 +909,12 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-chat-form]")) {
     event.preventDefault();
     await submitChatMessage(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-profile-form]")) {
+    event.preventDefault();
+    submitProfileSettings(new FormData(event.target));
     return;
   }
 
@@ -2501,6 +2528,18 @@ async function submitTagSettings(formData) {
   }
 }
 
+function submitProfileSettings(formData) {
+  const profile = normalizeProfileSettings({
+    displayName: formData.get("display_name"),
+    signature: formData.get("signature"),
+    avatarTone: formData.get("avatar_tone"),
+  });
+  state.profile = profile;
+  state.profileModalOpen = false;
+  const persisted = saveProfileSettings(profile);
+  showToast(persisted ? "个人资料已保存" : "个人资料已更新，本地保存受限");
+}
+
 async function openDiagnostics() {
   if (state.saving) {
     return;
@@ -3068,6 +3107,43 @@ function monthRange(monthKey) {
   return { start, end };
 }
 
+function loadProfileSettings() {
+  try {
+    const stored = window.localStorage?.getItem(profileStorageKey);
+    return normalizeProfileSettings(stored ? JSON.parse(stored) : {});
+  } catch (error) {
+    return { ...defaultProfileSettings };
+  }
+}
+
+function saveProfileSettings(profile) {
+  try {
+    window.localStorage?.setItem(profileStorageKey, JSON.stringify(profile));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function normalizeProfileSettings(value) {
+  const input = value && typeof value === "object" ? value : {};
+  const displayName = String(input.displayName ?? input.display_name ?? "")
+    .trim()
+    .slice(0, 18);
+  const signature = String(input.signature ?? "")
+    .trim()
+    .slice(0, 36);
+  const avatarTone = ["warm", "mint", "blue", "rose"].includes(input.avatarTone ?? input.avatar_tone)
+    ? String(input.avatarTone ?? input.avatar_tone)
+    : defaultProfileSettings.avatarTone;
+
+  return {
+    displayName: displayName || defaultProfileSettings.displayName,
+    signature: signature || defaultProfileSettings.signature,
+    avatarTone,
+  };
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   const text = await response.text();
@@ -3127,6 +3203,7 @@ function render() {
       ${state.snoozeTarget ? renderSnoozeModal() : ""}
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.dataImportPreview ? renderDataImportModal() : ""}
+      ${state.profileModalOpen ? renderProfileSettingsModal() : ""}
       ${state.privacySettingsOpen ? renderPrivacySettingsModal() : ""}
       ${state.categorySettingsOpen ? renderCategorySettingsModal() : ""}
       ${state.budgetSettingsOpen ? renderBudgetSettingsModal() : ""}
@@ -4337,6 +4414,26 @@ function getDiarySnapshot() {
   };
 }
 
+function openDiaryAssistantPrompt(promptText) {
+  const diary = getDiarySnapshot();
+  const existingContent = diary.hasEntry
+    ? diary.body.slice(0, 800)
+    : "今天还没有保存正文。";
+  const tags = diary.tags?.length ? diary.tags.join("、") : "暂无";
+  const prompt = promptText || "帮我补全今天的日记。";
+  const draft = [
+    `日记追问：${prompt}`,
+    `日期：${diary.dateLabel}`,
+    `当前心情：${diary.moodLabel}`,
+    `天气：${diary.weather}`,
+    `标签：${tags}`,
+    `已有内容：${existingContent}`,
+    "请先围绕这个问题追问我一个更具体的小问题，帮助我把今天的日记写得更完整。",
+  ].join("\n");
+
+  openAssistantPage(draft);
+}
+
 function renderDiaryPeriodTabs() {
   const tabs = [
     ["today", "今天"],
@@ -4598,7 +4695,7 @@ function renderDiaryAiAssistant() {
           ${prompts
             .map(
               ([iconName, text]) => `
-                <button class="ai-diary-prompt" type="button" data-diary-ai-prompt>
+                <button class="ai-diary-prompt" type="button" data-diary-ai-prompt="${escapeHtml(text)}">
                   ${icon(iconName)}
                   <span>${escapeHtml(text)}</span>
                   ${icon("chevron-right")}
@@ -4804,6 +4901,7 @@ function renderProfilePage() {
   const overview = state.billOverview ?? {};
   const monthly = overview.monthly_statistics ?? state.bootstrap?.dashboard?.monthly_statistics ?? {};
   const summary = state.bootstrap?.data_summary ?? {};
+  const profile = normalizeProfileSettings(state.profile);
   const expense = Number(monthly.total_expense ?? 0);
   const income = Number(monthly.total_income ?? 0);
   const netAmount = Number(monthly.net_amount ?? income - expense);
@@ -4829,12 +4927,12 @@ function renderProfilePage() {
           </div>
         </div>
         <div class="profile-greeting">
-          <span class="profile-avatar" aria-hidden="true">
+          <span class="profile-avatar tone-${escapeHtml(profile.avatarTone)}" aria-hidden="true">
             <span class="avatar-face"></span>
           </span>
           <div class="profile-greeting-copy">
-            <h2>Hi，今天也要加油呀</h2>
-            <p>记录生活，遇见更好的自己</p>
+            <h2>Hi，${escapeHtml(profile.displayName)}</h2>
+            <p>${escapeHtml(profile.signature)}</p>
           </div>
           <button class="profile-link-button" type="button" data-profile-placeholder aria-label="查看个人资料">
             ${icon("chevron-right")}
@@ -4856,6 +4954,70 @@ function renderProfilePage() {
       ${renderProfileTools()}
       ${renderProfileDataPanel(summary, completedTasks, diaryCount)}
       ${renderProfileSafetyPanel()}
+    </div>
+  `;
+}
+
+function renderProfileSettingsModal() {
+  const profile = normalizeProfileSettings(state.profile);
+  const avatarOptions = [
+    ["warm", "暖阳"],
+    ["mint", "薄荷"],
+    ["blue", "天空"],
+    ["rose", "粉桃"],
+  ];
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal profile-settings-modal" role="dialog" aria-modal="true" aria-labelledby="profile-settings-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="profile-settings-title">个人资料</h2>
+            <p class="section-note">用于个人页问候展示，暂存在当前浏览器。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-profile-settings aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form profile-settings-form" data-profile-form>
+          <div class="profile-settings-preview">
+            <span class="profile-avatar tone-${escapeHtml(profile.avatarTone)}" aria-hidden="true">
+              <span class="avatar-face"></span>
+            </span>
+            <div>
+              <strong>Hi，${escapeHtml(profile.displayName)}</strong>
+              <span>${escapeHtml(profile.signature)}</span>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="field full">
+              <label for="profile_display_name">问候昵称</label>
+              <input id="profile_display_name" name="display_name" maxlength="18" required
+                value="${escapeHtml(profile.displayName)}" placeholder="今天也要加油呀" />
+            </div>
+            <div class="field full">
+              <label for="profile_signature">生活签名</label>
+              <input id="profile_signature" name="signature" maxlength="36" required
+                value="${escapeHtml(profile.signature)}" placeholder="记录生活，遇见更好的自己" />
+            </div>
+            <div class="field full">
+              <label for="profile_avatar_tone">头像色调</label>
+              <select id="profile_avatar_tone" name="avatar_tone">
+                ${avatarOptions
+                  .map(([value, label]) => `
+                    <option value="${escapeHtml(value)}" ${profile.avatarTone === value ? "selected" : ""}>
+                      ${escapeHtml(label)}
+                    </option>
+                  `)
+                  .join("")}
+              </select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-profile-settings>取消</button>
+            <button class="button primary" type="submit">${icon("save")}保存资料</button>
+          </div>
+        </form>
+      </section>
     </div>
   `;
 }

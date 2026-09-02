@@ -98,6 +98,13 @@ def recognize_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def route_chat(text: str) -> dict[str, Any]:
+    if looks_like_diary(text):
+        return {
+            "intent": "diary_reflection",
+            "confidence": 0.82,
+            "reply": "我可以陪你把今天整理成日记。先说一个最想留下的小片段，我会继续帮你追问细节。",
+            "warnings": [],
+        }
     if looks_like_task(text):
         return {
             "intent": "create_task",
@@ -118,6 +125,14 @@ def route_chat(text: str) -> dict[str, Any]:
         "reply": "这条消息暂时不能直接转换成账单或提醒。",
         "warnings": ["mock_intent_low_confidence"],
     }
+
+
+def looks_like_diary(text: str) -> bool:
+    lowered = text.casefold()
+    return any(
+        keyword in lowered
+        for keyword in ("日记", "心情", "开心", "感谢", "学到", "记录今天", "今天发生")
+    )
 
 
 def parse_bill(text: str) -> dict[str, Any]:

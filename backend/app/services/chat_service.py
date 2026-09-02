@@ -46,6 +46,17 @@ class RuleBasedChatService:
         "点",
         "todo",
     )
+    _diary_keywords = (
+        "日记",
+        "心情",
+        "开心",
+        "感谢",
+        "学到",
+        "感受",
+        "复盘",
+        "今天发生",
+        "记录今天",
+    )
     _unsupported_reasons = {
         "订阅": "订阅管理还不在 MVP 范围内，可以先把这笔扣费记成普通账单。",
         "会员": "会员和周期扣费管理暂时不自动创建，可以先保存为普通账单或备注。",
@@ -86,6 +97,9 @@ class RuleBasedChatService:
                 warnings=["unsupported_mvp_intent"] + fallback_warnings,
             )
 
+        if self._looks_like_diary(text):
+            return self._diary_reflection_response(text, fallback_warnings=fallback_warnings)
+
         force_rule_based = self._should_force_rule_based_parser(fallback_warnings)
         if self._looks_like_task(text):
             return self._task_candidate_response(
@@ -124,6 +138,19 @@ class RuleBasedChatService:
                 text,
                 reply=route.reply,
                 route_confidence=route.confidence,
+                fallback_warnings=route.warnings,
+            )
+        if route.intent == ChatIntent.diary_reflection:
+            return self._diary_reflection_response(
+                text,
+                reply=route.reply,
+                route_confidence=route.confidence,
+                fallback_warnings=route.warnings,
+            )
+        if route.intent == ChatIntent.unsupported and self._looks_like_diary(text):
+            return self._diary_reflection_response(
+                text,
+                route_confidence=min(route.confidence, 0.7),
                 fallback_warnings=route.warnings,
             )
 
@@ -181,6 +208,24 @@ class RuleBasedChatService:
             need_user_confirmation=True,
         )
 
+    def _diary_reflection_response(
+        self,
+        text: str,
+        reply: str | None = None,
+        route_confidence: float | None = None,
+        fallback_warnings: list[str] | None = None,
+    ) -> ChatMessageResponse:
+        return ChatMessageResponse(
+            message_id=uuid4(),
+            reply=reply or self._diary_reflection_reply(text),
+            intent=ChatIntent.diary_reflection,
+            confidence=route_confidence or 0.72,
+            action_type=ChatActionType.none,
+            candidate=None,
+            warnings=self._dedupe(fallback_warnings or []),
+            need_user_confirmation=False,
+        )
+
     def _unsupported_response(
         self,
         reply: str,
@@ -229,6 +274,21 @@ class RuleBasedChatService:
 
     def _looks_like_task(self, text: str) -> bool:
         return any(keyword.casefold() in text.casefold() for keyword in self._task_keywords)
+
+    def _looks_like_diary(self, text: str) -> bool:
+        folded = text.casefold()
+        return any(keyword.casefold() in folded for keyword in self._diary_keywords)
+
+    def _diary_reflection_reply(self, text: str) -> str:
+        if "感谢" in text:
+            return "可以从一个具体的人开始写：今天谁让你觉得被帮助或被理解了？那一刻发生了什么？"
+        if "开心" in text:
+            return "先抓住今天最开心的一幕吧：它发生在什么时候，你当时为什么会觉得轻松或满足？"
+        if "学到" in text or "新东西" in text:
+            return "今天学到的新东西可以写成三句：我遇到了什么、我明白了什么、明天我想怎么用它。"
+        if "心情" in text or "感受" in text:
+            return "我可以陪你把今天的心情理清楚。先告诉我，今天让你情绪变化最大的一件事是什么？"
+        return "我可以陪你补全今天的日记。先说一个最想留下的小片段，我会继续帮你追问细节。"
 
     def _unsupported_reply(self, text: str) -> str | None:
         for keyword, reply in self._unsupported_reasons.items():
