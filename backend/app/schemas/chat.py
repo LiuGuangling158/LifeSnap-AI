@@ -21,6 +21,18 @@ class ChatActionType(str, Enum):
     none = "none"
 
 
+class ChatAgentStepStatus(str, Enum):
+    completed = "completed"
+    needs_confirmation = "needs_confirmation"
+    blocked = "blocked"
+
+
+class ChatAgentStep(BaseModel):
+    title: str = Field(min_length=1, max_length=40)
+    detail: str = Field(min_length=1, max_length=160)
+    status: ChatAgentStepStatus = ChatAgentStepStatus.completed
+
+
 class ChatMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
 
@@ -34,6 +46,7 @@ class ChatMessageResponse(BaseModel):
     candidate_id: UUID | None = None
     candidate: ParseBillResponse | ParseTaskResponse | None = None
     warnings: list[str] = []
+    agent_steps: list[ChatAgentStep] = Field(default_factory=list)
     need_user_confirmation: bool = True
 
 

@@ -5803,6 +5803,76 @@ button:focus-visible {
   background: #e8f4ec;
 }
 
+.chat-agent-steps {
+  display: grid;
+  gap: 7px;
+  width: min(360px, 100%);
+  margin-top: 8px;
+}
+
+.chat-agent-step {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid #dbe7df;
+  border-radius: var(--radius);
+  background: #fbfefb;
+  padding: 8px;
+  transition:
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.chat-agent-step:hover {
+  border-color: #b8d6c4;
+  transform: translateY(-1px);
+}
+
+.chat-agent-step > span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: var(--radius);
+  background: #eaf7f0;
+  color: #10a37f;
+}
+
+.chat-agent-step.needs_confirmation > span {
+  background: #fff8e8;
+  color: #b7791f;
+}
+
+.chat-agent-step.blocked > span {
+  background: #fff0f0;
+  color: #c24141;
+}
+
+.chat-agent-step .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.chat-agent-step strong,
+.chat-agent-step small {
+  display: block;
+  min-width: 0;
+}
+
+.chat-agent-step strong {
+  color: #223129;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.chat-agent-step small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .chat-candidate {
   margin-top: 9px;
   border: 1px solid #d9e5dd;

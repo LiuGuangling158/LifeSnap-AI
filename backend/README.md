@@ -547,10 +547,11 @@ Content-Type: application/json
 }
 ```
 
-The endpoint returns one of three outcomes:
+The endpoint returns one of four outcomes:
 
 - a bill candidate
 - a task or reminder candidate
+- a diary reflection prompt
 - an MVP fallback message for unsupported intents
 
 When `LIFESNAP_AI_PARSE_ENDPOINT` is configured and privacy settings allow
@@ -578,6 +579,9 @@ Chat responses do not create formal bills or tasks directly. If the response
 contains `candidate_id`, the user still needs to confirm it through the related
 candidate confirmation endpoint, or through the unified chat action endpoint.
 The user can also discard an unwanted candidate from the same chat flow.
+Responses also include `agent_steps`, a lightweight audit trail that explains
+what the assistant understood, prepared, and whether it is waiting for user
+confirmation.
 
 Confirm the candidate returned by `POST /chat/messages`:
 

@@ -5,6 +5,8 @@ from app.schemas.agent import ParseBillRequest, ParseTaskRequest
 from app.schemas.bill import BillSource
 from app.schemas.chat import (
     ChatActionType,
+    ChatAgentStep,
+    ChatAgentStepStatus,
     ChatIntent,
     ChatMessageRequest,
     ChatMessageResponse,
@@ -82,6 +84,13 @@ class RuleBasedChatService:
                 action_type=ChatActionType.none,
                 candidate=None,
                 warnings=["ai_text_processing_disabled"],
+                agent_steps=[
+                    self._agent_step(
+                        "隐私检查",
+                        "当前设置不允许 AI 文本处理，已停止解析。",
+                        ChatAgentStepStatus.blocked,
+                    )
+                ],
                 need_user_confirmation=False,
             )
 
@@ -181,6 +190,15 @@ class RuleBasedChatService:
             candidate_id=candidate.candidate_id,
             candidate=candidate,
             warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
+            agent_steps=[
+                self._agent_step("理解意图", "识别为提醒或待办请求。"),
+                self._agent_step("整理候选", "已提取标题、时间、分类和优先级。"),
+                self._agent_step(
+                    "等待确认",
+                    "保存前需要你确认候选提醒。",
+                    ChatAgentStepStatus.needs_confirmation,
+                ),
+            ],
             need_user_confirmation=True,
         )
 
@@ -205,6 +223,15 @@ class RuleBasedChatService:
             candidate_id=candidate.candidate_id,
             candidate=candidate,
             warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
+            agent_steps=[
+                self._agent_step("理解意图", "识别为记账请求。"),
+                self._agent_step("整理候选", "已提取金额、商户、分类和时间。"),
+                self._agent_step(
+                    "等待确认",
+                    "保存前需要你确认候选账单。",
+                    ChatAgentStepStatus.needs_confirmation,
+                ),
+            ],
             need_user_confirmation=True,
         )
 
@@ -223,6 +250,10 @@ class RuleBasedChatService:
             action_type=ChatActionType.none,
             candidate=None,
             warnings=self._dedupe(fallback_warnings or []),
+            agent_steps=[
+                self._agent_step("理解意图", "识别为日记追问或心情整理。"),
+                self._agent_step("生成引导", "已准备一个更具体的问题帮助补全日记。"),
+            ],
             need_user_confirmation=False,
         )
 
@@ -240,6 +271,14 @@ class RuleBasedChatService:
             action_type=ChatActionType.none,
             candidate=None,
             warnings=self._dedupe(warnings),
+            agent_steps=[
+                self._agent_step("理解意图", "没有匹配到可执行的生活操作。"),
+                self._agent_step(
+                    "停止执行",
+                    "需要更多信息，或该能力暂未进入当前版本。",
+                    ChatAgentStepStatus.blocked,
+                ),
+            ],
             need_user_confirmation=False,
         )
 
@@ -289,6 +328,14 @@ class RuleBasedChatService:
         if "心情" in text or "感受" in text:
             return "我可以陪你把今天的心情理清楚。先告诉我，今天让你情绪变化最大的一件事是什么？"
         return "我可以陪你补全今天的日记。先说一个最想留下的小片段，我会继续帮你追问细节。"
+
+    def _agent_step(
+        self,
+        title: str,
+        detail: str,
+        status: ChatAgentStepStatus = ChatAgentStepStatus.completed,
+    ) -> ChatAgentStep:
+        return ChatAgentStep(title=title, detail=detail, status=status)
 
     def _unsupported_reply(self, text: str) -> str | None:
         for keyword, reply in self._unsupported_reasons.items():

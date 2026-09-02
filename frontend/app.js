@@ -2683,7 +2683,7 @@ function integrationGuideText(commandKey) {
       "",
       "chat_intent response:",
       "{",
-      "  \"intent\": \"create_bill | create_task | unsupported\",",
+      "  \"intent\": \"create_bill | create_task | diary_reflection | unsupported\",",
       "  \"confidence\": 0.88,",
       "  \"reply\": \"我先整理成一个待确认事项。\",",
       "  \"warnings\": []",
@@ -6355,11 +6355,47 @@ function renderChatMessage(message, index) {
       <div>
         <p>${escapeHtml(message.text ?? "")}</p>
         ${renderChatMessageAttachments(message.attachments)}
+        ${renderChatAgentSteps(message.response?.agent_steps)}
         ${renderChatCandidate(message)}
         ${renderChatResult(message)}
       </div>
     </article>
   `;
+}
+
+function renderChatAgentSteps(steps = []) {
+  if (!steps.length) {
+    return "";
+  }
+
+  return `
+    <div class="chat-agent-steps" aria-label="助手执行步骤">
+      ${steps
+        .map((step) => {
+          const status = String(step.status || "completed");
+          return `
+            <div class="chat-agent-step ${escapeHtml(status)}">
+              <span>${icon(chatAgentStepIcon(status))}</span>
+              <div>
+                <strong>${escapeHtml(step.title || "执行步骤")}</strong>
+                <small>${escapeHtml(step.detail || "")}</small>
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function chatAgentStepIcon(status) {
+  if (status === "needs_confirmation") {
+    return "clock";
+  }
+  if (status === "blocked") {
+    return "alert-circle";
+  }
+  return "check-circle";
 }
 
 function renderChatMessageAttachments(attachments = []) {
@@ -7929,6 +7965,7 @@ function icon(name) {
     mic: '<path d="M12 4a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V7a3 3 0 0 0-3-3z"></path><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path>',
     trash: '<path d="M4 7h16"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M6 7l1 14h10l1-14"></path><path d="M9 7V4h6v3"></path>',
     "check-circle": '<circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path>',
+    "alert-circle": '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v6"></path><path d="M12 17h.01"></path>',
     clock: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>',
     bell: '<path d="M6 10a6 6 0 0 1 12 0c0 4 2 5 2 7H4c0-2 2-3 2-7z"></path><path d="M10 21h4"></path>',
     book: '<path d="M5 4h8a3 3 0 0 1 3 3v13H8a3 3 0 0 0-3 3V4z"></path><path d="M16 7h3v13h-3"></path><path d="M8 8h4"></path><path d="M8 12h4"></path>',

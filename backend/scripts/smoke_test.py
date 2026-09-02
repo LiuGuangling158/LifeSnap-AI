@@ -652,6 +652,11 @@ def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     status, body = client.request("POST", "/chat/messages", {"message": message})
     _assert(status == 200, "POST /chat/messages should return 200")
     _assert(body["intent"] == "create_task", "Chat should create a task candidate")
+    _assert(body["agent_steps"], "Chat task response should include agent steps")
+    _assert(
+        body["agent_steps"][-1]["status"] == "needs_confirmation",
+        "Chat task response should ask for confirmation in agent steps",
+    )
 
     candidate_id = body["candidate_id"]
     status, patched = client.request(
@@ -732,6 +737,7 @@ def _check_chat_diary_reflection(client: ApiClient) -> None:
         body["need_user_confirmation"] is False,
         "Diary reflection should not require candidate confirmation",
     )
+    _assert(body["agent_steps"], "Diary reflection should include agent steps")
     _assert(
         "\u5f00\u5fc3" in body["reply"],
         "Diary reflection reply should guide the selected prompt",
@@ -994,6 +1000,10 @@ def _check_privacy_switch(client: ApiClient) -> None:
     _assert(
         body["warnings"] == ["ai_text_processing_disabled"],
         "Disabled AI chat should expose a stable warning",
+    )
+    _assert(
+        body["agent_steps"][0]["status"] == "blocked",
+        "Disabled AI chat should expose a blocked agent step",
     )
 
     status, _ = client.request(
