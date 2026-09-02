@@ -59,6 +59,7 @@ class DataManagementService:
         return DataExportResponse(
             generated_at=datetime.now(timezone.utc),
             privacy_settings=settings_store.get_privacy_settings(),
+            category_settings=settings_store.get_category_settings(),
             bills=bill_store.all(include_deleted=include_deleted),
             tasks=task_store.all(include_deleted=include_deleted),
             diaries=diary_store.all(include_deleted=include_deleted),
@@ -99,6 +100,7 @@ class DataManagementService:
                 include_attachments=payload.include_attachments,
                 include_candidates=payload.include_candidates,
                 import_privacy_settings=payload.import_privacy_settings,
+                import_category_settings=payload.import_category_settings,
                 snapshot=snapshot,
             )
         )
@@ -150,6 +152,7 @@ class DataManagementService:
                 imported_bill_candidate_count=imported_bill_candidate_count,
                 imported_task_candidate_count=imported_task_candidate_count,
                 privacy_settings=settings_store.get_privacy_settings(),
+                category_settings=settings_store.get_category_settings(),
             )
 
         if payload.reset_existing:
@@ -162,6 +165,7 @@ class DataManagementService:
                     include_attachments=payload.include_attachments,
                     include_candidates=payload.include_candidates,
                     reset_privacy_settings=payload.import_privacy_settings,
+                    reset_category_settings=payload.import_category_settings,
                 )
             )
 
@@ -178,6 +182,8 @@ class DataManagementService:
             task_candidate_store.upsert_many(payload.snapshot.task_candidates)
         if payload.import_privacy_settings:
             settings_store.replace_privacy_settings(payload.snapshot.privacy_settings)
+        if payload.import_category_settings:
+            settings_store.replace_category_settings(payload.snapshot.category_settings)
 
         if (
             payload.include_bills
@@ -186,6 +192,7 @@ class DataManagementService:
             or payload.include_attachments
             or payload.include_candidates
             or payload.import_privacy_settings
+            or payload.import_category_settings
         ):
             idempotency_store.clear()
 
@@ -202,6 +209,7 @@ class DataManagementService:
             imported_bill_candidate_count=imported_bill_candidate_count,
             imported_task_candidate_count=imported_task_candidate_count,
             privacy_settings=settings_store.get_privacy_settings(),
+            category_settings=settings_store.get_category_settings(),
         )
 
     def _snapshot_status(self) -> DataSnapshotStatus:
@@ -483,6 +491,7 @@ class DataManagementService:
                     include_attachments=True,
                     include_candidates=True,
                     reset_privacy_settings=False,
+                    reset_category_settings=False,
                 )
             )
             before = self.summary()
@@ -524,6 +533,8 @@ class DataManagementService:
             task_candidate_store.clear()
         if payload.reset_privacy_settings:
             settings_store.reset_privacy_settings()
+        if payload.reset_category_settings:
+            settings_store.reset_category_settings()
         if (
             payload.include_bills
             or payload.include_tasks
@@ -531,6 +542,7 @@ class DataManagementService:
             or payload.include_attachments
             or payload.include_candidates
             or payload.reset_privacy_settings
+            or payload.reset_category_settings
         ):
             idempotency_store.clear()
 
@@ -539,6 +551,7 @@ class DataManagementService:
             before=before,
             after=self.summary(),
             privacy_settings=settings_store.get_privacy_settings(),
+            category_settings=settings_store.get_category_settings(),
         )
 
     def _write_csv(self, fieldnames: list[str], rows: list[dict[str, object]]) -> str:

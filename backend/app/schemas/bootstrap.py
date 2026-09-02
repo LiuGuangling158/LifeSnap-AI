@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.schemas.dashboard import DashboardSummary
-from app.schemas.settings import LocalDataSummary, PrivacySettings
+from app.schemas.settings import CategorySettings, LocalDataSummary, PrivacySettings
 
 
 class AppCapabilities(BaseModel):
@@ -30,5 +30,6 @@ class AppBootstrapResponse(BaseModel):
     generated_at: datetime
     capabilities: AppCapabilities
     privacy_settings: PrivacySettings
+    category_settings: CategorySettings
     data_summary: LocalDataSummary
     dashboard: DashboardSummary

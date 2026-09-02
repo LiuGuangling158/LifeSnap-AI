@@ -5923,6 +5923,50 @@ button:focus-visible {
   opacity: 0.62;
 }
 
+.category-settings-modal {
+  width: min(520px, 100%);
+}
+
+.category-settings-form textarea {
+  min-height: 118px;
+  line-height: 1.65;
+}
+
+.category-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.category-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid #cfe4d8;
+  border-radius: 999px;
+  background: #f1faf5;
+  color: #17614b;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 760;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.category-preview-chip:hover {
+  border-color: #9fcdb6;
+  background: #e6f6ed;
+  transform: translateY(-1px);
+}
+
+.category-preview-chip.muted {
+  border-color: #d8ded9;
+  background: #f4f7f5;
+  color: #718078;
+}
+
 .diagnostics-modal {
   width: min(680px, 100%);
 }

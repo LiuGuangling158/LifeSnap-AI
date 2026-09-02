@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -7,6 +7,33 @@ from app.schemas.attachment import AttachmentRead, RetentionPolicy
 from app.schemas.bill import BillRead
 from app.schemas.diary import DiaryRead
 from app.schemas.task import TaskRead
+
+
+DEFAULT_BILL_CATEGORIES = [
+    "餐饮",
+    "交通",
+    "购物",
+    "日用",
+    "医疗",
+    "娱乐",
+    "学习",
+    "住房",
+    "工资",
+    "其他",
+]
+
+DEFAULT_TASK_CATEGORIES = [
+    "生活",
+    "工作",
+    "学习",
+    "个人",
+    "财务",
+    "健康",
+]
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class PrivacySettings(BaseModel):
@@ -18,11 +45,26 @@ class PrivacySettings(BaseModel):
     updated_at: datetime
 
 
+class CategorySettings(BaseModel):
+    bill_categories: list[str] = Field(
+        default_factory=lambda: DEFAULT_BILL_CATEGORIES.copy()
+    )
+    task_categories: list[str] = Field(
+        default_factory=lambda: DEFAULT_TASK_CATEGORIES.copy()
+    )
+    updated_at: datetime = Field(default_factory=_now_utc)
+
+
 class PrivacySettingsUpdate(BaseModel):
     local_only_mode: bool | None = None
     allow_ai_text_processing: bool | None = None
     save_original_attachments_by_default: bool | None = None
     keep_ocr_text: bool | None = None
+
+
+class CategorySettingsUpdate(BaseModel):
+    bill_categories: list[str] | None = None
+    task_categories: list[str] | None = None
 
 
 class LocalDataSummary(BaseModel):
@@ -40,6 +82,7 @@ class LocalDataSummary(BaseModel):
 class DataExportResponse(BaseModel):
     generated_at: datetime
     privacy_settings: PrivacySettings
+    category_settings: CategorySettings = Field(default_factory=CategorySettings)
     bills: list[BillRead]
     tasks: list[TaskRead]
     diaries: list[DiaryRead] = Field(default_factory=list)
@@ -58,6 +101,7 @@ class DataImportRequest(BaseModel):
     include_attachments: bool = True
     include_candidates: bool = True
     import_privacy_settings: bool = True
+    import_category_settings: bool = True
     snapshot: DataExportResponse
 
 
@@ -74,6 +118,7 @@ class DataImportResponse(BaseModel):
     imported_bill_candidate_count: int
     imported_task_candidate_count: int
     privacy_settings: PrivacySettings
+    category_settings: CategorySettings
 
 
 class DataSnapshotStatus(BaseModel):
@@ -100,6 +145,7 @@ class DataSnapshotLoadRequest(BaseModel):
     include_attachments: bool = True
     include_candidates: bool = True
     import_privacy_settings: bool = True
+    import_category_settings: bool = True
 
 
 class DataSnapshotLoadResponse(BaseModel):
@@ -127,6 +173,7 @@ class DataClearRequest(BaseModel):
     include_attachments: bool = True
     include_candidates: bool = True
     reset_privacy_settings: bool = False
+    reset_category_settings: bool = False
 
 
 class DataClearResponse(BaseModel):
@@ -134,6 +181,7 @@ class DataClearResponse(BaseModel):
     before: LocalDataSummary
     after: LocalDataSummary
     privacy_settings: PrivacySettings
+    category_settings: CategorySettings
 
 
 class DemoDataSeedRequest(BaseModel):

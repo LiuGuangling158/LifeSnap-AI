@@ -49,6 +49,11 @@ const routes = [
   },
 ];
 
+const defaultCategorySettings = {
+  bill_categories: ["餐饮", "交通", "购物", "日用", "医疗", "娱乐", "学习", "住房", "工资", "其他"],
+  task_categories: ["生活", "工作", "学习", "个人", "财务", "健康"],
+};
+
 const state = {
   route: getRoute(),
   loading: true,
@@ -76,6 +81,7 @@ const state = {
   settingsConfirm: null,
   dataImportPreview: null,
   privacySettingsOpen: false,
+  categorySettingsOpen: false,
   diagnosticsOpen: false,
   diagnosticsLoading: false,
   integrationProbeLoading: false,
@@ -147,6 +153,7 @@ const state = {
   billOverview: null,
   taskOverview: null,
   snapshotStatus: null,
+  categorySettings: null,
   bills: [],
   tasks: [],
 };
@@ -307,6 +314,12 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-profile-preferences], [data-open-privacy-settings]")) {
     state.privacySettingsOpen = true;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-open-category-settings]")) {
+    state.categorySettingsOpen = true;
     render();
     return;
   }
@@ -485,6 +498,7 @@ document.addEventListener("click", (event) => {
     state.settingsConfirm = null;
     state.dataImportPreview = null;
     state.privacySettingsOpen = false;
+    state.categorySettingsOpen = false;
     state.diagnosticsOpen = false;
     state.auditLogOpen = false;
     state.recycleBinOpen = false;
@@ -620,6 +634,12 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-close-category-settings]")) {
+    state.categorySettingsOpen = false;
+    render();
+    return;
+  }
+
   if (event.target.closest("[data-open-diagnostics]")) {
     openDiagnostics();
     return;
@@ -723,6 +743,7 @@ document.addEventListener("keydown", (event) => {
       || state.settingsConfirm
       || state.dataImportPreview
       || state.privacySettingsOpen
+      || state.categorySettingsOpen
       || state.diagnosticsOpen
       || state.auditLogOpen
       || state.recycleBinOpen
@@ -747,6 +768,7 @@ document.addEventListener("keydown", (event) => {
     state.settingsConfirm = null;
     state.dataImportPreview = null;
     state.privacySettingsOpen = false;
+    state.categorySettingsOpen = false;
     state.diagnosticsOpen = false;
     state.auditLogOpen = false;
     state.recycleBinOpen = false;
@@ -825,6 +847,12 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-category-settings-form]")) {
+    event.preventDefault();
+    await submitCategorySettings(new FormData(event.target));
+    return;
+  }
+
   if (event.target.matches("[data-snooze-form]")) {
     event.preventDefault();
     await submitSnooze(new FormData(event.target));
@@ -848,6 +876,7 @@ async function loadData() {
       diaryList,
       diaryOverview,
       snapshotStatus,
+      categorySettings,
     ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
@@ -857,6 +886,7 @@ async function loadData() {
       api(buildDiaryListPath()),
       api("/diaries/statistics/overview"),
       api("/data/snapshot/status"),
+      api("/settings/categories"),
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
@@ -885,6 +915,7 @@ async function loadData() {
     state.diaryOverview = diaryOverview;
     state.diaryDraft = null;
     state.snapshotStatus = snapshotStatus;
+    state.categorySettings = categorySettings;
   } catch (error) {
     state.error = error.message || "后端连接失败";
   } finally {
@@ -898,10 +929,11 @@ async function submitBill(formData) {
   const paidAt = formData.get("paid_at");
   const editingBill = state.editingBill;
   const isEditing = Boolean(editingBill?.id);
+  const defaultBillCategory = getCategorySettings().bill_categories[0] || "其他";
   const payload = {
     amount,
     merchant: String(formData.get("merchant") || "").trim(),
-    category: String(formData.get("category") || "General").trim(),
+    category: String(formData.get("category") || defaultBillCategory).trim(),
     payment_method: String(formData.get("payment_method") || "").trim() || null,
     transaction_type: formData.get("transaction_type"),
     paid_at: paidAt ? new Date(paidAt).toISOString() : null,
@@ -1334,10 +1366,11 @@ async function submitTask(formData) {
   const taskType = String(formData.get("task_type") || "todo");
   const dueAt = formData.get("due_at");
   const remindAt = formData.get("remind_at");
+  const defaultTaskCategory = getCategorySettings().task_categories[0] || "生活";
   const payload = {
     title: String(formData.get("title") || "").trim(),
     description: String(formData.get("description") || "").trim() || null,
-    category: String(formData.get("category") || "生活").trim(),
+    category: String(formData.get("category") || defaultTaskCategory).trim(),
     task_type: taskType,
     due_at: taskType === "todo" && dueAt ? new Date(dueAt).toISOString() : null,
     remind_at: taskType === "reminder" && remindAt ? new Date(remindAt).toISOString() : null,
@@ -1375,7 +1408,8 @@ async function submitTask(formData) {
 
 async function submitRepeatTask(formData) {
   const title = String(formData.get("title") || "").trim();
-  const category = String(formData.get("category") || "生活").trim() || "生活";
+  const defaultTaskCategory = getCategorySettings().task_categories[0] || "生活";
+  const category = String(formData.get("category") || defaultTaskCategory).trim() || defaultTaskCategory;
   const description = String(formData.get("description") || "").trim();
   const frequency = String(formData.get("frequency") || "weekly");
   const priority = String(formData.get("priority") || "medium");
@@ -2304,6 +2338,39 @@ async function updatePrivacySetting(key) {
   }
 }
 
+async function submitCategorySettings(formData) {
+  if (state.saving) {
+    return;
+  }
+  const billCategories = parseCategoryInput(formData.get("bill_categories"));
+  const taskCategories = parseCategoryInput(formData.get("task_categories"));
+  if (!billCategories.length || !taskCategories.length) {
+    showToast("账单和待办分类都至少保留一项。");
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const updated = await api("/settings/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bill_categories: billCategories,
+        task_categories: taskCategories,
+      }),
+    });
+    state.categorySettings = updated;
+    state.categorySettingsOpen = false;
+    state.toast = "分类设置已保存";
+  } catch (error) {
+    state.toast = error.message || "分类设置保存失败";
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 async function openDiagnostics() {
   if (state.saving) {
     return;
@@ -2913,6 +2980,7 @@ function render() {
       <input type="file" accept="image/*" data-bill-image-input hidden />
       <input type="file" accept="image/*" data-diary-image-input multiple hidden />
       <input type="file" accept="application/json,.json" data-import-json-input hidden />
+      ${renderCategoryDatalists()}
       ${state.modalOpen ? renderBillModal() : ""}
       ${state.billRangeOpen ? renderBillRangeModal() : ""}
       ${state.notificationOpen ? renderNotificationModal() : ""}
@@ -2929,6 +2997,7 @@ function render() {
       ${state.settingsConfirm ? renderSettingsConfirmModal() : ""}
       ${state.dataImportPreview ? renderDataImportModal() : ""}
       ${state.privacySettingsOpen ? renderPrivacySettingsModal() : ""}
+      ${state.categorySettingsOpen ? renderCategorySettingsModal() : ""}
       ${state.diagnosticsOpen ? renderDiagnosticsModal() : ""}
       ${state.auditLogOpen ? renderAuditLogModal() : ""}
       ${state.recycleBinOpen ? renderRecycleBinModal() : ""}
@@ -2956,6 +3025,18 @@ function renderToast() {
         </button>
       ` : ""}
     </div>
+  `;
+}
+
+function renderCategoryDatalists() {
+  const categories = getCategorySettings();
+  return `
+    <datalist id="bill_category_options">
+      ${categories.bill_categories.map((item) => `<option value="${escapeHtml(item)}"></option>`).join("")}
+    </datalist>
+    <datalist id="task_category_options">
+      ${categories.task_categories.map((item) => `<option value="${escapeHtml(item)}"></option>`).join("")}
+    </datalist>
   `;
 }
 
@@ -3725,11 +3806,20 @@ function taskCalendarTasksForDate(dateKey) {
 }
 
 function renderReminderCategoryTabs() {
+  const configuredCategories = getCategorySettings().task_categories.slice(0, 4);
+  const selectedCategory = state.taskFilters.category;
+  const visibleCategories = selectedCategory
+    && selectedCategory !== ""
+    && !configuredCategories.includes(selectedCategory)
+    ? [...configuredCategories.slice(0, 3), selectedCategory]
+    : configuredCategories;
   const tabs = [
     ["", "全部", "check-circle"],
-    ["学习", "学习", "book"],
-    ["生活", "生活", "coffee"],
-    ["工作", "工作", "briefcase"],
+    ...visibleCategories.map((category) => [
+      category,
+      category,
+      iconForTask({ category }),
+    ]),
   ];
   return `
     <div class="reminder-category-tabs" aria-label="提醒分类">
@@ -4872,7 +4962,7 @@ function renderProfileTools() {
       <div class="profile-tool-grid">
         ${profileTool("pie-chart", "预算管理", "data-profile-placeholder", "mint")}
         ${profileTool("file-text", "账单导出", "data-export-json", "blue")}
-        ${profileTool("grid", "分类管理", "data-profile-placeholder", "orange")}
+        ${profileTool("grid", "分类管理", "data-open-category-settings", "orange")}
         ${profileTool("tag", "标签管理", "data-profile-placeholder", "mint")}
         ${profileTool("cloud", "数据备份", "data-snapshot-save", "blue")}
         ${profileTool("upload", "数据导入", "data-import-json", "mint")}
@@ -5267,7 +5357,7 @@ function renderBillRangeModal() {
             </div>
             <div class="field">
               <label for="bill_range_category">分类</label>
-              <input id="bill_range_category" name="category" maxlength="40" placeholder="如 餐饮"
+              <input id="bill_range_category" name="category" maxlength="40" list="bill_category_options" placeholder="如 餐饮"
                 value="${escapeHtml(filters.category)}" />
             </div>
             <div class="field full">
@@ -5310,7 +5400,7 @@ function renderBillFilters() {
       </div>
       <div class="field">
         <label for="filter_category">分类</label>
-        <input id="filter_category" name="category" maxlength="40" placeholder="如 餐饮"
+        <input id="filter_category" name="category" maxlength="40" list="bill_category_options" placeholder="如 餐饮"
           value="${escapeHtml(filters.category)}" />
       </div>
       <div class="field">
@@ -5456,6 +5546,7 @@ function renderBillModal() {
   const bill = state.editingBill ?? state.billDraft;
   const isEditing = Boolean(state.editingBill?.id);
   const isCandidate = !isEditing && Boolean(state.billDraft);
+  const defaultBillCategory = getCategorySettings().bill_categories[0] || "其他";
   const title = isEditing ? "编辑账单" : isCandidate ? "确认候选账单" : "新增账单";
   const description = isEditing
     ? "修改后会立即更新列表和首页统计。"
@@ -5494,7 +5585,7 @@ function renderBillModal() {
             </div>
             <div class="field">
               <label for="category">分类</label>
-              <input id="category" name="category" required maxlength="40" placeholder="餐饮"
+              <input id="category" name="category" required maxlength="40" list="bill_category_options" placeholder="${escapeHtml(defaultBillCategory)}"
                 value="${escapeHtml(bill?.category ?? "")}" />
             </div>
             <div class="field">
@@ -5616,6 +5707,7 @@ function renderTaskModal() {
   const isEditing = Boolean(task?.id);
   const taskType = task?.task_type || "todo";
   const priority = task?.priority || "medium";
+  const defaultTaskCategory = getCategorySettings().task_categories[0] || "生活";
   const title = isEditing ? "编辑待办" : "新增待办";
   const description = isEditing
     ? "修改后会同步更新后端任务记录和提醒页。"
@@ -5656,7 +5748,7 @@ function renderTaskModal() {
             </div>
             <div class="field">
               <label for="task_category">分类</label>
-              <input id="task_category" name="category" required maxlength="40" placeholder="生活"
+              <input id="task_category" name="category" required maxlength="40" list="task_category_options" placeholder="${escapeHtml(defaultTaskCategory)}"
                 value="${escapeHtml(task?.category || "")}" />
             </div>
             <div class="field">
@@ -5690,6 +5782,7 @@ function renderTaskModal() {
 function renderRepeatTaskModal() {
   const defaultStart = defaultRepeatStartDate();
   const previewDates = repeatPreviewDates(defaultStart, "weekly", 3);
+  const defaultTaskCategory = getCategorySettings().task_categories[0] || "生活";
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal repeat-task-modal" role="dialog" aria-modal="true" aria-labelledby="repeat-task-title">
@@ -5736,7 +5829,8 @@ function renderRepeatTaskModal() {
             </div>
             <div class="field">
               <label for="repeat_task_category">分类</label>
-              <input id="repeat_task_category" name="category" required maxlength="40" value="生活" />
+              <input id="repeat_task_category" name="category" required maxlength="40" list="task_category_options"
+                value="${escapeHtml(defaultTaskCategory)}" />
             </div>
             <div class="field full">
               <label for="repeat_task_description">备注</label>
@@ -6292,6 +6386,8 @@ function renderDataImportModal() {
   const before = result.before ?? {};
   const candidateCount = Number(result.imported_bill_candidate_count ?? 0)
     + Number(result.imported_task_candidate_count ?? 0);
+  const categoryCount = Number(preview?.snapshot?.category_settings?.bill_categories?.length ?? 0)
+    + Number(preview?.snapshot?.category_settings?.task_categories?.length ?? 0);
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="data-import-title">
@@ -6312,6 +6408,7 @@ function renderDataImportModal() {
           ${importPreviewMetric("日记", result.imported_diary_count ?? 0, `${before.diary_count ?? 0} 篇当前记录`)}
           ${importPreviewMetric("附件", result.imported_attachment_count ?? 0, `${before.attachment_count ?? 0} 个当前附件`)}
           ${importPreviewMetric("候选", candidateCount, "AI 待确认记录")}
+          ${importPreviewMetric("分类", categoryCount, "账单与待办分类")}
         </div>
         <p class="import-warning">建议确认已有数据已导出或保存快照后再导入。</p>
         <div class="form-actions modal-actions">
@@ -6365,6 +6462,46 @@ function renderPrivacySettingsModal() {
             Boolean(privacy.keep_ocr_text),
           )}
         </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderCategorySettingsModal() {
+  const categories = getCategorySettings();
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal category-settings-modal" role="dialog" aria-modal="true" aria-labelledby="category-settings-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="category-settings-title">分类管理</h2>
+            <p class="section-note">分类会保存到后端本地 JSON，并用于记账、筛选和提醒表单。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-category-settings aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form category-settings-form" data-category-settings-form>
+          <div class="form-grid">
+            <div class="field full">
+              <label for="bill_categories">账单分类</label>
+              <textarea id="bill_categories" name="bill_categories" maxlength="600" required>${escapeHtml(categories.bill_categories.join("\n"))}</textarea>
+              ${renderCategoryPreview(categories.bill_categories)}
+            </div>
+            <div class="field full">
+              <label for="task_categories">待办分类</label>
+              <textarea id="task_categories" name="task_categories" maxlength="600" required>${escapeHtml(categories.task_categories.join("\n"))}</textarea>
+              ${renderCategoryPreview(categories.task_categories)}
+            </div>
+          </div>
+          <p class="form-hint">支持换行、逗号或分号分隔；会自动去重，单项最多 40 字，最多保留 30 项。</p>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-category-settings>取消</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("save")}${state.saving ? "保存中..." : "保存分类"}
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   `;
@@ -7268,6 +7405,56 @@ function taskTargetText(task) {
     ? task.remind_at || task.due_at
     : task.due_at || task.remind_at;
   return target ? formatDate(target) : "未设置时间";
+}
+
+function getCategorySettings() {
+  return {
+    bill_categories: normalizeCategories(
+      state.categorySettings?.bill_categories,
+      defaultCategorySettings.bill_categories,
+    ),
+    task_categories: normalizeCategories(
+      state.categorySettings?.task_categories,
+      defaultCategorySettings.task_categories,
+    ),
+  };
+}
+
+function normalizeCategories(values, fallback) {
+  const normalized = [];
+  (Array.isArray(values) ? values : fallback).forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text || text.length > 40 || normalized.includes(text)) {
+      return;
+    }
+    normalized.push(text);
+  });
+  return normalized.length ? normalized.slice(0, 30) : fallback.slice();
+}
+
+function parseCategoryInput(value) {
+  return normalizeCategories(
+    String(value || "")
+      .split(/[\n,，;；]+/)
+      .map((item) => item.trim()),
+    [],
+  );
+}
+
+function renderCategoryPreview(categories) {
+  const items = normalizeCategories(categories, []);
+  if (!items.length) {
+    return `<p class="form-hint">暂无分类。</p>`;
+  }
+  return `
+    <div class="category-preview-list" aria-label="分类预览">
+      ${items
+        .slice(0, 12)
+        .map((item) => `<span class="category-preview-chip">${escapeHtml(item)}</span>`)
+        .join("")}
+      ${items.length > 12 ? `<span class="category-preview-chip muted">+${items.length - 12}</span>` : ""}
+    </div>
+  `;
 }
 
 function icon(name) {

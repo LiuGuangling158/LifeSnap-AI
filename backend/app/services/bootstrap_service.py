@@ -107,6 +107,7 @@ class BootstrapService:
             generated_at=datetime.now(timezone.utc),
             capabilities=self.capabilities(),
             privacy_settings=settings_store.get_privacy_settings(),
+            category_settings=settings_store.get_category_settings(),
             data_summary=data_management_service.summary(),
             dashboard=dashboard_service.summary(
                 year=year,

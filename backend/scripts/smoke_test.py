@@ -128,6 +128,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_bill_candidate_duplicate_detection(client)
     _check_task_snooze_idempotency(client)
     _check_privacy_switch(client)
+    _check_category_settings(client)
     _check_attachment_duplicate_detection(client)
     _check_ocr_fallback_flow(client)
     _check_audit_log_and_request_id(client)
@@ -263,6 +264,10 @@ def _check_app_bootstrap(client: ApiClient) -> None:
     _assert(
         bootstrap["privacy_settings"]["local_only_mode"],
         "App bootstrap should include privacy settings",
+    )
+    _assert(
+        bootstrap["category_settings"]["bill_categories"],
+        "App bootstrap should include category settings",
     )
     _assert(
         bootstrap["data_summary"]["bill_count"] >= 1,
@@ -964,6 +969,55 @@ def _check_privacy_switch(client: ApiClient) -> None:
         {"allow_ai_text_processing": True},
     )
     _assert(status == 200, "AI text processing should be re-enabled")
+
+
+def _check_category_settings(client: ApiClient) -> None:
+    status, categories = client.request("GET", "/settings/categories")
+    _assert(status == 200, "Category settings should return 200")
+    _assert(
+        categories["bill_categories"],
+        "Category settings should include bill categories",
+    )
+    _assert(
+        categories["task_categories"],
+        "Category settings should include task categories",
+    )
+    original_categories = {
+        "bill_categories": categories["bill_categories"],
+        "task_categories": categories["task_categories"],
+    }
+
+    status, updated = client.request(
+        "PATCH",
+        "/settings/categories",
+        {
+            "bill_categories": ["餐饮", "咖啡", "餐饮", ""],
+            "task_categories": ["工作", "生活", "工作", ""],
+        },
+    )
+    _assert(status == 200, "Category settings update should return 200")
+    _assert(
+        updated["bill_categories"] == ["餐饮", "咖啡"],
+        "Category settings should trim blanks and remove duplicate bill categories",
+    )
+    _assert(
+        updated["task_categories"] == ["工作", "生活"],
+        "Category settings should trim blanks and remove duplicate task categories",
+    )
+
+    status, snapshot = client.request("GET", "/data/export")
+    _assert(status == 200, "Category settings export setup should return 200")
+    _assert(
+        snapshot["category_settings"]["bill_categories"] == ["餐饮", "咖啡"],
+        "Data export should include category settings",
+    )
+
+    status, restored = client.request("PATCH", "/settings/categories", original_categories)
+    _assert(status == 200, "Category settings restore should return 200")
+    _assert(
+        restored["bill_categories"] == original_categories["bill_categories"],
+        "Category settings should restore original bill categories after test",
+    )
 
 
 def _check_attachment_duplicate_detection(client: ApiClient) -> None:

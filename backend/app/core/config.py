@@ -25,6 +25,7 @@ class Settings:
     local_task_path: Path = BACKEND_DIR / "data" / "tasks.json"
     local_diary_path: Path = BACKEND_DIR / "data" / "diaries.json"
     local_settings_path: Path = BACKEND_DIR / "data" / "settings.json"
+    local_category_settings_path: Path = BACKEND_DIR / "data" / "categories.json"
     local_bill_candidate_path: Path = BACKEND_DIR / "data" / "bill_candidates.json"
     local_task_candidate_path: Path = BACKEND_DIR / "data" / "task_candidates.json"
     local_attachment_path: Path = BACKEND_DIR / "data" / "attachments.json"
