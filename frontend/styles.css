@@ -1700,6 +1700,36 @@ button {
   margin: 0 0 5px;
 }
 
+.diary-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.diary-tag-list span {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid #d5e7dc;
+  border-radius: 999px;
+  background: #f4fbf7;
+  color: #25755b;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 720;
+  transition:
+    background-color var(--motion),
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.diary-tag-list span:hover {
+  border-color: #afd9bf;
+  background: #eaf8ef;
+  transform: translateY(-1px);
+}
+
 .diary-gallery-section .button.ghost {
   width: auto;
   min-height: 32px;
@@ -5927,7 +5957,8 @@ button:focus-visible {
   width: min(520px, 100%);
 }
 
-.category-settings-form textarea {
+.category-settings-form textarea,
+.tag-settings-form textarea {
   min-height: 118px;
   line-height: 1.65;
 }
@@ -5965,6 +5996,40 @@ button:focus-visible {
   border-color: #d8ded9;
   background: #f4f7f5;
   color: #718078;
+}
+
+.budget-preview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 18px 0;
+}
+
+.budget-preview > div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #d8e1da;
+  border-radius: var(--radius);
+  background: #fbfdfb;
+  padding: 11px;
+  transition:
+    border-color var(--motion),
+    transform var(--motion);
+}
+
+.budget-preview > div:hover {
+  border-color: #b8d5c3;
+  transform: translateY(-1px);
+}
+
+.budget-preview span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.budget-preview strong {
+  color: #17243a;
+  font-size: 16px;
 }
 
 .diagnostics-modal {

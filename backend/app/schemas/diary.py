@@ -2,7 +2,22 @@ from datetime import date, datetime
 from enum import Enum
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _normalize_tag_values(value: object) -> list[str]:
+    if value is None:
+        return []
+    raw_items = value if isinstance(value, list) else [value]
+    tags: list[str] = []
+    for item in raw_items:
+        text = str(item).strip()
+        if not text or len(text) > 40 or text in tags:
+            continue
+        tags.append(text)
+        if len(tags) >= 20:
+            break
+    return tags
 
 
 class DiaryMood(str, Enum):
@@ -27,6 +42,12 @@ class DiaryCreate(BaseModel):
     weather: str | None = Field(default=None, max_length=40)
     source: DiarySource = DiarySource.manual
     attachment_ids: list[UUID] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, value: object) -> list[str]:
+        return _normalize_tag_values(value)
 
 
 class DiaryUpdate(BaseModel):
@@ -37,6 +58,14 @@ class DiaryUpdate(BaseModel):
     weather: str | None = Field(default=None, max_length=40)
     source: DiarySource | None = None
     attachment_ids: list[UUID] | None = None
+    tags: list[str] | None = None
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        return _normalize_tag_values(value)
 
 
 class DiaryRead(DiaryCreate):

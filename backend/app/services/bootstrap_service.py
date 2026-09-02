@@ -108,6 +108,8 @@ class BootstrapService:
             capabilities=self.capabilities(),
             privacy_settings=settings_store.get_privacy_settings(),
             category_settings=settings_store.get_category_settings(),
+            budget_settings=settings_store.get_budget_settings(),
+            tag_settings=settings_store.get_tag_settings(),
             data_summary=data_management_service.summary(),
             dashboard=dashboard_service.summary(
                 year=year,

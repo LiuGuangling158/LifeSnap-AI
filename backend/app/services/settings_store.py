@@ -6,12 +6,17 @@ from datetime import datetime, timezone
 from app.core.config import settings
 from app.schemas.attachment import RetentionPolicy
 from app.schemas.settings import (
+    BudgetSettings,
+    BudgetSettingsUpdate,
     CategorySettings,
     CategorySettingsUpdate,
     DEFAULT_BILL_CATEGORIES,
+    DEFAULT_TAGS,
     DEFAULT_TASK_CATEGORIES,
     PrivacySettings,
     PrivacySettingsUpdate,
+    TagSettings,
+    TagSettingsUpdate,
 )
 
 
@@ -19,6 +24,8 @@ class LocalSettingsStore:
     def __init__(self) -> None:
         self._privacy_settings = self._load_privacy_settings()
         self._category_settings = self._load_category_settings()
+        self._budget_settings = self._load_budget_settings()
+        self._tag_settings = self._load_tag_settings()
 
     def get_privacy_settings(self) -> PrivacySettings:
         return self._privacy_settings
@@ -59,12 +66,12 @@ class LocalSettingsStore:
         data = self._category_settings.model_dump()
         incoming = payload.model_dump(exclude_none=True, exclude_unset=True)
         if "bill_categories" in incoming:
-            data["bill_categories"] = self._normalize_categories(
+            data["bill_categories"] = self._normalize_labels(
                 incoming["bill_categories"],
                 DEFAULT_BILL_CATEGORIES,
             )
         if "task_categories" in incoming:
-            data["task_categories"] = self._normalize_categories(
+            data["task_categories"] = self._normalize_labels(
                 incoming["task_categories"],
                 DEFAULT_TASK_CATEGORIES,
             )
@@ -80,11 +87,11 @@ class LocalSettingsStore:
 
     def replace_category_settings(self, payload: CategorySettings) -> CategorySettings:
         self._category_settings = CategorySettings(
-            bill_categories=self._normalize_categories(
+            bill_categories=self._normalize_labels(
                 payload.bill_categories,
                 DEFAULT_BILL_CATEGORIES,
             ),
-            task_categories=self._normalize_categories(
+            task_categories=self._normalize_labels(
                 payload.task_categories,
                 DEFAULT_TASK_CATEGORIES,
             ),
@@ -92,6 +99,66 @@ class LocalSettingsStore:
         )
         self._persist_category_settings()
         return self._category_settings
+
+    def get_budget_settings(self) -> BudgetSettings:
+        return self._budget_settings
+
+    def update_budget_settings(
+        self,
+        payload: BudgetSettingsUpdate,
+    ) -> BudgetSettings:
+        data = self._budget_settings.model_dump()
+        incoming = payload.model_dump(exclude_none=True, exclude_unset=True)
+        data.update(incoming)
+        data["currency"] = "CNY"
+        data["updated_at"] = datetime.now(timezone.utc)
+        self._budget_settings = BudgetSettings(**data)
+        self._persist_budget_settings()
+        return self._budget_settings
+
+    def reset_budget_settings(self) -> BudgetSettings:
+        self._budget_settings = self._default_budget_settings()
+        self._persist_budget_settings()
+        return self._budget_settings
+
+    def replace_budget_settings(self, payload: BudgetSettings) -> BudgetSettings:
+        self._budget_settings = BudgetSettings(
+            monthly_budget=payload.monthly_budget,
+            currency="CNY",
+            warning_threshold_percent=payload.warning_threshold_percent,
+            updated_at=payload.updated_at or datetime.now(timezone.utc),
+        )
+        self._persist_budget_settings()
+        return self._budget_settings
+
+    def get_tag_settings(self) -> TagSettings:
+        return self._tag_settings
+
+    def update_tag_settings(
+        self,
+        payload: TagSettingsUpdate,
+    ) -> TagSettings:
+        data = self._tag_settings.model_dump()
+        incoming = payload.model_dump(exclude_none=True, exclude_unset=True)
+        if "tags" in incoming:
+            data["tags"] = self._normalize_labels(incoming["tags"], DEFAULT_TAGS)
+        data["updated_at"] = datetime.now(timezone.utc)
+        self._tag_settings = TagSettings(**data)
+        self._persist_tag_settings()
+        return self._tag_settings
+
+    def reset_tag_settings(self) -> TagSettings:
+        self._tag_settings = self._default_tag_settings()
+        self._persist_tag_settings()
+        return self._tag_settings
+
+    def replace_tag_settings(self, payload: TagSettings) -> TagSettings:
+        self._tag_settings = TagSettings(
+            tags=self._normalize_labels(payload.tags, DEFAULT_TAGS),
+            updated_at=payload.updated_at or datetime.now(timezone.utc),
+        )
+        self._persist_tag_settings()
+        return self._tag_settings
 
     def _default_privacy_settings(self) -> PrivacySettings:
         return PrivacySettings(
@@ -130,6 +197,15 @@ class LocalSettingsStore:
             updated_at=datetime.now(timezone.utc),
         )
 
+    def _default_budget_settings(self) -> BudgetSettings:
+        return BudgetSettings(updated_at=datetime.now(timezone.utc))
+
+    def _default_tag_settings(self) -> TagSettings:
+        return TagSettings(
+            tags=DEFAULT_TAGS.copy(),
+            updated_at=datetime.now(timezone.utc),
+        )
+
     def _load_category_settings(self) -> CategorySettings:
         path = settings.local_category_settings_path
         if not path.exists():
@@ -138,11 +214,11 @@ class LocalSettingsStore:
             raw_settings = json.loads(path.read_text(encoding="utf-8"))
             loaded = CategorySettings.model_validate(raw_settings)
             return CategorySettings(
-                bill_categories=self._normalize_categories(
+                bill_categories=self._normalize_labels(
                     loaded.bill_categories,
                     DEFAULT_BILL_CATEGORIES,
                 ),
-                task_categories=self._normalize_categories(
+                task_categories=self._normalize_labels(
                     loaded.task_categories,
                     DEFAULT_TASK_CATEGORIES,
                 ),
@@ -150,6 +226,36 @@ class LocalSettingsStore:
             )
         except (OSError, ValueError, TypeError):
             return self._default_category_settings()
+
+    def _load_budget_settings(self) -> BudgetSettings:
+        path = settings.local_budget_settings_path
+        if not path.exists():
+            return self._default_budget_settings()
+        try:
+            raw_settings = json.loads(path.read_text(encoding="utf-8"))
+            loaded = BudgetSettings.model_validate(raw_settings)
+            return BudgetSettings(
+                monthly_budget=loaded.monthly_budget,
+                currency="CNY",
+                warning_threshold_percent=loaded.warning_threshold_percent,
+                updated_at=loaded.updated_at,
+            )
+        except (OSError, ValueError, TypeError):
+            return self._default_budget_settings()
+
+    def _load_tag_settings(self) -> TagSettings:
+        path = settings.local_tag_settings_path
+        if not path.exists():
+            return self._default_tag_settings()
+        try:
+            raw_settings = json.loads(path.read_text(encoding="utf-8"))
+            loaded = TagSettings.model_validate(raw_settings)
+            return TagSettings(
+                tags=self._normalize_labels(loaded.tags, DEFAULT_TAGS),
+                updated_at=loaded.updated_at,
+            )
+        except (OSError, ValueError, TypeError):
+            return self._default_tag_settings()
 
     def _persist_category_settings(self) -> None:
         path = settings.local_category_settings_path
@@ -161,7 +267,27 @@ class LocalSettingsStore:
         )
         temp_path.replace(path)
 
-    def _normalize_categories(
+    def _persist_budget_settings(self) -> None:
+        path = settings.local_budget_settings_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            self._budget_settings.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+    def _persist_tag_settings(self) -> None:
+        path = settings.local_tag_settings_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            self._tag_settings.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+    def _normalize_labels(
         self,
         values: list[str],
         fallback: list[str],

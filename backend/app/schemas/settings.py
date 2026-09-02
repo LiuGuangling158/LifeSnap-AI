@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,18 @@ DEFAULT_TASK_CATEGORIES = [
     "健康",
 ]
 
+DEFAULT_TAGS = [
+    "开心",
+    "轻松",
+    "成长",
+    "工作",
+    "学习",
+    "健康",
+    "朋友",
+    "家庭",
+    "旅行",
+]
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -55,6 +68,18 @@ class CategorySettings(BaseModel):
     updated_at: datetime = Field(default_factory=_now_utc)
 
 
+class BudgetSettings(BaseModel):
+    monthly_budget: Decimal = Field(default=Decimal("5000.00"), ge=0)
+    currency: str = "CNY"
+    warning_threshold_percent: int = Field(default=80, ge=1, le=100)
+    updated_at: datetime = Field(default_factory=_now_utc)
+
+
+class TagSettings(BaseModel):
+    tags: list[str] = Field(default_factory=lambda: DEFAULT_TAGS.copy())
+    updated_at: datetime = Field(default_factory=_now_utc)
+
+
 class PrivacySettingsUpdate(BaseModel):
     local_only_mode: bool | None = None
     allow_ai_text_processing: bool | None = None
@@ -65,6 +90,15 @@ class PrivacySettingsUpdate(BaseModel):
 class CategorySettingsUpdate(BaseModel):
     bill_categories: list[str] | None = None
     task_categories: list[str] | None = None
+
+
+class BudgetSettingsUpdate(BaseModel):
+    monthly_budget: Decimal | None = Field(default=None, ge=0)
+    warning_threshold_percent: int | None = Field(default=None, ge=1, le=100)
+
+
+class TagSettingsUpdate(BaseModel):
+    tags: list[str] | None = None
 
 
 class LocalDataSummary(BaseModel):
@@ -83,6 +117,8 @@ class DataExportResponse(BaseModel):
     generated_at: datetime
     privacy_settings: PrivacySettings
     category_settings: CategorySettings = Field(default_factory=CategorySettings)
+    budget_settings: BudgetSettings = Field(default_factory=BudgetSettings)
+    tag_settings: TagSettings = Field(default_factory=TagSettings)
     bills: list[BillRead]
     tasks: list[TaskRead]
     diaries: list[DiaryRead] = Field(default_factory=list)
@@ -102,6 +138,8 @@ class DataImportRequest(BaseModel):
     include_candidates: bool = True
     import_privacy_settings: bool = True
     import_category_settings: bool = True
+    import_budget_settings: bool = True
+    import_tag_settings: bool = True
     snapshot: DataExportResponse
 
 
@@ -119,6 +157,8 @@ class DataImportResponse(BaseModel):
     imported_task_candidate_count: int
     privacy_settings: PrivacySettings
     category_settings: CategorySettings
+    budget_settings: BudgetSettings
+    tag_settings: TagSettings
 
 
 class DataSnapshotStatus(BaseModel):
@@ -146,6 +186,8 @@ class DataSnapshotLoadRequest(BaseModel):
     include_candidates: bool = True
     import_privacy_settings: bool = True
     import_category_settings: bool = True
+    import_budget_settings: bool = True
+    import_tag_settings: bool = True
 
 
 class DataSnapshotLoadResponse(BaseModel):
@@ -174,6 +216,8 @@ class DataClearRequest(BaseModel):
     include_candidates: bool = True
     reset_privacy_settings: bool = False
     reset_category_settings: bool = False
+    reset_budget_settings: bool = False
+    reset_tag_settings: bool = False
 
 
 class DataClearResponse(BaseModel):
@@ -182,6 +226,8 @@ class DataClearResponse(BaseModel):
     after: LocalDataSummary
     privacy_settings: PrivacySettings
     category_settings: CategorySettings
+    budget_settings: BudgetSettings
+    tag_settings: TagSettings
 
 
 class DemoDataSeedRequest(BaseModel):

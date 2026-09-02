@@ -54,6 +54,16 @@ const defaultCategorySettings = {
   task_categories: ["生活", "工作", "学习", "个人", "财务", "健康"],
 };
 
+const defaultBudgetSettings = {
+  monthly_budget: 5000,
+  currency: "CNY",
+  warning_threshold_percent: 80,
+};
+
+const defaultTagSettings = {
+  tags: ["开心", "轻松", "成长", "工作", "学习", "健康", "朋友", "家庭", "旅行"],
+};
+
 const state = {
   route: getRoute(),
   loading: true,
@@ -82,6 +92,8 @@ const state = {
   dataImportPreview: null,
   privacySettingsOpen: false,
   categorySettingsOpen: false,
+  budgetSettingsOpen: false,
+  tagSettingsOpen: false,
   diagnosticsOpen: false,
   diagnosticsLoading: false,
   integrationProbeLoading: false,
@@ -154,6 +166,8 @@ const state = {
   taskOverview: null,
   snapshotStatus: null,
   categorySettings: null,
+  budgetSettings: null,
+  tagSettings: null,
   bills: [],
   tasks: [],
 };
@@ -320,6 +334,18 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-open-category-settings]")) {
     state.categorySettingsOpen = true;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-open-budget-settings]")) {
+    state.budgetSettingsOpen = true;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-open-tag-settings]")) {
+    state.tagSettingsOpen = true;
     render();
     return;
   }
@@ -499,6 +525,8 @@ document.addEventListener("click", (event) => {
     state.dataImportPreview = null;
     state.privacySettingsOpen = false;
     state.categorySettingsOpen = false;
+    state.budgetSettingsOpen = false;
+    state.tagSettingsOpen = false;
     state.diagnosticsOpen = false;
     state.auditLogOpen = false;
     state.recycleBinOpen = false;
@@ -640,6 +668,18 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-close-budget-settings]")) {
+    state.budgetSettingsOpen = false;
+    render();
+    return;
+  }
+
+  if (event.target.closest("[data-close-tag-settings]")) {
+    state.tagSettingsOpen = false;
+    render();
+    return;
+  }
+
   if (event.target.closest("[data-open-diagnostics]")) {
     openDiagnostics();
     return;
@@ -744,6 +784,8 @@ document.addEventListener("keydown", (event) => {
       || state.dataImportPreview
       || state.privacySettingsOpen
       || state.categorySettingsOpen
+      || state.budgetSettingsOpen
+      || state.tagSettingsOpen
       || state.diagnosticsOpen
       || state.auditLogOpen
       || state.recycleBinOpen
@@ -769,6 +811,8 @@ document.addEventListener("keydown", (event) => {
     state.dataImportPreview = null;
     state.privacySettingsOpen = false;
     state.categorySettingsOpen = false;
+    state.budgetSettingsOpen = false;
+    state.tagSettingsOpen = false;
     state.diagnosticsOpen = false;
     state.auditLogOpen = false;
     state.recycleBinOpen = false;
@@ -853,6 +897,18 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-budget-settings-form]")) {
+    event.preventDefault();
+    await submitBudgetSettings(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-tag-settings-form]")) {
+    event.preventDefault();
+    await submitTagSettings(new FormData(event.target));
+    return;
+  }
+
   if (event.target.matches("[data-snooze-form]")) {
     event.preventDefault();
     await submitSnooze(new FormData(event.target));
@@ -877,6 +933,8 @@ async function loadData() {
       diaryOverview,
       snapshotStatus,
       categorySettings,
+      budgetSettings,
+      tagSettings,
     ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
@@ -887,6 +945,8 @@ async function loadData() {
       api("/diaries/statistics/overview"),
       api("/data/snapshot/status"),
       api("/settings/categories"),
+      api("/settings/budget"),
+      api("/settings/tags"),
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
@@ -916,6 +976,8 @@ async function loadData() {
     state.diaryDraft = null;
     state.snapshotStatus = snapshotStatus;
     state.categorySettings = categorySettings;
+    state.budgetSettings = budgetSettings;
+    state.tagSettings = tagSettings;
   } catch (error) {
     state.error = error.message || "后端连接失败";
   } finally {
@@ -1550,6 +1612,7 @@ async function submitDiary(formData) {
     weather: String(formData.get("weather") || "").trim() || null,
     source: "manual",
     attachment_ids: diaryAttachmentIdsForDate(dateKey),
+    tags: parseLabelInput(formData.get("tags"), 20),
   };
 
   state.diaryRestoreTarget = null;
@@ -2371,6 +2434,73 @@ async function submitCategorySettings(formData) {
   }
 }
 
+async function submitBudgetSettings(formData) {
+  if (state.saving) {
+    return;
+  }
+  const monthlyBudget = Number(formData.get("monthly_budget"));
+  const warningThreshold = Number(formData.get("warning_threshold_percent"));
+  if (!Number.isFinite(monthlyBudget) || monthlyBudget < 0) {
+    showToast("请输入有效的月预算金额。");
+    return;
+  }
+  if (!Number.isFinite(warningThreshold) || warningThreshold < 1 || warningThreshold > 100) {
+    showToast("预警比例需要在 1 到 100 之间。");
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const updated = await api("/settings/budget", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        monthly_budget: monthlyBudget,
+        warning_threshold_percent: Math.round(warningThreshold),
+      }),
+    });
+    state.budgetSettings = updated;
+    state.budgetSettingsOpen = false;
+    state.toast = "预算设置已保存";
+    await loadData();
+  } catch (error) {
+    state.toast = error.message || "预算设置保存失败";
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function submitTagSettings(formData) {
+  if (state.saving) {
+    return;
+  }
+  const tags = parseLabelInput(formData.get("tags"), 30);
+  if (!tags.length) {
+    showToast("请至少保留一个标签。");
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const updated = await api("/settings/tags", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags }),
+    });
+    state.tagSettings = updated;
+    state.tagSettingsOpen = false;
+    state.toast = "标签设置已保存";
+  } catch (error) {
+    state.toast = error.message || "标签设置保存失败";
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 async function openDiagnostics() {
   if (state.saving) {
     return;
@@ -2807,6 +2937,7 @@ function normalizeDiaryEntry(item) {
     updated_at: item.updated_at,
     source: item.source || "manual",
     attachment_ids: uniqueValues(item.attachment_ids || []),
+    tags: normalizeLabels(item.tags || [], []),
   };
 }
 
@@ -2998,6 +3129,8 @@ function render() {
       ${state.dataImportPreview ? renderDataImportModal() : ""}
       ${state.privacySettingsOpen ? renderPrivacySettingsModal() : ""}
       ${state.categorySettingsOpen ? renderCategorySettingsModal() : ""}
+      ${state.budgetSettingsOpen ? renderBudgetSettingsModal() : ""}
+      ${state.tagSettingsOpen ? renderTagSettingsModal() : ""}
       ${state.diagnosticsOpen ? renderDiagnosticsModal() : ""}
       ${state.auditLogOpen ? renderAuditLogModal() : ""}
       ${state.recycleBinOpen ? renderRecycleBinModal() : ""}
@@ -3030,12 +3163,16 @@ function renderToast() {
 
 function renderCategoryDatalists() {
   const categories = getCategorySettings();
+  const tags = getTagSettings().tags;
   return `
     <datalist id="bill_category_options">
       ${categories.bill_categories.map((item) => `<option value="${escapeHtml(item)}"></option>`).join("")}
     </datalist>
     <datalist id="task_category_options">
       ${categories.task_categories.map((item) => `<option value="${escapeHtml(item)}"></option>`).join("")}
+    </datalist>
+    <datalist id="diary_tag_options">
+      ${tags.map((item) => `<option value="${escapeHtml(item)}"></option>`).join("")}
     </datalist>
   `;
 }
@@ -3141,9 +3278,13 @@ function renderDashboard() {
   const expense = Number(monthly.total_expense ?? 0);
   const income = Number(monthly.total_income ?? 0);
   const netAmount = Number(monthly.net_amount ?? income - expense);
-  const budgetRemaining = Math.max(0, netAmount);
-  const progress = financeProgress(monthly);
-  const remainingPercent = Math.max(0, 100 - progress);
+  const budget = getBudgetSettings();
+  const monthlyBudget = Number(budget.monthly_budget ?? 0);
+  const budgetRemaining = Math.max(0, monthlyBudget - expense);
+  const progress = financeProgress(monthly, budget);
+  const remainingPercent = monthlyBudget > 0
+    ? Math.max(0, Math.round((budgetRemaining / monthlyBudget) * 100))
+    : 0;
   const homeTasks = [
     ...(dashboard.today_tasks ?? []),
     ...(dashboard.upcoming_reminders ?? []),
@@ -3180,9 +3321,9 @@ function renderDashboard() {
         <div class="finance-body">
           <div class="finance-main">
             <div class="home-metrics">
-              ${homeMetric("本月支出", money(expense), "expense", `支出占收入 ${progress}%`)}
+              ${homeMetric("本月支出", money(expense), "expense", `预算使用 ${progress}%`)}
               ${homeMetric("本月收入", money(income), "income", `净额 ${money(netAmount)}`)}
-              ${homeMetric("预算剩余", money(budgetRemaining), "income", `剩余 ${remainingPercent}%`)}
+              ${homeMetric("预算剩余", money(budgetRemaining), "income", `月预算 ${money(monthlyBudget)} · 剩余 ${remainingPercent}%`)}
             </div>
             <div class="home-chart-wrap">
               ${renderDailyChart(state.billOverview?.daily_breakdown ?? [], "home-chart")}
@@ -4182,6 +4323,7 @@ function getDiarySnapshot() {
     streakDays,
     monthEntries: diaryEntriesInMonth(selectedDateKey),
     attachmentIds: diaryAttachmentIdsForDate(selectedDateKey),
+    tags: normalizeLabels(entry?.tags || [], []),
     body: entry?.content || [
       `${diaryDateLabel(selectedDateKey)}还没有保存日记，可以先留下一点生活记录。`,
       recentBills.length
@@ -4304,6 +4446,11 @@ function renderDiaryEntry(diary) {
       <div class="diary-entry-body">
         ${lines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
       </div>
+      ${diary.tags?.length ? `
+        <div class="diary-tag-list">
+          ${diary.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
+        </div>
+      ` : ""}
     </section>
   `;
 }
@@ -4960,10 +5107,10 @@ function renderProfileTools() {
         </button>
       </div>
       <div class="profile-tool-grid">
-        ${profileTool("pie-chart", "预算管理", "data-profile-placeholder", "mint")}
+        ${profileTool("pie-chart", "预算管理", "data-open-budget-settings", "mint")}
         ${profileTool("file-text", "账单导出", "data-export-json", "blue")}
         ${profileTool("grid", "分类管理", "data-open-category-settings", "orange")}
-        ${profileTool("tag", "标签管理", "data-profile-placeholder", "mint")}
+        ${profileTool("tag", "标签管理", "data-open-tag-settings", "mint")}
         ${profileTool("cloud", "数据备份", "data-snapshot-save", "blue")}
         ${profileTool("upload", "数据导入", "data-import-json", "mint")}
       </div>
@@ -5171,13 +5318,13 @@ function homeMetric(label, value, tone, hint = "") {
   `;
 }
 
-function financeProgress(monthly) {
+function financeProgress(monthly, budgetSettings = getBudgetSettings()) {
   const expense = Number(monthly.total_expense ?? 0);
-  const income = Number(monthly.total_income ?? 0);
-  if (income <= 0) {
+  const monthlyBudget = Number(budgetSettings.monthly_budget ?? 0);
+  if (monthlyBudget <= 0) {
     return 0;
   }
-  return Math.min(100, Math.round((expense / income) * 100));
+  return Math.min(100, Math.round((expense / monthlyBudget) * 100));
 }
 
 function renderProgressRing(percent) {
@@ -5862,6 +6009,7 @@ function renderDiaryModal() {
   const actionLabel = diary.hasEntry ? "更新日记" : "保存日记";
   const titleValue = diary.hasEntry ? diary.title : "";
   const weatherValue = diary.hasEntry ? diary.weather : "";
+  const tagValue = diary.hasEntry ? diary.tags.join("，") : "";
   const bodyValue = diary.hasEntry ? diary.body : "";
   return `
     <div class="modal-backdrop" role="presentation">
@@ -5896,6 +6044,11 @@ function renderDiaryModal() {
               <label for="diary_weather">天气</label>
               <input id="diary_weather" name="weather" maxlength="20" placeholder="晴天"
                 value="${escapeHtml(weatherValue)}" />
+            </div>
+            <div class="field full">
+              <label for="diary_tags">标签</label>
+              <input id="diary_tags" name="tags" maxlength="400" list="diary_tag_options" placeholder="轻松，成长，朋友"
+                value="${escapeHtml(tagValue)}" />
             </div>
             <div class="field full">
               <label for="diary_content">内容</label>
@@ -6388,6 +6541,8 @@ function renderDataImportModal() {
     + Number(result.imported_task_candidate_count ?? 0);
   const categoryCount = Number(preview?.snapshot?.category_settings?.bill_categories?.length ?? 0)
     + Number(preview?.snapshot?.category_settings?.task_categories?.length ?? 0);
+  const importedBudget = Number(preview?.snapshot?.budget_settings?.monthly_budget ?? 0);
+  const tagCount = Number(preview?.snapshot?.tag_settings?.tags?.length ?? 0);
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal compact-modal" role="dialog" aria-modal="true" aria-labelledby="data-import-title">
@@ -6409,6 +6564,8 @@ function renderDataImportModal() {
           ${importPreviewMetric("附件", result.imported_attachment_count ?? 0, `${before.attachment_count ?? 0} 个当前附件`)}
           ${importPreviewMetric("候选", candidateCount, "AI 待确认记录")}
           ${importPreviewMetric("分类", categoryCount, "账单与待办分类")}
+          ${importPreviewMetric("预算", money(importedBudget), "月预算配置")}
+          ${importPreviewMetric("标签", tagCount, "日记常用标签")}
         </div>
         <p class="import-warning">建议确认已有数据已导出或保存快照后再导入。</p>
         <div class="form-actions modal-actions">
@@ -6499,6 +6656,99 @@ function renderCategorySettingsModal() {
             <button class="button ghost" type="button" data-close-category-settings>取消</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
               ${icon("save")}${state.saving ? "保存中..." : "保存分类"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderBudgetSettingsModal() {
+  const budget = getBudgetSettings();
+  const monthlyBudget = Number(budget.monthly_budget ?? 0);
+  const threshold = Number(budget.warning_threshold_percent ?? 80);
+  const monthly = state.bootstrap?.dashboard?.monthly_statistics ?? {};
+  const expense = Number(monthly.total_expense ?? 0);
+  const progress = financeProgress(monthly, budget);
+  const remaining = Math.max(0, monthlyBudget - expense);
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal budget-settings-modal" role="dialog" aria-modal="true" aria-labelledby="budget-settings-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="budget-settings-title">预算管理</h2>
+            <p class="section-note">设置本月预算，用于首页预算进度和个人页财务概览。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-budget-settings aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <div class="budget-preview">
+          <div>
+            <span>本月已用</span>
+            <strong>${money(expense)}</strong>
+          </div>
+          <div>
+            <span>剩余预算</span>
+            <strong>${money(remaining)}</strong>
+          </div>
+          <div>
+            <span>使用进度</span>
+            <strong class="${progress >= threshold ? "expense" : "income"}">${progress}%</strong>
+          </div>
+        </div>
+        <form class="form" data-budget-settings-form>
+          <div class="form-grid">
+            <div class="field full">
+              <label for="monthly_budget">月预算金额</label>
+              <input id="monthly_budget" name="monthly_budget" type="number" min="0" step="0.01" required
+                value="${escapeHtml(monthlyBudget)}" />
+            </div>
+            <div class="field full">
+              <label for="warning_threshold_percent">预警比例</label>
+              <input id="warning_threshold_percent" name="warning_threshold_percent" type="number" min="1" max="100" step="1" required
+                value="${escapeHtml(threshold)}" />
+            </div>
+          </div>
+          <p class="form-hint">当预算使用进度达到预警比例时，页面会用支出色提示；当前先支持全局月预算。</p>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-budget-settings>取消</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("save")}${state.saving ? "保存中..." : "保存预算"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderTagSettingsModal() {
+  const tags = getTagSettings().tags;
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal compact-modal tag-settings-modal" role="dialog" aria-modal="true" aria-labelledby="tag-settings-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="tag-settings-title">标签管理</h2>
+            <p class="section-note">标签会保存到后端本地 JSON，并可用于日记记录。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-tag-settings aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form tag-settings-form" data-tag-settings-form>
+          <div class="field">
+            <label for="tag_settings_tags">常用标签</label>
+            <textarea id="tag_settings_tags" name="tags" maxlength="600" required>${escapeHtml(tags.join("\n"))}</textarea>
+            ${renderCategoryPreview(tags)}
+          </div>
+          <p class="form-hint">支持换行、逗号或分号分隔；会自动去重，单项最多 40 字，最多保留 30 项。</p>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-tag-settings>取消</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("save")}${state.saving ? "保存中..." : "保存标签"}
             </button>
           </div>
         </form>
@@ -7420,7 +7670,35 @@ function getCategorySettings() {
   };
 }
 
+function getBudgetSettings() {
+  const source = state.budgetSettings ?? state.bootstrap?.budget_settings ?? defaultBudgetSettings;
+  const monthlyBudget = Number(source.monthly_budget ?? defaultBudgetSettings.monthly_budget);
+  const threshold = Number(
+    source.warning_threshold_percent ?? defaultBudgetSettings.warning_threshold_percent,
+  );
+  return {
+    monthly_budget: Number.isFinite(monthlyBudget) && monthlyBudget >= 0
+      ? monthlyBudget
+      : defaultBudgetSettings.monthly_budget,
+    currency: source.currency || defaultBudgetSettings.currency,
+    warning_threshold_percent: Number.isFinite(threshold)
+      ? Math.min(100, Math.max(1, Math.round(threshold)))
+      : defaultBudgetSettings.warning_threshold_percent,
+  };
+}
+
 function normalizeCategories(values, fallback) {
+  return normalizeLabels(values, fallback, 30);
+}
+
+function getTagSettings() {
+  const source = state.tagSettings ?? state.bootstrap?.tag_settings ?? defaultTagSettings;
+  return {
+    tags: normalizeLabels(source.tags, defaultTagSettings.tags, 30),
+  };
+}
+
+function normalizeLabels(values, fallback, limit = 30) {
   const normalized = [];
   (Array.isArray(values) ? values : fallback).forEach((value) => {
     const text = String(value || "").trim();
@@ -7429,15 +7707,20 @@ function normalizeCategories(values, fallback) {
     }
     normalized.push(text);
   });
-  return normalized.length ? normalized.slice(0, 30) : fallback.slice();
+  return normalized.length ? normalized.slice(0, limit) : fallback.slice();
 }
 
 function parseCategoryInput(value) {
-  return normalizeCategories(
+  return parseLabelInput(value, 30);
+}
+
+function parseLabelInput(value, limit = 30) {
+  return normalizeLabels(
     String(value || "")
       .split(/[\n,，;；]+/)
       .map((item) => item.trim()),
     [],
+    limit,
   );
 }
 

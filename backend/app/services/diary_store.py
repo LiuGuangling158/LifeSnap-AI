@@ -223,6 +223,7 @@ class LocalDiaryStore:
             diary.title,
             diary.content,
             diary.weather or "",
+            " ".join(diary.tags),
         ]
         return any(keyword in field.casefold() for field in fields)
 

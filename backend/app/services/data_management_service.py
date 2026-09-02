@@ -60,6 +60,8 @@ class DataManagementService:
             generated_at=datetime.now(timezone.utc),
             privacy_settings=settings_store.get_privacy_settings(),
             category_settings=settings_store.get_category_settings(),
+            budget_settings=settings_store.get_budget_settings(),
+            tag_settings=settings_store.get_tag_settings(),
             bills=bill_store.all(include_deleted=include_deleted),
             tasks=task_store.all(include_deleted=include_deleted),
             diaries=diary_store.all(include_deleted=include_deleted),
@@ -101,6 +103,8 @@ class DataManagementService:
                 include_candidates=payload.include_candidates,
                 import_privacy_settings=payload.import_privacy_settings,
                 import_category_settings=payload.import_category_settings,
+                import_budget_settings=payload.import_budget_settings,
+                import_tag_settings=payload.import_tag_settings,
                 snapshot=snapshot,
             )
         )
@@ -153,6 +157,8 @@ class DataManagementService:
                 imported_task_candidate_count=imported_task_candidate_count,
                 privacy_settings=settings_store.get_privacy_settings(),
                 category_settings=settings_store.get_category_settings(),
+                budget_settings=settings_store.get_budget_settings(),
+                tag_settings=settings_store.get_tag_settings(),
             )
 
         if payload.reset_existing:
@@ -166,6 +172,8 @@ class DataManagementService:
                     include_candidates=payload.include_candidates,
                     reset_privacy_settings=payload.import_privacy_settings,
                     reset_category_settings=payload.import_category_settings,
+                    reset_budget_settings=payload.import_budget_settings,
+                    reset_tag_settings=payload.import_tag_settings,
                 )
             )
 
@@ -184,6 +192,10 @@ class DataManagementService:
             settings_store.replace_privacy_settings(payload.snapshot.privacy_settings)
         if payload.import_category_settings:
             settings_store.replace_category_settings(payload.snapshot.category_settings)
+        if payload.import_budget_settings:
+            settings_store.replace_budget_settings(payload.snapshot.budget_settings)
+        if payload.import_tag_settings:
+            settings_store.replace_tag_settings(payload.snapshot.tag_settings)
 
         if (
             payload.include_bills
@@ -193,6 +205,8 @@ class DataManagementService:
             or payload.include_candidates
             or payload.import_privacy_settings
             or payload.import_category_settings
+            or payload.import_budget_settings
+            or payload.import_tag_settings
         ):
             idempotency_store.clear()
 
@@ -210,6 +224,8 @@ class DataManagementService:
             imported_task_candidate_count=imported_task_candidate_count,
             privacy_settings=settings_store.get_privacy_settings(),
             category_settings=settings_store.get_category_settings(),
+            budget_settings=settings_store.get_budget_settings(),
+            tag_settings=settings_store.get_tag_settings(),
         )
 
     def _snapshot_status(self) -> DataSnapshotStatus:
@@ -492,6 +508,8 @@ class DataManagementService:
                     include_candidates=True,
                     reset_privacy_settings=False,
                     reset_category_settings=False,
+                    reset_budget_settings=False,
+                    reset_tag_settings=False,
                 )
             )
             before = self.summary()
@@ -535,6 +553,10 @@ class DataManagementService:
             settings_store.reset_privacy_settings()
         if payload.reset_category_settings:
             settings_store.reset_category_settings()
+        if payload.reset_budget_settings:
+            settings_store.reset_budget_settings()
+        if payload.reset_tag_settings:
+            settings_store.reset_tag_settings()
         if (
             payload.include_bills
             or payload.include_tasks
@@ -543,6 +565,8 @@ class DataManagementService:
             or payload.include_candidates
             or payload.reset_privacy_settings
             or payload.reset_category_settings
+            or payload.reset_budget_settings
+            or payload.reset_tag_settings
         ):
             idempotency_store.clear()
 
@@ -552,6 +576,8 @@ class DataManagementService:
             after=self.summary(),
             privacy_settings=settings_store.get_privacy_settings(),
             category_settings=settings_store.get_category_settings(),
+            budget_settings=settings_store.get_budget_settings(),
+            tag_settings=settings_store.get_tag_settings(),
         )
 
     def _write_csv(self, fieldnames: list[str], rows: list[dict[str, object]]) -> str:

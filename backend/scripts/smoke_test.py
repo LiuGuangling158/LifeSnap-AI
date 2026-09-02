@@ -129,6 +129,8 @@ def _run_checks(client: ApiClient) -> None:
     _check_task_snooze_idempotency(client)
     _check_privacy_switch(client)
     _check_category_settings(client)
+    _check_budget_settings(client)
+    _check_tag_settings(client)
     _check_attachment_duplicate_detection(client)
     _check_ocr_fallback_flow(client)
     _check_audit_log_and_request_id(client)
@@ -204,7 +206,7 @@ def _check_demo_data_seed(client: ApiClient) -> None:
         "include_attachment": True,
         "include_candidates": True,
     }
-    headers = {"Idempotency-Key": "smoke-seed-demo-001"}
+    headers = {"Idempotency-Key": f"smoke-seed-demo-{time.time_ns()}"}
     status, first = client.request(
         "POST",
         "/data/seed-demo",
@@ -268,6 +270,14 @@ def _check_app_bootstrap(client: ApiClient) -> None:
     _assert(
         bootstrap["category_settings"]["bill_categories"],
         "App bootstrap should include category settings",
+    )
+    _assert(
+        float(bootstrap["budget_settings"]["monthly_budget"]) >= 0,
+        "App bootstrap should include budget settings",
+    )
+    _assert(
+        bootstrap["tag_settings"]["tags"],
+        "App bootstrap should include tag settings",
     )
     _assert(
         bootstrap["data_summary"]["bill_count"] >= 1,
@@ -1017,6 +1027,108 @@ def _check_category_settings(client: ApiClient) -> None:
     _assert(
         restored["bill_categories"] == original_categories["bill_categories"],
         "Category settings should restore original bill categories after test",
+    )
+
+
+def _check_budget_settings(client: ApiClient) -> None:
+    status, budget = client.request("GET", "/settings/budget")
+    _assert(status == 200, "Budget settings should return 200")
+    _assert(
+        float(budget["monthly_budget"]) >= 0,
+        "Budget settings should include a non-negative monthly budget",
+    )
+    original_budget = {
+        "monthly_budget": budget["monthly_budget"],
+        "warning_threshold_percent": budget["warning_threshold_percent"],
+    }
+
+    status, updated = client.request(
+        "PATCH",
+        "/settings/budget",
+        {
+            "monthly_budget": "3600.50",
+            "warning_threshold_percent": 75,
+        },
+    )
+    _assert(status == 200, "Budget settings update should return 200")
+    _assert(
+        float(updated["monthly_budget"]) == 3600.5,
+        "Budget settings should update monthly budget",
+    )
+    _assert(
+        updated["warning_threshold_percent"] == 75,
+        "Budget settings should update warning threshold",
+    )
+
+    status, snapshot = client.request("GET", "/data/export")
+    _assert(status == 200, "Budget settings export setup should return 200")
+    _assert(
+        float(snapshot["budget_settings"]["monthly_budget"]) == 3600.5,
+        "Data export should include budget settings",
+    )
+
+    status, restored = client.request("PATCH", "/settings/budget", original_budget)
+    _assert(status == 200, "Budget settings restore should return 200")
+    _assert(
+        float(restored["monthly_budget"]) == float(original_budget["monthly_budget"]),
+        "Budget settings should restore original monthly budget after test",
+    )
+
+
+def _check_tag_settings(client: ApiClient) -> None:
+    status, tags = client.request("GET", "/settings/tags")
+    _assert(status == 200, "Tag settings should return 200")
+    _assert(tags["tags"], "Tag settings should include default tags")
+    original_tags = {"tags": tags["tags"]}
+
+    status, updated = client.request(
+        "PATCH",
+        "/settings/tags",
+        {"tags": ["轻松", "成长", "轻松", ""]},
+    )
+    _assert(status == 200, "Tag settings update should return 200")
+    _assert(
+        updated["tags"] == ["轻松", "成长"],
+        "Tag settings should trim blanks and remove duplicate tags",
+    )
+
+    status, diary = client.request(
+        "PUT",
+        "/diaries/by-date/2026-08-18",
+        {
+            "entry_date": "2026-08-18",
+            "title": "Smoke Tag Diary",
+            "content": "A diary entry with tags.",
+            "mood": "calm",
+            "source": "manual",
+            "tags": ["轻松", "成长", "轻松", ""],
+        },
+    )
+    _assert(status == 200, "Diary with tags should be saved")
+    _assert(
+        diary["tags"] == ["轻松", "成长"],
+        "Diary tags should trim blanks and remove duplicates",
+    )
+
+    status, found = client.request("GET", "/diaries?q=%E6%88%90%E9%95%BF&page_size=5")
+    _assert(status == 200, "Diary tag search should return 200")
+    _assert(
+        any(item["id"] == diary["id"] for item in found["items"]),
+        "Diary keyword search should include matching tags",
+    )
+
+    status, snapshot = client.request("GET", "/data/export")
+    _assert(status == 200, "Tag settings export setup should return 200")
+    _assert(
+        snapshot["tag_settings"]["tags"] == ["轻松", "成长"],
+        "Data export should include tag settings",
+    )
+
+    status, restored = client.request("PATCH", "/settings/tags", original_tags)
+    _assert(status == 200, "Tag settings restore should return 200")
+    _assert(
+        restored["tags"] == original_tags["tags"],
+        "Tag settings should restore original tags after test",
     )
 
 
