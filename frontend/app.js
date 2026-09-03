@@ -65,12 +65,16 @@ const defaultTagSettings = {
 };
 
 const profileStorageKey = "lifesnap_profile_settings";
+const assistantSessionStorageKey = "lifesnap_assistant_session";
+const knownAssistantToolIds = ["bill_candidate", "task_candidate", "diary_reflection", "attachment_bill_recognition"];
 
 const defaultProfileSettings = {
   displayName: "今天也要加油呀",
   signature: "记录生活，遇见更好的自己",
   avatarTone: "warm",
 };
+
+const initialAssistantSession = loadAssistantSession();
 
 const state = {
   route: getRoute(),
@@ -119,10 +123,10 @@ const state = {
     tasks: [],
     diaries: [],
   },
-  chatMessages: [],
-  chatDraft: "",
+  chatMessages: initialAssistantSession.chatMessages,
+  chatDraft: initialAssistantSession.chatDraft,
   chatAttachments: [],
-  activeAssistantToolId: null,
+  activeAssistantToolId: initialAssistantSession.activeAssistantToolId,
   voiceListening: false,
   billFilters: {
     period: "month",
@@ -232,6 +236,7 @@ document.addEventListener("click", (event) => {
   if (chatExampleButton) {
     const draft = chatExampleButton.dataset.chatExample || "";
     state.activeAssistantToolId = inferAssistantToolFromMessage(draft);
+    saveAssistantSession();
     openAssistantPage(draft);
     return;
   }
@@ -853,6 +858,7 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("input", (event) => {
   if (event.target.matches("[data-chat-input]")) {
     state.chatDraft = event.target.value;
+    saveAssistantSession();
   }
 });
 
@@ -1851,6 +1857,7 @@ function openChatModal(draft = "") {
 function openAssistantPage(draft = "", options = {}) {
   if (draft) {
     state.chatDraft = draft;
+    saveAssistantSession();
   }
   ensureChatIntro();
   if (state.route !== "assistant") {
@@ -1865,6 +1872,7 @@ function openAssistantPage(draft = "", options = {}) {
 
 function startAssistantTool(toolId) {
   state.activeAssistantToolId = toolId || null;
+  saveAssistantSession();
   if (toolId === "attachment_bill_recognition") {
     openAssistantPage();
     window.setTimeout(() => {
@@ -1915,6 +1923,7 @@ function resetChatSession() {
   state.chatDraft = "";
   state.chatAttachments = [];
   state.activeAssistantToolId = null;
+  clearAssistantSessionStorage();
   ensureChatIntro();
   showToast("已清空当前助手会话。");
 }
@@ -1953,6 +1962,7 @@ async function submitChatMessage(formData) {
   state.chatDraft = "";
   state.chatAttachments = [];
   state.saving = true;
+  saveAssistantSession();
   render();
 
   try {
@@ -1964,6 +1974,7 @@ async function submitChatMessage(formData) {
 
     if (imageMessages.length) {
       state.chatMessages = [...state.chatMessages, ...imageMessages];
+      saveAssistantSession();
     }
 
     if (shouldSendTextToChat) {
@@ -1978,12 +1989,14 @@ async function submitChatMessage(formData) {
         { role: "assistant", text: response.reply, response },
       ];
       state.activeAssistantToolId = response.assistant_tool_id || state.activeAssistantToolId;
+      saveAssistantSession();
     }
   } catch (error) {
     state.chatMessages = [
       ...state.chatMessages,
       { role: "assistant", text: error.message || "AI 助手暂时没有响应。" },
     ];
+    saveAssistantSession();
   } finally {
     state.saving = false;
     render();
@@ -1997,6 +2010,15 @@ async function analyzeChatAttachments(attachments) {
       messages.push({
         role: "assistant",
         text: `图片「${attachment.name}」还没有上传成功，暂时无法识别。`,
+        response: {
+          intent: "create_bill",
+          confidence: 0,
+          assistant_tool_id: "attachment_bill_recognition",
+          action_type: "none",
+          warnings: ["attachment_upload_missing"],
+          need_user_confirmation: false,
+          agent_steps: attachmentAgentSteps("blocked"),
+        },
       });
       continue;
     }
@@ -2010,6 +2032,15 @@ async function analyzeChatAttachments(attachments) {
       messages.push({
         role: "assistant",
         text: `图片「${attachment.name}」已上传，但识别时遇到问题：${error.message || "请稍后再试"}`,
+        response: {
+          intent: "create_bill",
+          confidence: 0,
+          assistant_tool_id: "attachment_bill_recognition",
+          action_type: "none",
+          warnings: ["attachment_recognition_failed"],
+          need_user_confirmation: false,
+          agent_steps: attachmentAgentSteps("blocked"),
+        },
       });
     }
   }
@@ -2025,10 +2056,12 @@ function chatMessageFromAttachmentResult(attachment, result) {
         reply: "我从图片里整理出一个待确认账单，你确认后再保存。",
         intent: "create_bill",
         confidence: result.candidate.confidence ?? 0.7,
+        assistant_tool_id: "attachment_bill_recognition",
         action_type: "bill_candidate",
         candidate_id: result.candidate.candidate_id,
         candidate: result.candidate,
         warnings: result.warnings ?? [],
+        agent_steps: attachmentAgentSteps("needs_confirmation"),
         need_user_confirmation: true,
       },
     };
@@ -2037,7 +2070,41 @@ function chatMessageFromAttachmentResult(attachment, result) {
   return {
     role: "assistant",
     text: `图片「${attachment.name}」已上传，但当前本地 OCR 还没有识别出文字。你可以补充商户、金额或提醒内容，我再继续整理。`,
+    response: {
+      intent: "create_bill",
+      confidence: result.confidence ?? 0,
+      assistant_tool_id: "attachment_bill_recognition",
+      action_type: "none",
+      warnings: result.warnings ?? [],
+      need_user_confirmation: false,
+      agent_steps: attachmentAgentSteps("blocked"),
+    },
   };
+}
+
+function attachmentAgentSteps(finalStatus) {
+  const isBlocked = finalStatus === "blocked";
+  return [
+    {
+      title: "读取图片",
+      detail: "已接收上传图片并尝试识别内容。",
+      status: "completed",
+    },
+    {
+      title: isBlocked ? "停止执行" : "整理候选",
+      detail: isBlocked
+        ? "暂时没有足够信息生成可确认账单。"
+        : "已从识别结果中整理金额、商户、分类和时间。",
+      status: isBlocked ? "blocked" : "completed",
+    },
+    ...(isBlocked
+      ? []
+      : [{
+          title: "等待确认",
+          detail: "保存前需要你确认候选账单。",
+          status: finalStatus,
+        }]),
+  ];
 }
 
 async function addChatImages(fileList) {
@@ -2167,6 +2234,7 @@ function startVoiceInput() {
     }
     const currentSpeech = [spokenText, interimText].filter(Boolean).join(" ");
     state.chatDraft = [initialDraft, currentSpeech].filter(Boolean).join(initialDraft && currentSpeech ? " " : "");
+    saveAssistantSession();
     render();
   };
 
@@ -2231,6 +2299,7 @@ async function confirmChatAction(actionType, candidateId) {
       ...state.chatMessages,
       { role: "assistant", text: response.reply || "已确认保存。", response },
     ];
+    saveAssistantSession();
     state.toast = actionType === "bill_candidate" ? "AI 账单已保存" : "AI 待办已保存";
     await loadData();
   } catch (error) {
@@ -2238,6 +2307,7 @@ async function confirmChatAction(actionType, candidateId) {
       ...state.chatMessages,
       { role: "assistant", text: error.message || "确认保存失败。" },
     ];
+    saveAssistantSession();
     render();
   } finally {
     state.saving = false;
@@ -2266,12 +2336,14 @@ async function discardChatAction(actionType, candidateId) {
       ...state.chatMessages,
       { role: "assistant", text: response.reply || "已丢弃候选记录。" },
     ];
+    saveAssistantSession();
     await loadData();
   } catch (error) {
     state.chatMessages = [
       ...state.chatMessages,
       { role: "assistant", text: error.message || "丢弃失败。" },
     ];
+    saveAssistantSession();
     render();
   } finally {
     state.saving = false;
@@ -2284,6 +2356,7 @@ function markChatCandidate(candidateId, status) {
     const responseCandidateId = getChatCandidateId(message.response);
     return responseCandidateId === candidateId ? { ...message, handled: status } : message;
   });
+  saveAssistantSession();
 }
 
 async function completeTask(taskId) {
@@ -3182,6 +3255,111 @@ function saveProfileSettings(profile) {
   } catch (error) {
     return false;
   }
+}
+
+function loadAssistantSession() {
+  try {
+    const stored = window.localStorage?.getItem(assistantSessionStorageKey);
+    return normalizeAssistantSession(stored ? JSON.parse(stored) : {});
+  } catch (error) {
+    return normalizeAssistantSession({});
+  }
+}
+
+function saveAssistantSession() {
+  try {
+    window.localStorage?.setItem(assistantSessionStorageKey, JSON.stringify({
+      chatMessages: state.chatMessages.map(toStoredChatMessage).filter(Boolean).slice(-30),
+      chatDraft: state.chatDraft,
+      activeAssistantToolId: state.activeAssistantToolId,
+    }));
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function clearAssistantSessionStorage() {
+  try {
+    window.localStorage?.removeItem(assistantSessionStorageKey);
+  } catch (error) {
+    // Clearing a local draft is best-effort only.
+  }
+}
+
+function normalizeAssistantSession(value) {
+  const input = value && typeof value === "object" ? value : {};
+  return {
+    chatMessages: Array.isArray(input.chatMessages)
+      ? input.chatMessages.map(normalizeStoredChatMessage).filter(Boolean).slice(-30)
+      : [],
+    chatDraft: String(input.chatDraft ?? "").slice(0, 5000),
+    activeAssistantToolId: isKnownAssistantTool(input.activeAssistantToolId)
+      ? input.activeAssistantToolId
+      : null,
+  };
+}
+
+function normalizeStoredChatMessage(message) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const role = message.role === "user" ? "user" : "assistant";
+  const text = String(message.text ?? "").slice(0, 5000);
+  const response = normalizeStoredChatResponse(message.response);
+  if (!text && !response) {
+    return null;
+  }
+  return {
+    role,
+    text,
+    response,
+    handled: ["confirmed", "discarded"].includes(message.handled) ? message.handled : undefined,
+  };
+}
+
+function normalizeStoredChatResponse(response) {
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+  return {
+    reply: String(response.reply ?? "").slice(0, 5000),
+    intent: String(response.intent ?? "unsupported"),
+    confidence: Number.isFinite(Number(response.confidence)) ? Number(response.confidence) : 0,
+    assistant_tool_id: isKnownAssistantTool(response.assistant_tool_id) ? response.assistant_tool_id : null,
+    action_type: String(response.action_type ?? "none"),
+    candidate_id: response.candidate_id ? String(response.candidate_id) : null,
+    candidate: response.candidate ?? null,
+    warnings: Array.isArray(response.warnings) ? response.warnings.map(String).slice(0, 20) : [],
+    need_user_confirmation: Boolean(response.need_user_confirmation),
+    agent_steps: Array.isArray(response.agent_steps)
+      ? response.agent_steps.map(normalizeStoredAgentStep).filter(Boolean).slice(0, 6)
+      : [],
+  };
+}
+
+function normalizeStoredAgentStep(step) {
+  if (!step || typeof step !== "object") {
+    return null;
+  }
+  return {
+    title: String(step.title ?? "执行步骤").slice(0, 40),
+    detail: String(step.detail ?? "").slice(0, 160),
+    status: ["completed", "needs_confirmation", "blocked"].includes(step.status) ? step.status : "completed",
+  };
+}
+
+function toStoredChatMessage(message) {
+  return normalizeStoredChatMessage({
+    role: message.role,
+    text: message.text,
+    response: message.response,
+    handled: message.handled,
+  });
+}
+
+function isKnownAssistantTool(toolId) {
+  return knownAssistantToolIds.includes(toolId);
 }
 
 function normalizeProfileSettings(value) {
