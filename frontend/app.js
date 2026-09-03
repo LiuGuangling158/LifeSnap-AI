@@ -122,6 +122,7 @@ const state = {
   chatMessages: [],
   chatDraft: "",
   chatAttachments: [],
+  activeAssistantToolId: null,
   voiceListening: false,
   billFilters: {
     period: "month",
@@ -229,7 +230,15 @@ document.addEventListener("click", (event) => {
 
   const chatExampleButton = event.target.closest("[data-chat-example]");
   if (chatExampleButton) {
-    openAssistantPage(chatExampleButton.dataset.chatExample || "");
+    const draft = chatExampleButton.dataset.chatExample || "";
+    state.activeAssistantToolId = inferAssistantToolFromMessage(draft);
+    openAssistantPage(draft);
+    return;
+  }
+
+  const assistantToolButton = event.target.closest("[data-assistant-tool]");
+  if (assistantToolButton) {
+    startAssistantTool(assistantToolButton.dataset.assistantTool || "");
     return;
   }
 
@@ -1854,11 +1863,58 @@ function openAssistantPage(draft = "", options = {}) {
   }
 }
 
+function startAssistantTool(toolId) {
+  state.activeAssistantToolId = toolId || null;
+  if (toolId === "attachment_bill_recognition") {
+    openAssistantPage();
+    window.setTimeout(() => {
+      const input = app.querySelector("[data-chat-image-input]");
+      if (input) {
+        input.click();
+      } else {
+        showToast("图片入口暂时没有准备好，请稍后再试。");
+      }
+    }, 80);
+    return;
+  }
+
+  const drafts = {
+    bill_candidate: "记一笔：",
+    task_candidate: "提醒我：",
+    diary_reflection: "日记追问：帮我整理今天的心情。",
+  };
+  openAssistantPage(drafts[toolId] || "");
+}
+
+function inferAssistantToolFromMessage(message = "", attachments = []) {
+  if (attachments.length) {
+    return "attachment_bill_recognition";
+  }
+  const text = String(message || "");
+  if (text.includes("日记") || text.includes("心情") || text.includes("感谢") || text.includes("学到")) {
+    return "diary_reflection";
+  }
+  if (text.includes("提醒") || text.includes("待办") || text.includes("任务") || text.includes("明天")) {
+    return "task_candidate";
+  }
+  if (
+    text.includes("记账")
+    || text.includes("记一笔")
+    || text.includes("收入")
+    || text.includes("支出")
+    || /\d+(?:\.\d{1,2})?\s*(元|块|rmb|cny|¥)/i.test(text)
+  ) {
+    return "bill_candidate";
+  }
+  return null;
+}
+
 function resetChatSession() {
   stopVoiceInput(false);
   state.chatMessages = [];
   state.chatDraft = "";
   state.chatAttachments = [];
+  state.activeAssistantToolId = null;
   ensureChatIntro();
   showToast("已清空当前助手会话。");
 }
@@ -1884,6 +1940,8 @@ async function submitChatMessage(formData) {
   }
 
   const displayText = message || "发送了一张图片";
+  state.activeAssistantToolId = inferAssistantToolFromMessage(message, attachments)
+    || state.activeAssistantToolId;
   state.chatMessages = [
     ...state.chatMessages,
     {
@@ -1919,6 +1977,7 @@ async function submitChatMessage(formData) {
         ...state.chatMessages,
         { role: "assistant", text: response.reply, response },
       ];
+      state.activeAssistantToolId = response.assistant_tool_id || state.activeAssistantToolId;
     }
   } catch (error) {
     state.chatMessages = [
@@ -4431,6 +4490,7 @@ function openDiaryAssistantPrompt(promptText) {
     "请先围绕这个问题追问我一个更具体的小问题，帮助我把今天的日记写得更完整。",
   ].join("\n");
 
+  state.activeAssistantToolId = "diary_reflection";
   openAssistantPage(draft);
 }
 
@@ -6283,9 +6343,9 @@ function renderAssistantPage() {
 
         <form class="assistant-composer" data-chat-form>
           ${renderChatAttachmentQueue()}
-          <label class="sr-only" for="chat_message">输入账单或提醒</label>
+          <label class="sr-only" for="chat_message">输入给助手的内容</label>
           <textarea id="chat_message" name="message" maxlength="5000" data-chat-input
-            placeholder="例如：午餐 28 元 微信支付；或：提醒我明天 10 点开会。也可以先选图片再补一句说明。">${escapeHtml(state.chatDraft)}</textarea>
+            placeholder="${escapeHtml(assistantComposerPlaceholder())}">${escapeHtml(state.chatDraft)}</textarea>
 
           <div class="assistant-composer-actions">
             <label class="assistant-tool-button" aria-label="发送图片">
@@ -6318,16 +6378,29 @@ function renderAssistantCapabilities() {
   return `
     <div class="assistant-capabilities" aria-label="助手可执行能力">
       ${tools.map((tool) => `
-        <div class="assistant-capability">
+        <button class="assistant-capability ${state.activeAssistantToolId === tool.id ? "is-active" : ""}" type="button"
+          data-assistant-tool="${escapeHtml(tool.id)}"
+          aria-pressed="${state.activeAssistantToolId === tool.id ? "true" : "false"}"
+          aria-label="使用${escapeHtml(tool.label)}"
+          title="${escapeHtml(tool.description || tool.label)}">
           <span>${icon(iconForAssistantTool(tool.id))}</span>
           <div>
             <strong>${escapeHtml(tool.label)}</strong>
             <small>${escapeHtml(tool.requires_confirmation ? "需要确认" : "直接引导")}</small>
           </div>
-        </div>
+        </button>
       `).join("")}
     </div>
   `;
+}
+
+function assistantComposerPlaceholder() {
+  return {
+    bill_candidate: "例如：午餐 28 元 微信支付 餐饮",
+    task_candidate: "例如：提醒我明天 10 点开会",
+    diary_reflection: "例如：今天有点累，但完成了一个重要任务",
+    attachment_bill_recognition: "可以先选择图片，再补一句说明",
+  }[state.activeAssistantToolId] ?? "例如：午餐 28 元 微信支付；或：提醒我明天 10 点开会。也可以先选图片再补一句说明。";
 }
 
 function assistantTools() {

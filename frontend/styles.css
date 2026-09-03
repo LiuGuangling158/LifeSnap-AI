@@ -5320,6 +5320,7 @@ td {
   border-radius: var(--radius);
   background: #fbfdfa;
   padding: 8px;
+  text-align: left;
   transition:
     border-color var(--motion),
     background-color var(--motion),
@@ -5330,6 +5331,11 @@ td {
   border-color: #b7d7c5;
   background: #f4fbf7;
   transform: translateY(-1px);
+}
+
+.assistant-capability.is-active {
+  border-color: #10a37f;
+  background: #edf8f2;
 }
 
 .assistant-capability > span {
