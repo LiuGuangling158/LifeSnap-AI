@@ -42,6 +42,7 @@ class ChatMessageResponse(BaseModel):
     reply: str
     intent: ChatIntent
     confidence: float = Field(ge=0, le=1)
+    assistant_tool_id: str | None = Field(default=None, max_length=80)
     action_type: ChatActionType = ChatActionType.none
     candidate_id: UUID | None = None
     candidate: ParseBillResponse | ParseTaskResponse | None = None

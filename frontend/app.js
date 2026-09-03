@@ -6273,6 +6273,7 @@ function renderAssistantPage() {
           </div>
         </div>
 
+        ${renderAssistantCapabilities()}
         ${renderAssistantQuickPrompts()}
 
         <div class="assistant-thread chat-thread" aria-live="polite">
@@ -6306,6 +6307,49 @@ function renderAssistantPage() {
       </section>
     </div>
   `;
+}
+
+function renderAssistantCapabilities() {
+  const tools = assistantTools().slice(0, 4);
+  if (!tools.length) {
+    return "";
+  }
+
+  return `
+    <div class="assistant-capabilities" aria-label="助手可执行能力">
+      ${tools.map((tool) => `
+        <div class="assistant-capability">
+          <span>${icon(iconForAssistantTool(tool.id))}</span>
+          <div>
+            <strong>${escapeHtml(tool.label)}</strong>
+            <small>${escapeHtml(tool.requires_confirmation ? "需要确认" : "直接引导")}</small>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function assistantTools() {
+  const tools = state.bootstrap?.capabilities?.assistant_tools;
+  if (Array.isArray(tools) && tools.length) {
+    return tools;
+  }
+  return [
+    { id: "bill_candidate", label: "记账候选", requires_confirmation: true },
+    { id: "task_candidate", label: "提醒候选", requires_confirmation: true },
+    { id: "diary_reflection", label: "日记追问", requires_confirmation: false },
+    { id: "attachment_bill_recognition", label: "图片记账", requires_confirmation: true },
+  ];
+}
+
+function iconForAssistantTool(toolId) {
+  return {
+    bill_candidate: "wallet",
+    task_candidate: "bell",
+    diary_reflection: "book",
+    attachment_bill_recognition: "image",
+  }[toolId] ?? "spark";
 }
 
 function renderAssistantQuickPrompts() {
@@ -6355,11 +6399,28 @@ function renderChatMessage(message, index) {
       <div>
         <p>${escapeHtml(message.text ?? "")}</p>
         ${renderChatMessageAttachments(message.attachments)}
+        ${renderChatSelectedTool(message.response)}
         ${renderChatAgentSteps(message.response?.agent_steps)}
         ${renderChatCandidate(message)}
         ${renderChatResult(message)}
       </div>
     </article>
+  `;
+}
+
+function renderChatSelectedTool(response) {
+  if (!response?.assistant_tool_id) {
+    return "";
+  }
+  const tool = assistantTools().find((item) => item.id === response.assistant_tool_id);
+  const label = tool?.label || chatIntentDisplay(response.intent) || "助手能力";
+  const note = tool?.requires_confirmation ? "需确认后执行" : "直接对话";
+  return `
+    <div class="chat-selected-tool">
+      ${icon(iconForAssistantTool(response.assistant_tool_id))}
+      <span>${escapeHtml(label)}</span>
+      <small>${escapeHtml(note)}</small>
+    </div>
   `;
 }
 

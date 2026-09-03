@@ -12,6 +12,14 @@ from app.schemas.settings import (
 )
 
 
+class AssistantToolCapability(BaseModel):
+    id: str
+    label: str
+    description: str
+    input_modes: list[str]
+    requires_confirmation: bool = False
+
+
 class AppCapabilities(BaseModel):
     app_name: str
     app_version: str
@@ -27,6 +35,7 @@ class AppCapabilities(BaseModel):
     supported_diary_sources: list[str]
     supported_diary_moods: list[str]
     supported_transaction_types: list[str]
+    assistant_tools: list[AssistantToolCapability]
     idempotency_supported_endpoints: list[str]
     feature_flags: dict[str, bool]
     known_limitations: list[str]

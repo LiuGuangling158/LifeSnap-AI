@@ -258,6 +258,12 @@ def _check_app_bootstrap(client: ApiClient) -> None:
         not capabilities["feature_flags"]["real_ocr_engine"],
         "App capabilities should expose unavailable real OCR feature",
     )
+    tool_ids = {tool["id"] for tool in capabilities["assistant_tools"]}
+    _assert(
+        {"bill_candidate", "task_candidate", "diary_reflection", "attachment_bill_recognition"}
+        <= tool_ids,
+        "App capabilities should expose supported assistant tools",
+    )
 
     status, bootstrap = client.request(
         "GET",
@@ -291,6 +297,10 @@ def _check_app_bootstrap(client: ApiClient) -> None:
     _assert(
         bootstrap["capabilities"]["app_version"] == capabilities["app_version"],
         "App bootstrap should include the same capabilities version",
+    )
+    _assert(
+        len(bootstrap["capabilities"]["assistant_tools"]) >= 4,
+        "App bootstrap should include assistant tools",
     )
 
 
@@ -652,6 +662,10 @@ def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     status, body = client.request("POST", "/chat/messages", {"message": message})
     _assert(status == 200, "POST /chat/messages should return 200")
     _assert(body["intent"] == "create_task", "Chat should create a task candidate")
+    _assert(
+        body["assistant_tool_id"] == "task_candidate",
+        "Chat task response should expose selected assistant tool",
+    )
     _assert(body["agent_steps"], "Chat task response should include agent steps")
     _assert(
         body["agent_steps"][-1]["status"] == "needs_confirmation",
@@ -732,6 +746,10 @@ def _check_chat_diary_reflection(client: ApiClient) -> None:
     _assert(
         body["action_type"] == "none",
         "Diary reflection should not create a candidate action",
+    )
+    _assert(
+        body["assistant_tool_id"] == "diary_reflection",
+        "Diary reflection should expose selected assistant tool",
     )
     _assert(
         body["need_user_confirmation"] is False,
@@ -1268,6 +1286,10 @@ def _check_audit_log_and_request_id(client: ApiClient) -> None:
     _assert(
         chat_metadata.get("agent_step_count", 0) >= 1,
         "Audit chat event should include agent step count",
+    )
+    _assert(
+        "assistant_tool_id" in chat_metadata,
+        "Audit chat event should include selected assistant tool",
     )
     _assert(
         chat_events["items"][0]["request_id"],

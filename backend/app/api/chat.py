@@ -34,6 +34,7 @@ def send_message(payload: ChatMessageRequest, request: Request) -> ChatMessageRe
             "message_length": len(payload.message),
             "intent": response.intent,
             "confidence": response.confidence,
+            "assistant_tool_id": response.assistant_tool_id,
             "action_type": response.action_type,
             "candidate_id": response.candidate_id,
             "need_user_confirmation": response.need_user_confirmation,

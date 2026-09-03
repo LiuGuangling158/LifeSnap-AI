@@ -5241,7 +5241,7 @@ td {
 
 .assistant-chat-page {
   display: grid;
-  grid-template-rows: auto auto minmax(260px, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(260px, 1fr) auto;
   min-height: calc(100vh - 296px);
   overflow: hidden;
   border: 1px solid #d9e6df;
@@ -5301,6 +5301,69 @@ td {
   border-color: #86bec9;
   background: #edf8fb;
   color: #236577;
+}
+
+.assistant-capabilities {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 15px 0;
+}
+
+.assistant-capability {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid #dbe7df;
+  border-radius: var(--radius);
+  background: #fbfdfa;
+  padding: 8px;
+  transition:
+    border-color var(--motion),
+    background-color var(--motion),
+    transform var(--motion);
+}
+
+.assistant-capability:hover {
+  border-color: #b7d7c5;
+  background: #f4fbf7;
+  transform: translateY(-1px);
+}
+
+.assistant-capability > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--radius);
+  background: #eaf7f0;
+  color: #10a37f;
+}
+
+.assistant-capability .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.assistant-capability strong,
+.assistant-capability small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-capability strong {
+  color: #223129;
+  font-size: 12px;
+}
+
+.assistant-capability small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .assistant-prompts {
@@ -5801,6 +5864,53 @@ button:focus-visible {
 
 .chat-message.user p {
   background: #e8f4ec;
+}
+
+.chat-selected-tool {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  border: 1px solid #d6e6dc;
+  border-radius: var(--radius);
+  background: #f5fbf7;
+  color: #24735f;
+  padding: 5px 8px;
+  transition:
+    border-color var(--motion),
+    background-color var(--motion),
+    transform var(--motion);
+}
+
+.chat-selected-tool:hover {
+  border-color: #acd4bd;
+  background: #edf8f2;
+  transform: translateY(-1px);
+}
+
+.chat-selected-tool .icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.chat-selected-tool span,
+.chat-selected-tool small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-selected-tool span {
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.chat-selected-tool small {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .chat-agent-steps {
@@ -7869,6 +7979,10 @@ button:focus-visible {
 
   .assistant-chat-page {
     min-height: calc(100vh - 280px);
+  }
+
+  .assistant-capabilities {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .assistant-thread.chat-thread {

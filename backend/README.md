@@ -33,10 +33,10 @@ GET /app/bootstrap
 GET /app/bootstrap?recent_bill_limit=5&candidate_limit=5
 ```
 
-`/app/capabilities` exposes MVP feature flags, supported attachment types,
-attachment size limits, parser providers, storage backend, and known
-limitations. `/app/bootstrap` combines capabilities, privacy settings, local
-data counts, and dashboard summary for frontend startup.
+`/app/capabilities` exposes MVP feature flags, assistant tool capabilities,
+supported attachment types, attachment size limits, parser providers, storage
+backend, and known limitations. `/app/bootstrap` combines capabilities, privacy
+settings, local data counts, and dashboard summary for frontend startup.
 
 Bill statistics:
 

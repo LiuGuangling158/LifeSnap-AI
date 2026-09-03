@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.schemas.bill import BillSource, TransactionType
-from app.schemas.bootstrap import AppBootstrapResponse, AppCapabilities
+from app.schemas.bootstrap import AppBootstrapResponse, AppCapabilities, AssistantToolCapability
 from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskSource
 from app.services.attachment_store import attachment_store
@@ -31,6 +31,36 @@ class BootstrapService:
             supported_diary_moods=[mood.value for mood in DiaryMood],
             supported_transaction_types=[
                 transaction_type.value for transaction_type in TransactionType
+            ],
+            assistant_tools=[
+                AssistantToolCapability(
+                    id="bill_candidate",
+                    label="记账候选",
+                    description="从一句话整理金额、商户、分类和时间，确认后保存账单。",
+                    input_modes=["text", "voice"],
+                    requires_confirmation=True,
+                ),
+                AssistantToolCapability(
+                    id="task_candidate",
+                    label="提醒候选",
+                    description="从一句话整理待办标题、时间、分类和优先级，确认后保存提醒。",
+                    input_modes=["text", "voice"],
+                    requires_confirmation=True,
+                ),
+                AssistantToolCapability(
+                    id="diary_reflection",
+                    label="日记追问",
+                    description="围绕心情、感谢、学习和生活片段生成追问，帮助补全日记。",
+                    input_modes=["text", "voice"],
+                    requires_confirmation=False,
+                ),
+                AssistantToolCapability(
+                    id="attachment_bill_recognition",
+                    label="图片记账",
+                    description="识别支付截图或票据图片，并整理成待确认账单候选。",
+                    input_modes=["image", "text"],
+                    requires_confirmation=True,
+                ),
             ],
             idempotency_supported_endpoints=[
                 "POST /bills",
