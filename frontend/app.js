@@ -7465,6 +7465,7 @@ function renderAuditEvent(event) {
       <div class="audit-event-main">
         <strong>${escapeHtml(auditActionLabel(event.action))}</strong>
         <small>${escapeHtml(auditEventMeta(event))}</small>
+        ${renderAuditEventDetail(event)}
       </div>
       <time>${escapeHtml(formatDate(event.occurred_at))}</time>
     </article>
@@ -7532,6 +7533,46 @@ function auditEventMeta(event) {
     parts.push(`请求 ${String(event.request_id).slice(0, 8)}`);
   }
   return parts.join(" · ") || "本地操作记录";
+}
+
+function renderAuditEventDetail(event) {
+  if (event.action !== "chat_message_processed") {
+    return "";
+  }
+  const metadata = event.metadata ?? {};
+  const details = [
+    chatIntentDisplay(metadata.intent),
+    chatActionDisplay(metadata.action_type),
+    metadata.need_user_confirmation ? "等待确认" : "无需确认",
+    metadata.agent_step_count ? `步骤 ${metadata.agent_step_count}` : "",
+  ].filter(Boolean);
+
+  if (!details.length) {
+    return "";
+  }
+
+  return `
+    <div class="audit-detail-chips">
+      ${details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function chatIntentDisplay(intent) {
+  return {
+    create_bill: "记账",
+    create_task: "提醒",
+    diary_reflection: "日记追问",
+    unsupported: "未支持",
+  }[intent] ?? "";
+}
+
+function chatActionDisplay(actionType) {
+  return {
+    bill_candidate: "账单候选",
+    task_candidate: "待办候选",
+    none: "无候选",
+  }[actionType] ?? "";
 }
 
 function auditEntityLabel(entityType) {

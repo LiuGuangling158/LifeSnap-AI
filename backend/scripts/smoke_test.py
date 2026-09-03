@@ -1254,6 +1254,26 @@ def _check_audit_log_and_request_id(client: ApiClient) -> None:
         "Audit OCR event should store length instead of raw OCR text",
     )
 
+    status, chat_events = client.request(
+        "GET",
+        "/audit/events?action=chat_message_processed&entity_type=chat&page_size=5",
+    )
+    _assert(status == 200, "Audit chat event list should return 200")
+    _assert(chat_events["total"] >= 1, "Audit log should include chat message events")
+    chat_metadata = chat_events["items"][0]["metadata"]
+    _assert(
+        "message_length" in chat_metadata and "message" not in chat_metadata,
+        "Audit chat event should store length instead of raw message text",
+    )
+    _assert(
+        chat_metadata.get("agent_step_count", 0) >= 1,
+        "Audit chat event should include agent step count",
+    )
+    _assert(
+        chat_events["items"][0]["request_id"],
+        "Audit chat events should include request id",
+    )
+
 
 def _check_data_import_restore(client: ApiClient) -> None:
     status, snapshot = client.request("GET", "/data/export")

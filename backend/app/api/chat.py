@@ -23,8 +23,26 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("/messages", response_model=ChatMessageResponse)
-def send_message(payload: ChatMessageRequest) -> ChatMessageResponse:
-    return chat_service.handle_message(payload)
+def send_message(payload: ChatMessageRequest, request: Request) -> ChatMessageResponse:
+    response = chat_service.handle_message(payload)
+    audit_log_store.record(
+        action="chat_message_processed",
+        entity_type="chat",
+        entity_id=response.message_id,
+        request=request,
+        metadata={
+            "message_length": len(payload.message),
+            "intent": response.intent,
+            "confidence": response.confidence,
+            "action_type": response.action_type,
+            "candidate_id": response.candidate_id,
+            "need_user_confirmation": response.need_user_confirmation,
+            "warning_count": len(response.warnings),
+            "agent_step_count": len(response.agent_steps),
+            "agent_step_statuses": ",".join(step.status.value for step in response.agent_steps),
+        },
+    )
+    return response
 
 
 @router.post("/confirm-action", response_model=ChatConfirmActionResponse)
