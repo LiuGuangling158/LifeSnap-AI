@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from app.schemas.bill import BillRead
+from app.schemas.diary import DiaryRead
 from app.schemas.chat import (
     ChatActionType,
     ChatConfirmActionRequest,
@@ -16,6 +17,7 @@ from app.schemas.task import TaskRead
 from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.chat_service import chat_service
+from app.services.diary_candidate_store import diary_candidate_store
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 from app.services.task_candidate_store import task_candidate_store
 
@@ -68,6 +70,7 @@ def confirm_action(
                 "action_type": payload.action_type,
                 "created_bill_id": response.created_bill.id if response.created_bill else None,
                 "created_task_id": response.created_task.id if response.created_task else None,
+                "created_diary_id": response.created_diary.id if response.created_diary else None,
             },
         )
         return response
@@ -105,6 +108,8 @@ def _confirm_candidate(payload: ChatConfirmActionRequest) -> ChatConfirmActionRe
         return _confirm_bill_candidate(payload.candidate_id)
     if payload.action_type == ChatActionType.task_candidate:
         return _confirm_task_candidate(payload.candidate_id)
+    if payload.action_type == ChatActionType.diary_candidate:
+        return _confirm_diary_candidate(payload.candidate_id)
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -117,6 +122,8 @@ def _discard_candidate(payload: ChatDiscardActionRequest) -> ChatDiscardActionRe
         return _discard_bill_candidate(payload.candidate_id)
     if payload.action_type == ChatActionType.task_candidate:
         return _discard_task_candidate(payload.candidate_id)
+    if payload.action_type == ChatActionType.diary_candidate:
+        return _discard_diary_candidate(payload.candidate_id)
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -182,6 +189,35 @@ def _confirm_task_candidate(candidate_id: UUID) -> ChatConfirmActionResponse:
     )
 
 
+def _confirm_diary_candidate(candidate_id: UUID) -> ChatConfirmActionResponse:
+    candidate = diary_candidate_store.get(candidate_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Diary candidate not found",
+        )
+    if not diary_candidate_store.is_confirmable(candidate):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Diary candidate is missing required fields",
+        )
+
+    diary: DiaryRead | None = diary_candidate_store.confirm(candidate_id)
+    if diary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Diary candidate not found",
+        )
+
+    return ChatConfirmActionResponse(
+        message_id=uuid4(),
+        reply="Diary candidate confirmed and saved.",
+        action_type=ChatActionType.diary_candidate,
+        candidate_id=candidate_id,
+        created_diary=diary,
+    )
+
+
 def _discard_bill_candidate(candidate_id: UUID) -> ChatDiscardActionResponse:
     deleted = bill_candidate_store.delete(candidate_id)
     if not deleted:
@@ -210,5 +246,21 @@ def _discard_task_candidate(candidate_id: UUID) -> ChatDiscardActionResponse:
         message_id=uuid4(),
         reply="Task candidate discarded.",
         action_type=ChatActionType.task_candidate,
+        candidate_id=candidate_id,
+    )
+
+
+def _discard_diary_candidate(candidate_id: UUID) -> ChatDiscardActionResponse:
+    deleted = diary_candidate_store.delete(candidate_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Diary candidate not found",
+        )
+
+    return ChatDiscardActionResponse(
+        message_id=uuid4(),
+        reply="Diary candidate discarded.",
+        action_type=ChatActionType.diary_candidate,
         candidate_id=candidate_id,
     )

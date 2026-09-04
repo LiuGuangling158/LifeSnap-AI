@@ -124,6 +124,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_candidate_discard_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_chat_diary_reflection(client)
+    _check_chat_diary_candidate_confirmation(client)
     _check_bill_idempotency(client)
     _check_soft_delete_and_restore(client)
     _check_bill_candidate_duplicate_detection(client)
@@ -759,6 +760,52 @@ def _check_chat_diary_reflection(client: ApiClient) -> None:
     _assert(
         "\u5f00\u5fc3" in body["reply"],
         "Diary reflection reply should guide the selected prompt",
+    )
+
+
+def _check_chat_diary_candidate_confirmation(client: ApiClient) -> None:
+    message = "\u5199\u65e5\u8bb0\uff1a\u4eca\u5929\u5b8c\u6210\u4e86\u9879\u76ee\u590d\u76d8\uff0c\u6674\u5929\uff0c\u5fc3\u60c5\u5f88\u8f7b\u677e"
+    status, body = client.request("POST", "/chat/messages", {"message": message})
+    _assert(status == 200, "POST /chat/messages should create diary candidates")
+    _assert(body["intent"] == "create_diary", "Chat should recognize diary creation")
+    _assert(
+        body["action_type"] == "diary_candidate",
+        "Diary creation should expose a confirmable candidate action",
+    )
+    _assert(
+        body["assistant_tool_id"] == "diary_candidate",
+        "Diary candidate should expose selected assistant tool",
+    )
+    _assert(body["need_user_confirmation"] is True, "Diary candidate should require confirmation")
+    _assert(body["candidate"]["data"]["title"], "Diary candidate should include a title")
+    _assert(body["candidate"]["data"]["content"], "Diary candidate should include content")
+    candidate_id = body["candidate_id"]
+
+    headers = {"Idempotency-Key": "smoke-chat-diary-confirm-001"}
+    status, first = client.request(
+        "POST",
+        "/chat/confirm-action",
+        {"action_type": "diary_candidate", "candidate_id": candidate_id},
+        headers=headers,
+    )
+    status_again, second = client.request(
+        "POST",
+        "/chat/confirm-action",
+        {"action_type": "diary_candidate", "candidate_id": candidate_id},
+        headers=headers,
+    )
+    _assert(status == 200 and status_again == 200, "Diary candidate confirmation should be repeatable")
+    _assert(
+        first["created_diary"]["id"] == second["created_diary"]["id"],
+        "Repeated diary confirmation should return the first diary",
+    )
+    _assert(first["action_type"] == "diary_candidate", "Diary confirmation should keep action type")
+
+    status, diary_candidates = client.request("GET", "/agent/diary-candidates")
+    _assert(status == 200, "Diary candidate list after confirmation should return 200")
+    _assert(
+        all(candidate["candidate_id"] != candidate_id for candidate in diary_candidates["items"]),
+        "Confirmed diary candidate should leave the pending candidate list",
     )
 
 

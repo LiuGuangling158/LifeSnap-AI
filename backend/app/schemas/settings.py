@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.agent import ParseBillResponse, ParseTaskResponse
+from app.schemas.agent import ParseBillResponse, ParseDiaryResponse, ParseTaskResponse
 from app.schemas.attachment import AttachmentRead, RetentionPolicy
 from app.schemas.bill import BillRead
 from app.schemas.diary import DiaryRead
@@ -108,6 +108,7 @@ class LocalDataSummary(BaseModel):
     attachment_count: int
     bill_candidate_count: int
     task_candidate_count: int
+    diary_candidate_count: int = 0
     deleted_bill_count: int = 0
     deleted_task_count: int = 0
     deleted_diary_count: int = 0
@@ -125,6 +126,7 @@ class DataExportResponse(BaseModel):
     attachments: list[AttachmentRead]
     bill_candidates: list[ParseBillResponse]
     task_candidates: list[ParseTaskResponse]
+    diary_candidates: list[ParseDiaryResponse] = Field(default_factory=list)
 
 
 class DataImportRequest(BaseModel):
@@ -155,6 +157,7 @@ class DataImportResponse(BaseModel):
     imported_attachment_count: int
     imported_bill_candidate_count: int
     imported_task_candidate_count: int
+    imported_diary_candidate_count: int = 0
     privacy_settings: PrivacySettings
     category_settings: CategorySettings
     budget_settings: BudgetSettings
@@ -246,3 +249,4 @@ class DemoDataSeedResponse(BaseModel):
     created_attachment: AttachmentRead | None = None
     created_bill_candidates: list[ParseBillResponse]
     created_task_candidates: list[ParseTaskResponse]
+    created_diary_candidates: list[ParseDiaryResponse] = Field(default_factory=list)

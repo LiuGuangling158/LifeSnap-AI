@@ -30,6 +30,7 @@ class Settings:
     local_tag_settings_path: Path = BACKEND_DIR / "data" / "tags.json"
     local_bill_candidate_path: Path = BACKEND_DIR / "data" / "bill_candidates.json"
     local_task_candidate_path: Path = BACKEND_DIR / "data" / "task_candidates.json"
+    local_diary_candidate_path: Path = BACKEND_DIR / "data" / "diary_candidates.json"
     local_attachment_path: Path = BACKEND_DIR / "data" / "attachments.json"
     local_attachment_file_dir: Path = BACKEND_DIR / "data" / "attachment_files"
     local_audit_path: Path = BACKEND_DIR / "data" / "audit_events.json"

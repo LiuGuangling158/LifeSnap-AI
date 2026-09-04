@@ -66,7 +66,13 @@ const defaultTagSettings = {
 
 const profileStorageKey = "lifesnap_profile_settings";
 const assistantSessionStorageKey = "lifesnap_assistant_session";
-const knownAssistantToolIds = ["bill_candidate", "task_candidate", "diary_reflection", "attachment_bill_recognition"];
+const knownAssistantToolIds = [
+  "bill_candidate",
+  "task_candidate",
+  "diary_candidate",
+  "diary_reflection",
+  "attachment_bill_recognition",
+];
 
 const defaultProfileSettings = {
   displayName: "今天也要加油呀",
@@ -1889,6 +1895,7 @@ function startAssistantTool(toolId) {
   const drafts = {
     bill_candidate: "记一笔：",
     task_candidate: "提醒我：",
+    diary_candidate: "写日记：",
     diary_reflection: "日记追问：帮我整理今天的心情。",
   };
   openAssistantPage(drafts[toolId] || "");
@@ -1900,7 +1907,9 @@ function inferAssistantToolFromMessage(message = "", attachments = []) {
   }
   const text = String(message || "");
   if (text.includes("日记") || text.includes("心情") || text.includes("感谢") || text.includes("学到")) {
-    return "diary_reflection";
+    return text.includes("追问") || text.includes("整理")
+      ? "diary_reflection"
+      : "diary_candidate";
   }
   if (text.includes("提醒") || text.includes("待办") || text.includes("任务") || text.includes("明天")) {
     return "task_candidate";
@@ -2300,7 +2309,11 @@ async function confirmChatAction(actionType, candidateId) {
       { role: "assistant", text: response.reply || "已确认保存。", response },
     ];
     saveAssistantSession();
-    state.toast = actionType === "bill_candidate" ? "AI 账单已保存" : "AI 待办已保存";
+    state.toast = {
+      bill_candidate: "AI 账单已保存",
+      task_candidate: "AI 待办已保存",
+      diary_candidate: "AI 日记已保存",
+    }[actionType] || "AI 候选已保存";
     await loadData();
   } catch (error) {
     state.chatMessages = [
@@ -6548,7 +6561,9 @@ function renderAssistantPage() {
 }
 
 function renderAssistantCapabilities() {
-  const tools = assistantTools().slice(0, 4);
+  const preferredToolIds = ["bill_candidate", "task_candidate", "diary_candidate", "attachment_bill_recognition"];
+  const toolsById = new Map(assistantTools().map((tool) => [tool.id, tool]));
+  const tools = preferredToolIds.map((toolId) => toolsById.get(toolId)).filter(Boolean);
   if (!tools.length) {
     return "";
   }
@@ -6576,6 +6591,7 @@ function assistantComposerPlaceholder() {
   return {
     bill_candidate: "例如：午餐 28 元 微信支付 餐饮",
     task_candidate: "例如：提醒我明天 10 点开会",
+    diary_candidate: "例如：今天完成了项目复盘，心情很轻松，晴天",
     diary_reflection: "例如：今天有点累，但完成了一个重要任务",
     attachment_bill_recognition: "可以先选择图片，再补一句说明",
   }[state.activeAssistantToolId] ?? "例如：午餐 28 元 微信支付；或：提醒我明天 10 点开会。也可以先选图片再补一句说明。";
@@ -6589,6 +6605,7 @@ function assistantTools() {
   return [
     { id: "bill_candidate", label: "记账候选", requires_confirmation: true },
     { id: "task_candidate", label: "提醒候选", requires_confirmation: true },
+    { id: "diary_candidate", label: "日记候选", requires_confirmation: true },
     { id: "diary_reflection", label: "日记追问", requires_confirmation: false },
     { id: "attachment_bill_recognition", label: "图片记账", requires_confirmation: true },
   ];
@@ -6598,6 +6615,7 @@ function iconForAssistantTool(toolId) {
   return {
     bill_candidate: "wallet",
     task_candidate: "bell",
+    diary_candidate: "book",
     diary_reflection: "book",
     attachment_bill_recognition: "image",
   }[toolId] ?? "spark";
@@ -6804,6 +6822,39 @@ function renderChatResult(message) {
     `;
   }
 
+  if (response?.created_diary) {
+    const diary = response.created_diary;
+    return `
+      <div class="chat-result-card">
+        <div class="chat-result-head">
+          <span>${icon("check-circle")}</span>
+          <strong>日记已保存</strong>
+        </div>
+        <div class="chat-result-grid">
+          <div>
+            <small>标题</small>
+            <b>${escapeHtml(diary.title || "今天的日记")}</b>
+          </div>
+          <div>
+            <small>日期</small>
+            <b>${escapeHtml(formatDateOnly(diary.entry_date))}</b>
+          </div>
+          <div>
+            <small>心情</small>
+            <b>${escapeHtml(diaryMoodLabel(diary.mood))}</b>
+          </div>
+          <div>
+            <small>天气</small>
+            <b>${escapeHtml(diary.weather || "未记录")}</b>
+          </div>
+        </div>
+        <button class="button ghost" type="button" data-route="diary">
+          ${icon("book")}查看日记
+        </button>
+      </div>
+    `;
+  }
+
   return "";
 }
 
@@ -6818,21 +6869,35 @@ function renderChatCandidate(message) {
   const candidate = response.candidate;
   const data = candidate.data ?? {};
   const confidence = Math.round(Number(candidate.confidence ?? response.confidence ?? 0) * 100);
-  const rows = actionType === "bill_candidate"
-    ? [
+  let rows = [];
+  let candidateTitle = "候选提醒";
+  if (actionType === "bill_candidate") {
+    candidateTitle = "候选账单";
+    rows = [
         ["类型", labelTransaction(data.transaction_type)],
         ["金额", data.amount ? money(data.amount) : "待补充"],
         ["商户", data.merchant || "待补充"],
         ["分类", data.category || "其他"],
         ["时间", data.paid_at ? formatDate(data.paid_at) : "待补充"],
-      ]
-    : [
+      ];
+  } else if (actionType === "diary_candidate") {
+    candidateTitle = "候选日记";
+    rows = [
+      ["标题", data.title || "待补充"],
+      ["日期", data.entry_date ? formatDateOnly(data.entry_date) : "待补充"],
+      ["心情", diaryMoodLabel(data.mood)],
+      ["天气", data.weather || "未记录"],
+      ["标签", Array.isArray(data.tags) && data.tags.length ? data.tags.join("，") : "未记录"],
+    ];
+  } else {
+    rows = [
         ["类型", labelTaskType(data.task_type)],
         ["标题", data.title || "待补充"],
         ["分类", data.category || "生活"],
         ["优先级", labelTaskPriority(data.priority)],
         ["时间", formatChatTaskTime(data)],
       ];
+  }
   const warnings = response.warnings?.length ? response.warnings : candidate.warnings ?? [];
   const canConfirm = isChatCandidateConfirmable(actionType, data);
   const warningText = chatCandidateWarningText(actionType, data, warnings);
@@ -6844,7 +6909,7 @@ function renderChatCandidate(message) {
   return `
     <div class="chat-candidate">
       <div class="chat-candidate-head">
-        <strong>${actionType === "bill_candidate" ? "候选账单" : "候选提醒"}</strong>
+        <strong>${candidateTitle}</strong>
         <span>可信度 ${confidence}%</span>
       </div>
       <div class="chat-candidate-grid">
@@ -6897,6 +6962,9 @@ function isChatCandidateConfirmable(actionType, data) {
   if (actionType === "task_candidate") {
     return Boolean(data?.title && (data.task_type !== "reminder" || data.remind_at));
   }
+  if (actionType === "diary_candidate") {
+    return Boolean(data?.entry_date && data?.title && data?.content);
+  }
   return false;
 }
 
@@ -6906,6 +6974,9 @@ function chatCandidateWarningText(actionType, data, warnings) {
   }
   if (actionType === "task_candidate" && !isChatCandidateConfirmable(actionType, data)) {
     return "缺少标题或提醒时间，暂不能确认保存。请重新输入更完整的一句。";
+  }
+  if (actionType === "diary_candidate" && !isChatCandidateConfirmable(actionType, data)) {
+    return "缺少日期、标题或正文，暂不能确认保存。请补充今天想记录的具体内容。";
   }
   return warnings.length ? "有字段可能需要你再确认。" : "";
 }

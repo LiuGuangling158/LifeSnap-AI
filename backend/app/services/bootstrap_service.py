@@ -48,6 +48,13 @@ class BootstrapService:
                     requires_confirmation=True,
                 ),
                 AssistantToolCapability(
+                    id="diary_candidate",
+                    label="日记候选",
+                    description="从一句话整理日期、心情、天气、标签和正文，确认后保存日记。",
+                    input_modes=["text", "voice"],
+                    requires_confirmation=True,
+                ),
+                AssistantToolCapability(
                     id="diary_reflection",
                     label="日记追问",
                     description="围绕心情、感谢、学习和生活片段生成追问，帮助补全日记。",

@@ -7,8 +7,11 @@ from app.schemas.agent import (
     BillCandidateUpdate,
     BillCandidateListResponse,
     CandidateListResponse,
+    DiaryCandidateListResponse,
+    DiaryCandidateUpdate,
     ParseBillRequest,
     ParseBillResponse,
+    ParseDiaryResponse,
     ParseTaskRequest,
     ParseTaskResponse,
     TaskCandidateUpdate,
@@ -19,6 +22,8 @@ from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
 from app.services.bill_store import bill_store
+from app.services.diary_candidate_store import diary_candidate_store
+from app.schemas.diary import DiaryRead
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
@@ -52,6 +57,7 @@ def list_candidates(
 ) -> CandidateListResponse:
     bill_candidates = bill_candidate_store.all()
     task_candidates = task_candidate_store.all()
+    diary_candidates = diary_candidate_store.all()
     if confirmable_only:
         bill_candidates = [
             candidate
@@ -63,13 +69,20 @@ def list_candidates(
             for candidate in task_candidates
             if task_candidate_store.is_confirmable(candidate)
         ]
+        diary_candidates = [
+            candidate
+            for candidate in diary_candidates
+            if diary_candidate_store.is_confirmable(candidate)
+        ]
 
     return CandidateListResponse(
         bill_candidates=bill_candidates,
         task_candidates=task_candidates,
+        diary_candidates=diary_candidates,
         bill_candidate_count=len(bill_candidates),
         task_candidate_count=len(task_candidates),
-        total=len(bill_candidates) + len(task_candidates),
+        diary_candidate_count=len(diary_candidates),
+        total=len(bill_candidates) + len(task_candidates) + len(diary_candidates),
     )
 
 
@@ -333,5 +346,114 @@ def confirm_task_candidate(
             metadata={"candidate_id": candidate_id},
         )
         return task
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+
+@router.get("/diary-candidates", response_model=DiaryCandidateListResponse)
+def list_diary_candidates(
+    confirmable_only: bool = Query(default=False),
+) -> DiaryCandidateListResponse:
+    candidates = diary_candidate_store.all()
+    if confirmable_only:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if diary_candidate_store.is_confirmable(candidate)
+        ]
+    return DiaryCandidateListResponse(items=candidates, total=len(candidates))
+
+
+@router.get("/diary-candidates/{candidate_id}", response_model=ParseDiaryResponse)
+def get_diary_candidate(candidate_id: UUID) -> ParseDiaryResponse:
+    candidate = diary_candidate_store.get(candidate_id)
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Diary candidate not found",
+        )
+    return candidate
+
+
+@router.patch("/diary-candidates/{candidate_id}", response_model=ParseDiaryResponse)
+def update_diary_candidate(
+    candidate_id: UUID,
+    payload: DiaryCandidateUpdate,
+    request: Request,
+) -> ParseDiaryResponse:
+    candidate = diary_candidate_store.update(candidate_id, payload)
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Diary candidate not found",
+        )
+    audit_log_store.record(
+        action="diary_candidate_updated",
+        entity_type="diary_candidate",
+        entity_id=candidate_id,
+        request=request,
+        metadata={"updated_fields": payload.model_dump(exclude_none=True, exclude_unset=True)},
+    )
+    return candidate
+
+
+@router.delete("/diary-candidates/{candidate_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_diary_candidate(candidate_id: UUID, request: Request) -> None:
+    deleted = diary_candidate_store.delete(candidate_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Diary candidate not found",
+        )
+    audit_log_store.record(
+        action="diary_candidate_deleted",
+        entity_type="diary_candidate",
+        entity_id=candidate_id,
+        request=request,
+    )
+
+
+@router.post("/diary-candidates/{candidate_id}/confirm", response_model=DiaryRead)
+def confirm_diary_candidate(
+    candidate_id: UUID,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> DiaryRead:
+    def confirm() -> DiaryRead:
+        candidate = diary_candidate_store.get(candidate_id)
+        if candidate is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Diary candidate not found",
+            )
+        if not diary_candidate_store.is_confirmable(candidate):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Diary candidate is missing required fields",
+            )
+
+        diary = diary_candidate_store.confirm(candidate_id)
+        if diary is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Diary candidate not found",
+            )
+        return diary
+
+    try:
+        diary = idempotency_store.run(
+            scope="POST /agent/diary-candidates/confirm",
+            key=idempotency_key,
+            fingerprint={"candidate_id": str(candidate_id)},
+            factory=confirm,
+        )
+        audit_log_store.record(
+            action="diary_candidate_confirmed",
+            entity_type="diary",
+            entity_id=diary.id,
+            request=request,
+            metadata={"candidate_id": candidate_id},
+        )
+        return diary
     except IdempotencyConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))

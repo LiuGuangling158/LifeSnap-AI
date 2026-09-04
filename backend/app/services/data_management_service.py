@@ -9,7 +9,9 @@ from pydantic import ValidationError
 from app.core.config import settings
 from app.schemas.agent import (
     BillCandidateData,
+    DiaryCandidateData,
     ParseBillResponse,
+    ParseDiaryResponse,
     ParseTaskResponse,
     TaskCandidateData,
 )
@@ -35,6 +37,7 @@ from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
 from app.services.diary_store import diary_store
+from app.services.diary_candidate_store import diary_candidate_store
 from app.services.idempotency_store import idempotency_store
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
@@ -50,6 +53,7 @@ class DataManagementService:
             attachment_count=len(attachment_store.all()),
             bill_candidate_count=len(bill_candidate_store.all()),
             task_candidate_count=len(task_candidate_store.all()),
+            diary_candidate_count=len(diary_candidate_store.all()),
             deleted_bill_count=bill_store.deleted_count(),
             deleted_task_count=task_store.deleted_count(),
             deleted_diary_count=diary_store.deleted_count(),
@@ -68,6 +72,7 @@ class DataManagementService:
             attachments=attachment_store.all(),
             bill_candidates=bill_candidate_store.all(),
             task_candidates=task_candidate_store.all(),
+            diary_candidates=diary_candidate_store.all(),
         )
 
     def snapshot_status(self) -> DataSnapshotStatus:
@@ -141,6 +146,9 @@ class DataManagementService:
         imported_task_candidate_count = (
             len(payload.snapshot.task_candidates) if payload.include_candidates else 0
         )
+        imported_diary_candidate_count = (
+            len(payload.snapshot.diary_candidates) if payload.include_candidates else 0
+        )
 
         if payload.dry_run:
             return DataImportResponse(
@@ -155,6 +163,7 @@ class DataManagementService:
                 imported_attachment_count=imported_attachment_count,
                 imported_bill_candidate_count=imported_bill_candidate_count,
                 imported_task_candidate_count=imported_task_candidate_count,
+                imported_diary_candidate_count=imported_diary_candidate_count,
                 privacy_settings=settings_store.get_privacy_settings(),
                 category_settings=settings_store.get_category_settings(),
                 budget_settings=settings_store.get_budget_settings(),
@@ -188,6 +197,7 @@ class DataManagementService:
         if payload.include_candidates:
             bill_candidate_store.upsert_many(payload.snapshot.bill_candidates)
             task_candidate_store.upsert_many(payload.snapshot.task_candidates)
+            diary_candidate_store.upsert_many(payload.snapshot.diary_candidates)
         if payload.import_privacy_settings:
             settings_store.replace_privacy_settings(payload.snapshot.privacy_settings)
         if payload.import_category_settings:
@@ -222,6 +232,7 @@ class DataManagementService:
             imported_attachment_count=imported_attachment_count,
             imported_bill_candidate_count=imported_bill_candidate_count,
             imported_task_candidate_count=imported_task_candidate_count,
+            imported_diary_candidate_count=imported_diary_candidate_count,
             privacy_settings=settings_store.get_privacy_settings(),
             category_settings=settings_store.get_category_settings(),
             budget_settings=settings_store.get_budget_settings(),
@@ -278,6 +289,7 @@ class DataManagementService:
             attachment_count=len(snapshot.attachments),
             bill_candidate_count=len(snapshot.bill_candidates),
             task_candidate_count=len(snapshot.task_candidates),
+            diary_candidate_count=len(snapshot.diary_candidates),
             deleted_bill_count=len(deleted_bills),
             deleted_task_count=len(deleted_tasks),
             deleted_diary_count=len(deleted_diaries),
@@ -520,9 +532,11 @@ class DataManagementService:
         created_attachment = self._seed_demo_attachment() if payload.include_attachment else None
         created_bill_candidates: list[ParseBillResponse] = []
         created_task_candidates: list[ParseTaskResponse] = []
+        created_diary_candidates: list[ParseDiaryResponse] = []
         if payload.include_candidates:
             created_bill_candidates = self._seed_demo_bill_candidates(now)
             created_task_candidates = self._seed_demo_task_candidates(now)
+            created_diary_candidates = self._seed_demo_diary_candidates(now)
 
         return DemoDataSeedResponse(
             seeded_at=datetime.now(timezone.utc),
@@ -533,6 +547,7 @@ class DataManagementService:
             created_attachment=created_attachment,
             created_bill_candidates=created_bill_candidates,
             created_task_candidates=created_task_candidates,
+            created_diary_candidates=created_diary_candidates,
         )
 
     def clear(self, payload: DataClearRequest) -> DataClearResponse:
@@ -549,6 +564,7 @@ class DataManagementService:
         if payload.include_candidates:
             bill_candidate_store.clear()
             task_candidate_store.clear()
+            diary_candidate_store.clear()
         if payload.reset_privacy_settings:
             settings_store.reset_privacy_settings()
         if payload.reset_category_settings:
@@ -727,6 +743,31 @@ class DataManagementService:
             need_user_confirmation=True,
         )
         return [task_candidate_store.save(candidate)]
+
+    def _seed_demo_diary_candidates(self, now: datetime) -> list[ParseDiaryResponse]:
+        candidate = ParseDiaryResponse(
+            candidate_id=uuid4(),
+            confidence=0.84,
+            data=DiaryCandidateData(
+                entry_date=now.date(),
+                title="完成一次项目复盘",
+                content="今天完成了一次项目复盘，把账单、提醒和日记的流程都重新梳理了一遍，心情很踏实。",
+                mood="calm",
+                weather="晴天",
+                tags=["工作", "成长"],
+            ),
+            field_confidence={
+                "entry_date": 0.9,
+                "title": 0.85,
+                "content": 0.9,
+                "mood": 0.75,
+                "weather": 0.75,
+                "tags": 0.8,
+            },
+            warnings=[],
+            need_user_confirmation=True,
+        )
+        return [diary_candidate_store.save(candidate)]
 
 
 data_management_service = DataManagementService()

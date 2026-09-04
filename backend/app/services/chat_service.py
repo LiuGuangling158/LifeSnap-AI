@@ -1,7 +1,8 @@
 import re
+from datetime import date, timedelta
 from uuid import uuid4
 
-from app.schemas.agent import ParseBillRequest, ParseTaskRequest
+from app.schemas.agent import DiaryCandidateData, ParseBillRequest, ParseDiaryResponse, ParseTaskRequest
 from app.schemas.bill import BillSource
 from app.schemas.chat import (
     ChatActionType,
@@ -11,9 +12,11 @@ from app.schemas.chat import (
     ChatMessageRequest,
     ChatMessageResponse,
 )
+from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskSource
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
+from app.services.diary_candidate_store import diary_candidate_store
 from app.services.external_ai_parser import ExternalChatRoute, external_ai_parser
 from app.services.settings_store import settings_store
 from app.services.task_candidate_store import task_candidate_store
@@ -107,6 +110,9 @@ class RuleBasedChatService:
                 warnings=["unsupported_mvp_intent"] + fallback_warnings,
             )
 
+        if self._looks_like_diary_entry(text):
+            return self._diary_candidate_response(text, fallback_warnings=fallback_warnings)
+
         if self._looks_like_diary(text):
             return self._diary_reflection_response(text, fallback_warnings=fallback_warnings)
 
@@ -151,6 +157,13 @@ class RuleBasedChatService:
                 fallback_warnings=route.warnings,
             )
         if route.intent == ChatIntent.diary_reflection:
+            if self._looks_like_diary_entry(text):
+                return self._diary_candidate_response(
+                    text,
+                    reply=route.reply,
+                    route_confidence=min(route.confidence, 0.78),
+                    fallback_warnings=route.warnings,
+                )
             return self._diary_reflection_response(
                 text,
                 reply=route.reply,
@@ -158,6 +171,12 @@ class RuleBasedChatService:
                 fallback_warnings=route.warnings,
             )
         if route.intent == ChatIntent.unsupported and self._looks_like_diary(text):
+            if self._looks_like_diary_entry(text):
+                return self._diary_candidate_response(
+                    text,
+                    route_confidence=min(route.confidence, 0.7),
+                    fallback_warnings=route.warnings,
+                )
             return self._diary_reflection_response(
                 text,
                 route_confidence=min(route.confidence, 0.7),
@@ -261,6 +280,36 @@ class RuleBasedChatService:
             need_user_confirmation=False,
         )
 
+    def _diary_candidate_response(
+        self,
+        text: str,
+        reply: str | None = None,
+        route_confidence: float | None = None,
+        fallback_warnings: list[str] | None = None,
+    ) -> ChatMessageResponse:
+        candidate = diary_candidate_store.save(self._parse_diary_candidate(text))
+        return ChatMessageResponse(
+            message_id=uuid4(),
+            reply=reply or "我先整理成一篇待确认日记，你确认后再保存到日记本。",
+            intent=ChatIntent.create_diary,
+            confidence=self._combined_confidence(candidate.confidence, route_confidence),
+            assistant_tool_id="diary_candidate",
+            action_type=ChatActionType.diary_candidate,
+            candidate_id=candidate.candidate_id,
+            candidate=candidate,
+            warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
+            agent_steps=[
+                self._agent_step("理解意图", "识别为写日记或记录生活片段。"),
+                self._agent_step("整理候选", "已整理日期、标题、心情、天气、标签和正文。"),
+                self._agent_step(
+                    "等待确认",
+                    "保存前需要你确认候选日记。",
+                    ChatAgentStepStatus.needs_confirmation,
+                ),
+            ],
+            need_user_confirmation=True,
+        )
+
     def _unsupported_response(
         self,
         reply: str,
@@ -322,6 +371,126 @@ class RuleBasedChatService:
     def _looks_like_diary(self, text: str) -> bool:
         folded = text.casefold()
         return any(keyword.casefold() in folded for keyword in self._diary_keywords)
+
+    def _looks_like_diary_entry(self, text: str) -> bool:
+        folded = text.casefold()
+        entry_markers = ("写日记", "记日记", "记录今天", "记录一下", "今天的日记", "日记：", "日记:")
+        return any(marker.casefold() in folded for marker in entry_markers)
+
+    def _parse_diary_candidate(self, text: str) -> ParseDiaryResponse:
+        content = self._clean_diary_text(text)
+        entry_date = self._diary_entry_date(text)
+        mood = self._diary_mood(text)
+        weather = self._diary_weather(text)
+        title = self._diary_title(content, mood)
+        tags = self._diary_tags(text, mood)
+        data = DiaryCandidateData(
+            entry_date=entry_date,
+            title=title,
+            content=content,
+            mood=mood,
+            weather=weather,
+            source=DiarySource.ai_chat,
+            tags=tags,
+        )
+        field_confidence = {
+            "entry_date": 0.9,
+            "title": 0.75 if title else 0.0,
+            "content": 0.86 if len(content) >= 10 else 0.45,
+            "mood": 0.72,
+            "weather": 0.75 if weather else 0.0,
+            "tags": 0.78 if tags else 0.0,
+        }
+        warnings: list[str] = []
+        if len(content) < 10:
+            warnings.append("content_too_short")
+        if not weather:
+            warnings.append("weather_missing")
+        if not tags:
+            warnings.append("tags_missing")
+        confidence = round(
+            (field_confidence["entry_date"] + field_confidence["title"] + field_confidence["content"] + field_confidence["mood"]) / 4,
+            2,
+        )
+        return ParseDiaryResponse(
+            candidate_id=uuid4(),
+            confidence=confidence,
+            data=data,
+            field_confidence=field_confidence,
+            warnings=warnings,
+            need_user_confirmation=True,
+        )
+
+    def _clean_diary_text(self, text: str) -> str:
+        cleaned = text.strip()
+        for prefix in ("写日记", "记日记", "记录今天", "记录一下", "今天的日记", "日记：", "日记:"):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip(" ：:\n")
+                break
+        return cleaned or text.strip()
+
+    def _diary_entry_date(self, text: str) -> date:
+        today = date.today()
+        if "昨天" in text:
+            return today - timedelta(days=1)
+        if "明天" in text:
+            return today + timedelta(days=1)
+        return today
+
+    def _diary_mood(self, text: str) -> DiaryMood:
+        if any(keyword in text for keyword in ("开心", "高兴", "满足", "轻松", "治愈", "快乐")):
+            return DiaryMood.happy
+        if any(keyword in text for keyword in ("累", "疲惫", "困", "加班")):
+            return DiaryMood.tired
+        if any(keyword in text for keyword in ("焦虑", "紧张", "担心", "压力")):
+            return DiaryMood.anxious
+        if any(keyword in text for keyword in ("难过", "失落", "伤心")):
+            return DiaryMood.sad
+        return DiaryMood.calm
+
+    def _diary_weather(self, text: str) -> str | None:
+        for weather in ("晴天", "多云", "阴天", "下雨", "雨天", "下雪", "雪天"):
+            if weather in text:
+                return "雨天" if weather == "下雨" else "雪天" if weather == "下雪" else weather
+        return None
+
+    def _diary_title(self, content: str, mood: DiaryMood) -> str:
+        compact = re.sub(r"\s+", " ", content).strip(" ，。,.")
+        if compact:
+            return compact[:24]
+        return {
+            DiaryMood.happy: "开心的一天",
+            DiaryMood.tired: "有点累的一天",
+            DiaryMood.anxious: "需要慢下来的日子",
+            DiaryMood.sad: "想被好好安放的一天",
+            DiaryMood.calm: "平静的一天",
+        }[mood]
+
+    def _diary_tags(self, text: str, mood: DiaryMood) -> list[str]:
+        tags: list[str] = []
+        mood_tag = {
+            DiaryMood.happy: "开心",
+            DiaryMood.tired: "疲惫",
+            DiaryMood.anxious: "焦虑",
+            DiaryMood.sad: "难过",
+            DiaryMood.calm: "平静",
+        }[mood]
+        tags.append(mood_tag)
+        keyword_tags = {
+            "工作": "工作",
+            "学习": "学习",
+            "朋友": "朋友",
+            "家人": "家庭",
+            "运动": "健康",
+            "跑步": "健康",
+            "咖啡": "生活",
+            "复盘": "成长",
+            "感谢": "感恩",
+        }
+        for keyword, tag in keyword_tags.items():
+            if keyword in text and tag not in tags:
+                tags.append(tag)
+        return tags[:6]
 
     def _diary_reflection_reply(self, text: str) -> str:
         if "感谢" in text:

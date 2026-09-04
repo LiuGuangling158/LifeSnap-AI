@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from app.schemas.bill import BillSource, TransactionType
+from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskPriority, TaskSource, TaskType
 
 
@@ -64,6 +65,26 @@ class TaskCandidateUpdate(BaseModel):
     source: TaskSource | None = None
 
 
+class DiaryCandidateData(BaseModel):
+    entry_date: date | None = None
+    title: str | None = Field(default=None, max_length=120)
+    content: str | None = Field(default=None, max_length=5000)
+    mood: DiaryMood = DiaryMood.calm
+    weather: str | None = Field(default=None, max_length=40)
+    source: DiarySource = DiarySource.ai_chat
+    tags: list[str] = Field(default_factory=list)
+
+
+class DiaryCandidateUpdate(BaseModel):
+    entry_date: date | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    content: str | None = Field(default=None, min_length=1, max_length=5000)
+    mood: DiaryMood | None = None
+    weather: str | None = Field(default=None, max_length=40)
+    source: DiarySource | None = None
+    tags: list[str] | None = None
+
+
 class ParseBillResponse(BaseModel):
     candidate_id: UUID
     intent: str = "create_bill"
@@ -84,6 +105,16 @@ class ParseTaskResponse(BaseModel):
     need_user_confirmation: bool = True
 
 
+class ParseDiaryResponse(BaseModel):
+    candidate_id: UUID
+    intent: str = "create_diary"
+    confidence: float = Field(ge=0, le=1)
+    data: DiaryCandidateData
+    field_confidence: dict[str, float]
+    warnings: list[str]
+    need_user_confirmation: bool = True
+
+
 class BillCandidateListResponse(BaseModel):
     items: list[ParseBillResponse]
     total: int
@@ -94,9 +125,16 @@ class TaskCandidateListResponse(BaseModel):
     total: int
 
 
+class DiaryCandidateListResponse(BaseModel):
+    items: list[ParseDiaryResponse]
+    total: int
+
+
 class CandidateListResponse(BaseModel):
     bill_candidates: list[ParseBillResponse]
     task_candidates: list[ParseTaskResponse]
+    diary_candidates: list[ParseDiaryResponse] = []
     bill_candidate_count: int
     task_candidate_count: int
+    diary_candidate_count: int = 0
     total: int
