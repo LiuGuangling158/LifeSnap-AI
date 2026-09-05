@@ -7441,7 +7441,8 @@ function renderDataImportModal() {
   const result = preview?.result ?? {};
   const before = result.before ?? {};
   const candidateCount = Number(result.imported_bill_candidate_count ?? 0)
-    + Number(result.imported_task_candidate_count ?? 0);
+    + Number(result.imported_task_candidate_count ?? 0)
+    + Number(result.imported_diary_candidate_count ?? 0);
   const categoryCount = Number(preview?.snapshot?.category_settings?.bill_categories?.length ?? 0)
     + Number(preview?.snapshot?.category_settings?.task_categories?.length ?? 0);
   const importedBudget = Number(preview?.snapshot?.budget_settings?.monthly_budget ?? 0);
@@ -7465,7 +7466,7 @@ function renderDataImportModal() {
           ${importPreviewMetric("待办", result.imported_task_count ?? 0, `${before.task_count ?? 0} 条当前记录`)}
           ${importPreviewMetric("日记", result.imported_diary_count ?? 0, `${before.diary_count ?? 0} 篇当前记录`)}
           ${importPreviewMetric("附件", result.imported_attachment_count ?? 0, `${before.attachment_count ?? 0} 个当前附件`)}
-          ${importPreviewMetric("候选", candidateCount, "AI 待确认记录")}
+          ${importPreviewMetric("候选", candidateCount, "账单、待办与日记")}
           ${importPreviewMetric("分类", categoryCount, "账单与待办分类")}
           ${importPreviewMetric("预算", money(importedBudget), "月预算配置")}
           ${importPreviewMetric("标签", tagCount, "日记常用标签")}
@@ -8088,8 +8089,10 @@ function diagnosticIssueTitle(issue) {
     duplicate_attachment: "发现重复附件",
     pending_bill_candidates: "有待确认账单候选",
     pending_task_candidates: "有待确认待办候选",
+    pending_diary_candidates: "有待确认日记候选",
     bill_candidate_missing_required_fields: "账单候选缺少必要字段",
     task_candidate_missing_required_fields: "待办候选缺少必要字段",
+    diary_candidate_missing_required_fields: "日记候选缺少必要字段",
     possible_duplicate_bill: "可能存在重复账单",
     unscheduled_pending_task: "待办未设置时间",
     overdue_task: "待办已逾期",
@@ -8106,8 +8109,10 @@ function diagnosticIssueMessage(issue) {
     duplicate_attachment: "多个附件的校验值相同，可以后续清理重复文件。",
     pending_bill_candidates: "助手识别出的账单还没有确认保存。",
     pending_task_candidates: "助手识别出的待办还没有确认保存。",
+    pending_diary_candidates: "助手整理出的日记还没有确认保存。",
     bill_candidate_missing_required_fields: "缺少金额或商户，暂时不能确认保存。",
     task_candidate_missing_required_fields: "缺少标题或提醒时间，暂时不能确认保存。",
+    diary_candidate_missing_required_fields: "缺少日期、标题或正文，暂时不能确认保存。",
     possible_duplicate_bill: "两条账单商户、金额、类型和时间都很接近，建议核对。",
     unscheduled_pending_task: "待办没有到期或提醒时间，可能难以及时触达。",
     overdue_task: "这条待办已经超过目标时间，需要处理或延后。",
@@ -8276,6 +8281,7 @@ function chatActionDisplay(actionType) {
   return {
     bill_candidate: "账单候选",
     task_candidate: "待办候选",
+    diary_candidate: "日记候选",
     none: "无候选",
   }[actionType] ?? "";
 }
@@ -8288,6 +8294,7 @@ function auditEntityLabel(entityType) {
     attachment: "附件",
     bill_candidate: "账单候选",
     task_candidate: "待办候选",
+    diary_candidate: "日记候选",
     settings: "设置",
     data: "数据",
     chat: "助手",
@@ -8317,7 +8324,7 @@ function importPreviewMetric(label, value, note) {
   return `
     <div class="import-preview-card">
       <span>${escapeHtml(label)}</span>
-      <strong>${Number(value ?? 0)}</strong>
+      <strong>${escapeHtml(String(value ?? 0))}</strong>
       <small>${escapeHtml(note)}</small>
     </div>
   `;

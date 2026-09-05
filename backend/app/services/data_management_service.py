@@ -508,6 +508,53 @@ class DataManagementService:
             ],
         )
 
+    def export_diary_candidates_csv(self) -> str:
+        return self._write_csv(
+            [
+                "candidate_id",
+                "intent",
+                "confidence",
+                "entry_date",
+                "title",
+                "content",
+                "mood",
+                "weather",
+                "tags",
+                "source",
+                "entry_date_confidence",
+                "title_confidence",
+                "content_confidence",
+                "mood_confidence",
+                "weather_confidence",
+                "tags_confidence",
+                "warnings",
+                "need_user_confirmation",
+            ],
+            [
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "intent": candidate.intent,
+                    "confidence": candidate.confidence,
+                    "entry_date": candidate.data.entry_date,
+                    "title": candidate.data.title,
+                    "content": candidate.data.content,
+                    "mood": candidate.data.mood,
+                    "weather": candidate.data.weather,
+                    "tags": candidate.data.tags,
+                    "source": candidate.data.source,
+                    "entry_date_confidence": candidate.field_confidence.get("entry_date"),
+                    "title_confidence": candidate.field_confidence.get("title"),
+                    "content_confidence": candidate.field_confidence.get("content"),
+                    "mood_confidence": candidate.field_confidence.get("mood"),
+                    "weather_confidence": candidate.field_confidence.get("weather"),
+                    "tags_confidence": candidate.field_confidence.get("tags"),
+                    "warnings": candidate.warnings,
+                    "need_user_confirmation": candidate.need_user_confirmation,
+                }
+                for candidate in diary_candidate_store.all()
+            ],
+        )
+
     def seed_demo_data(self, payload: DemoDataSeedRequest) -> DemoDataSeedResponse:
         before = self.summary()
         if payload.reset_existing:

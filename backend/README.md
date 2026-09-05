@@ -687,6 +687,7 @@ GET /data/export/tasks.csv
 GET /data/export/attachments.csv
 GET /data/export/bill-candidates.csv
 GET /data/export/task-candidates.csv
+GET /data/export/diary-candidates.csv
 ```
 
 CSV exports include structured records only. Attachment CSV exports metadata and

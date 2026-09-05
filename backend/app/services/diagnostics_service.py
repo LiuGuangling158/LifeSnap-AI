@@ -13,6 +13,7 @@ from app.schemas.agent import (
     ParseBillResponse,
     ParseTaskRequest,
     ParseTaskResponse,
+    ParseDiaryResponse,
 )
 from app.schemas.attachment import AttachmentRead
 from app.schemas.bill import BillRead, BillSource
@@ -30,6 +31,7 @@ from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
 from app.services.data_management_service import data_management_service
+from app.services.diary_candidate_store import diary_candidate_store
 from app.services.external_ai_parser import external_ai_parser
 from app.services.ocr_service import ocr_service
 from app.services.settings_store import settings_store
@@ -641,6 +643,7 @@ class DiagnosticsService:
         issues: list[DiagnosticIssue] = []
         bill_candidates = bill_candidate_store.all()
         task_candidates = task_candidate_store.all()
+        diary_candidates = diary_candidate_store.all()
         if bill_candidates:
             issues.append(
                 DiagnosticIssue(
@@ -667,13 +670,33 @@ class DiagnosticsService:
                     metadata={"candidate_count": len(task_candidates)},
                 )
             )
-        issues.extend(self._candidate_field_issues(bill_candidates, task_candidates))
+        if diary_candidates:
+            issues.append(
+                DiagnosticIssue(
+                    code="pending_diary_candidates",
+                    severity=DiagnosticSeverity.info,
+                    message="There are diary candidates waiting for user confirmation.",
+                    entity_type="diary_candidate",
+                    related_entity_ids=[
+                        str(candidate.candidate_id) for candidate in diary_candidates[:10]
+                    ],
+                    metadata={"candidate_count": len(diary_candidates)},
+                )
+            )
+        issues.extend(
+            self._candidate_field_issues(
+                bill_candidates,
+                task_candidates,
+                diary_candidates,
+            )
+        )
         return issues
 
     def _candidate_field_issues(
         self,
         bill_candidates: list[ParseBillResponse],
         task_candidates: list[ParseTaskResponse],
+        diary_candidates: list[ParseDiaryResponse],
     ) -> list[DiagnosticIssue]:
         issues: list[DiagnosticIssue] = []
         for candidate in bill_candidates:
@@ -698,6 +721,19 @@ class DiagnosticsService:
                     severity=DiagnosticSeverity.action_required,
                     message="Task candidate is missing title or reminder time and cannot be confirmed yet.",
                     entity_type="task_candidate",
+                    entity_id=str(candidate.candidate_id),
+                    metadata={"warnings": candidate.warnings},
+                )
+            )
+        for candidate in diary_candidates:
+            if diary_candidate_store.is_confirmable(candidate):
+                continue
+            issues.append(
+                DiagnosticIssue(
+                    code="diary_candidate_missing_required_fields",
+                    severity=DiagnosticSeverity.action_required,
+                    message="Diary candidate is missing date, title, or content and cannot be confirmed yet.",
+                    entity_type="diary_candidate",
                     entity_id=str(candidate.candidate_id),
                     metadata={"warnings": candidate.warnings},
                 )

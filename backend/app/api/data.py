@@ -110,6 +110,20 @@ def export_task_candidates_csv(request: Request) -> Response:
     )
 
 
+@router.get("/export/diary-candidates.csv")
+def export_diary_candidates_csv(request: Request) -> Response:
+    audit_log_store.record(
+        action="data_exported",
+        entity_type="data",
+        request=request,
+        metadata={"format": "csv", "dataset": "diary_candidates"},
+    )
+    return _csv_response(
+        data_management_service.export_diary_candidates_csv(),
+        filename="lifesnap-diary-candidates.csv",
+    )
+
+
 @router.get("/snapshot/status", response_model=DataSnapshotStatus)
 def get_local_snapshot_status() -> DataSnapshotStatus:
     return data_management_service.snapshot_status()

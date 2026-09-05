@@ -1753,6 +1753,10 @@ def _check_data_quality_diagnostics(client: ApiClient) -> None:
         "Data quality diagnostics should find attachments missing OCR text",
     )
     _assert(
+        "pending_diary_candidates" in codes,
+        "Data quality diagnostics should find pending diary candidates",
+    )
+    _assert(
         diagnostics["action_required_count"] >= 1
         and diagnostics["warning_count"] >= 1
         and diagnostics["info_count"] >= 1,
@@ -1838,6 +1842,16 @@ def _check_data_export_and_clear(client: ApiClient) -> None:
         "candidate_id" in task_candidates_csv
         and task_candidate["candidate_id"] in task_candidates_csv,
         "Task candidates CSV should include pending task candidate rows",
+    )
+
+    status, diary_candidates_csv = client.request(
+        "GET",
+        "/data/export/diary-candidates.csv",
+    )
+    _assert(status == 200, "GET /data/export/diary-candidates.csv should return 200")
+    _assert(
+        "candidate_id" in diary_candidates_csv and "候选编辑联调完成" in diary_candidates_csv,
+        "Diary candidates CSV should include pending diary candidate rows",
     )
 
     status, data_export_events = client.request(
