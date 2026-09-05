@@ -132,6 +132,7 @@ const state = {
   chatMessages: initialAssistantSession.chatMessages,
   chatDraft: initialAssistantSession.chatDraft,
   chatAttachments: [],
+  chatCandidateEditor: null,
   activeAssistantToolId: initialAssistantSession.activeAssistantToolId,
   voiceListening: false,
   billFilters: {
@@ -266,6 +267,18 @@ document.addEventListener("click", (event) => {
   const removeChatAttachmentButton = event.target.closest("[data-remove-chat-attachment]");
   if (removeChatAttachmentButton) {
     removeChatAttachment(removeChatAttachmentButton.dataset.removeChatAttachment);
+    return;
+  }
+
+  const chatEditButton = event.target.closest("[data-chat-edit]");
+  if (chatEditButton) {
+    openChatCandidateEditor(chatEditButton.dataset.candidateId);
+    return;
+  }
+
+  if (event.target.closest("[data-close-chat-candidate-editor]")) {
+    state.chatCandidateEditor = null;
+    render();
     return;
   }
 
@@ -829,6 +842,7 @@ document.addEventListener("keydown", (event) => {
       || state.diagnosticsOpen
       || state.auditLogOpen
       || state.recycleBinOpen
+      || state.chatCandidateEditor
     )
   ) {
     state.modalOpen = false;
@@ -930,6 +944,12 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-chat-form]")) {
     event.preventDefault();
     await submitChatMessage(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-chat-candidate-editor-form]")) {
+    event.preventDefault();
+    await submitChatCandidateEdit(new FormData(event.target));
     return;
   }
 
@@ -2287,6 +2307,142 @@ function stopVoiceInput(shouldRender = true) {
   }
 }
 
+function openChatCandidateEditor(candidateId) {
+  const message = state.chatMessages.find((item) => getChatCandidateId(item.response) === String(candidateId));
+  if (!message?.response?.candidate) {
+    showToast("没有找到可编辑的候选记录。");
+    return;
+  }
+  if (message.handled) {
+    showToast("已处理的候选记录不能继续编辑。");
+    return;
+  }
+  state.chatCandidateEditor = {
+    candidateId: String(candidateId),
+    actionType: message.response.action_type,
+    candidate: message.response.candidate,
+  };
+  render();
+}
+
+async function submitChatCandidateEdit(formData) {
+  const editor = state.chatCandidateEditor;
+  if (!editor?.candidateId || !editor.actionType) {
+    return;
+  }
+
+  const endpoint = chatCandidateEndpoint(editor.actionType, editor.candidateId);
+  const payload = chatCandidateUpdatePayload(editor.actionType, formData);
+  if (!endpoint || !payload) {
+    showToast("当前候选暂不支持编辑。");
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const candidate = await api(endpoint, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    updateChatCandidateInMessages(editor.candidateId, candidate);
+    state.chatCandidateEditor = null;
+    state.toast = "候选记录已更新";
+  } catch (error) {
+    state.toast = error.message || "候选记录更新失败";
+  } finally {
+    state.saving = false;
+    saveAssistantSession();
+    render();
+  }
+}
+
+function chatCandidateEndpoint(actionType, candidateId) {
+  return {
+    bill_candidate: `/agent/bill-candidates/${candidateId}`,
+    task_candidate: `/agent/task-candidates/${candidateId}`,
+    diary_candidate: `/agent/diary-candidates/${candidateId}`,
+  }[actionType] || "";
+}
+
+function chatCandidateUpdatePayload(actionType, formData) {
+  if (actionType === "bill_candidate") {
+    const amount = Number(formData.get("amount") || 0);
+    return {
+      amount: amount > 0 ? amount : null,
+      merchant: textOrNull(formData.get("merchant")),
+      category: textOrDefault(formData.get("category"), "其他"),
+      payment_method: textOrNull(formData.get("payment_method")),
+      paid_at: dateTimeValueOrNull(formData.get("paid_at")),
+      transaction_type: textOrDefault(formData.get("transaction_type"), "expense"),
+      note: textOrNull(formData.get("note")),
+    };
+  }
+
+  if (actionType === "task_candidate") {
+    return {
+      title: textOrNull(formData.get("title")),
+      description: textOrNull(formData.get("description")),
+      category: textOrDefault(formData.get("category"), "生活"),
+      task_type: textOrDefault(formData.get("task_type"), "todo"),
+      due_at: dateTimeValueOrNull(formData.get("due_at")),
+      remind_at: dateTimeValueOrNull(formData.get("remind_at")),
+      priority: textOrDefault(formData.get("priority"), "medium"),
+    };
+  }
+
+  if (actionType === "diary_candidate") {
+    return {
+      entry_date: textOrNull(formData.get("entry_date")),
+      title: textOrNull(formData.get("title")),
+      content: textOrNull(formData.get("content")),
+      mood: textOrDefault(formData.get("mood"), "calm"),
+      weather: textOrNull(formData.get("weather")),
+      tags: splitLabels(formData.get("tags")),
+    };
+  }
+
+  return null;
+}
+
+function updateChatCandidateInMessages(candidateId, candidate) {
+  state.chatMessages = state.chatMessages.map((message) => {
+    if (getChatCandidateId(message.response) !== String(candidateId)) {
+      return message;
+    }
+    const response = message.response || {};
+    return {
+      ...message,
+      response: {
+        ...response,
+        candidate,
+        candidate_id: candidate.candidate_id || response.candidate_id,
+        confidence: candidate.confidence ?? response.confidence,
+        warnings: candidate.warnings ?? response.warnings,
+        need_user_confirmation: candidate.need_user_confirmation ?? response.need_user_confirmation,
+      },
+    };
+  });
+}
+
+function textOrNull(value) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function textOrDefault(value, fallback) {
+  return String(value ?? "").trim() || fallback;
+}
+
+function dateTimeValueOrNull(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
 async function confirmChatAction(actionType, candidateId) {
   if (!actionType || !candidateId) {
     return;
@@ -3461,6 +3617,7 @@ function render() {
       ${state.diagnosticsOpen ? renderDiagnosticsModal() : ""}
       ${state.auditLogOpen ? renderAuditLogModal() : ""}
       ${state.recycleBinOpen ? renderRecycleBinModal() : ""}
+      ${state.chatCandidateEditor ? renderChatCandidateEditorModal() : ""}
       ${state.toast ? renderToast() : ""}
     </div>
   `;
@@ -6858,6 +7015,165 @@ function renderChatResult(message) {
   return "";
 }
 
+function renderChatCandidateEditorModal() {
+  const editor = state.chatCandidateEditor;
+  const actionType = editor?.actionType || "";
+  const data = editor?.candidate?.data || {};
+  const title = {
+    bill_candidate: "编辑候选账单",
+    task_candidate: "编辑候选提醒",
+    diary_candidate: "编辑候选日记",
+  }[actionType] || "编辑候选记录";
+
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="chat-candidate-editor-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="chat-candidate-editor-title">${title}</h2>
+            <p class="section-note">先修正 AI 整理出的字段，再确认保存。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-chat-candidate-editor aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form" data-chat-candidate-editor-form>
+          <div class="form-grid">
+            ${renderChatCandidateEditorFields(actionType, data)}
+          </div>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-chat-candidate-editor>取消</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("save")}${state.saving ? "保存中..." : "保存候选"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderChatCandidateEditorFields(actionType, data) {
+  if (actionType === "bill_candidate") {
+    const defaultBillCategory = getCategorySettings().bill_categories[0] || "其他";
+    return `
+      <div class="field">
+        <label for="chat_candidate_amount">金额</label>
+        <input id="chat_candidate_amount" name="amount" type="number" min="0.01" step="0.01"
+          value="${escapeHtml(data.amount ?? "")}" />
+      </div>
+      <div class="field">
+        <label for="chat_candidate_transaction_type">类型</label>
+        <select id="chat_candidate_transaction_type" name="transaction_type">
+          ${transactionOptions(data.transaction_type || "expense")}
+        </select>
+      </div>
+      <div class="field">
+        <label for="chat_candidate_merchant">商户</label>
+        <input id="chat_candidate_merchant" name="merchant" maxlength="120"
+          value="${escapeHtml(data.merchant || "")}" />
+      </div>
+      <div class="field">
+        <label for="chat_candidate_category">分类</label>
+        <input id="chat_candidate_category" name="category" maxlength="40" list="bill_category_options"
+          placeholder="${escapeHtml(defaultBillCategory)}" value="${escapeHtml(data.category || "")}" />
+      </div>
+      <div class="field">
+        <label for="chat_candidate_payment_method">支付方式</label>
+        <input id="chat_candidate_payment_method" name="payment_method" maxlength="40"
+          value="${escapeHtml(data.payment_method || "")}" />
+      </div>
+      <div class="field">
+        <label for="chat_candidate_paid_at">时间</label>
+        <input id="chat_candidate_paid_at" name="paid_at" type="datetime-local"
+          value="${escapeHtml(toDateTimeLocal(data.paid_at))}" />
+      </div>
+      <div class="field full">
+        <label for="chat_candidate_note">备注</label>
+        <textarea id="chat_candidate_note" name="note" maxlength="500">${escapeHtml(data.note || "")}</textarea>
+      </div>
+    `;
+  }
+
+  if (actionType === "task_candidate") {
+    const defaultTaskCategory = getCategorySettings().task_categories[0] || "生活";
+    return `
+      <div class="field full">
+        <label for="chat_candidate_title">标题</label>
+        <input id="chat_candidate_title" name="title" maxlength="120" value="${escapeHtml(data.title || "")}" />
+      </div>
+      <div class="field">
+        <label for="chat_candidate_task_type">类型</label>
+        <select id="chat_candidate_task_type" name="task_type">
+          <option value="todo" ${data.task_type === "todo" ? "selected" : ""}>待办</option>
+          <option value="reminder" ${data.task_type === "reminder" ? "selected" : ""}>提醒</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="chat_candidate_priority">优先级</label>
+        <select id="chat_candidate_priority" name="priority">
+          <option value="medium" ${data.priority === "medium" ? "selected" : ""}>普通</option>
+          <option value="high" ${data.priority === "high" ? "selected" : ""}>高</option>
+          <option value="low" ${data.priority === "low" ? "selected" : ""}>低</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="chat_candidate_task_category">分类</label>
+        <input id="chat_candidate_task_category" name="category" maxlength="40" list="task_category_options"
+          placeholder="${escapeHtml(defaultTaskCategory)}" value="${escapeHtml(data.category || "")}" />
+      </div>
+      <div class="field">
+        <label for="chat_candidate_due_at">截止时间</label>
+        <input id="chat_candidate_due_at" name="due_at" type="datetime-local"
+          value="${escapeHtml(toDateTimeLocal(data.due_at))}" />
+      </div>
+      <div class="field">
+        <label for="chat_candidate_remind_at">提醒时间</label>
+        <input id="chat_candidate_remind_at" name="remind_at" type="datetime-local"
+          value="${escapeHtml(toDateTimeLocal(data.remind_at))}" />
+      </div>
+      <div class="field full">
+        <label for="chat_candidate_description">备注</label>
+        <textarea id="chat_candidate_description" name="description" maxlength="500">${escapeHtml(data.description || "")}</textarea>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="field">
+      <label for="chat_candidate_entry_date">日期</label>
+      <input id="chat_candidate_entry_date" name="entry_date" type="date"
+        value="${escapeHtml(data.entry_date || todayDateKey())}" />
+    </div>
+    <div class="field">
+      <label for="chat_candidate_mood">心情</label>
+      <select id="chat_candidate_mood" name="mood">
+        <option value="happy" ${data.mood === "happy" ? "selected" : ""}>开心</option>
+        <option value="calm" ${data.mood === "calm" ? "selected" : ""}>平静</option>
+        <option value="tired" ${data.mood === "tired" ? "selected" : ""}>疲惫</option>
+        <option value="anxious" ${data.mood === "anxious" ? "selected" : ""}>有压力</option>
+        <option value="sad" ${data.mood === "sad" ? "selected" : ""}>低落</option>
+      </select>
+    </div>
+    <div class="field full">
+      <label for="chat_candidate_diary_title">标题</label>
+      <input id="chat_candidate_diary_title" name="title" maxlength="120" value="${escapeHtml(data.title || "")}" />
+    </div>
+    <div class="field">
+      <label for="chat_candidate_weather">天气</label>
+      <input id="chat_candidate_weather" name="weather" maxlength="40" value="${escapeHtml(data.weather || "")}" />
+    </div>
+    <div class="field">
+      <label for="chat_candidate_tags">标签</label>
+      <input id="chat_candidate_tags" name="tags" maxlength="400" list="diary_tag_options"
+        value="${escapeHtml(Array.isArray(data.tags) ? data.tags.join("，") : "")}" />
+    </div>
+    <div class="field full">
+      <label for="chat_candidate_content">正文</label>
+      <textarea id="chat_candidate_content" name="content" maxlength="5000">${escapeHtml(data.content || "")}</textarea>
+    </div>
+  `;
+}
 function renderChatCandidate(message) {
   const response = message.response;
   if (!response || response.action_type === "none" || !response.candidate) {
@@ -6930,6 +7246,12 @@ function renderChatCandidate(message) {
           handledLabel
             ? `<span class="chat-status">${handledLabel}</span>`
             : `
+              <button class="button ghost" type="button"
+                data-chat-edit
+                data-candidate-id="${escapeHtml(candidateId)}"
+                ${state.saving ? "disabled" : ""}>
+                ${icon("edit")}编辑
+              </button>
               <button class="button primary" type="button"
                 data-chat-confirm
                 data-action-type="${escapeHtml(actionType)}"
