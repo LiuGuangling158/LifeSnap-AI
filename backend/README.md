@@ -170,8 +170,9 @@ or imported from a snapshot.
 Privacy settings are stored at `backend/data/settings.json` and are updated
 when settings are changed, reset, or imported from a snapshot.
 
-Pending bill and task candidates are stored at
-`backend/data/bill_candidates.json` and `backend/data/task_candidates.json`.
+Pending bill, task, and diary candidates are stored at
+`backend/data/bill_candidates.json`, `backend/data/task_candidates.json`, and
+`backend/data/diary_candidates.json`.
 They are updated when AI parsing creates a candidate, the user edits it,
 confirms it, discards it, clears local data, or imports a snapshot.
 

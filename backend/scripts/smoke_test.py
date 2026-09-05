@@ -122,6 +122,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_bill_statistics_overview(client)
     _check_task_statistics_overview(client)
     _check_candidate_discard_flow(client)
+    _check_candidate_edit_flow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_chat_diary_reflection(client)
     _check_chat_diary_candidate_confirmation(client)
@@ -227,7 +228,8 @@ def _check_demo_data_seed(client: ApiClient) -> None:
     _assert(first["after"]["attachment_count"] == 1, "Demo seed should create an attachment")
     _assert(
         first["after"]["bill_candidate_count"] == 1
-        and first["after"]["task_candidate_count"] == 1,
+        and first["after"]["task_candidate_count"] == 1
+        and first["after"]["diary_candidate_count"] == 1,
         "Demo seed should create pending candidates",
     )
     _assert(
@@ -259,9 +261,17 @@ def _check_app_bootstrap(client: ApiClient) -> None:
         not capabilities["feature_flags"]["real_ocr_engine"],
         "App capabilities should expose unavailable real OCR feature",
     )
+    _assert(
+        capabilities["feature_flags"]["diary_candidates"],
+        "App capabilities should expose diary candidate feature flag",
+    )
+    _assert(
+        "POST /agent/diary-candidates/{candidate_id}/confirm" in capabilities["idempotency_supported_endpoints"],
+        "App capabilities should expose diary candidate confirm idempotency",
+    )
     tool_ids = {tool["id"] for tool in capabilities["assistant_tools"]}
     _assert(
-        {"bill_candidate", "task_candidate", "diary_reflection", "attachment_bill_recognition"}
+        {"bill_candidate", "task_candidate", "diary_candidate", "diary_reflection", "attachment_bill_recognition"}
         <= tool_ids,
         "App capabilities should expose supported assistant tools",
     )
@@ -657,6 +667,76 @@ def _check_candidate_discard_flow(client: ApiClient) -> None:
     status, _ = client.request("GET", f"/agent/task-candidates/{chat_task_candidate_id}")
     _assert(status == 404, "Chat-discarded task candidate should not be readable")
 
+
+def _check_candidate_edit_flow(client: ApiClient) -> None:
+    status, bill_candidate = client.request(
+        "POST",
+        "/agent/parse-bill",
+        {
+            "text": "午餐 28 元 微信支付",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Bill candidate edit setup should parse bill")
+    bill_candidate_id = bill_candidate["candidate_id"]
+    status, patched_bill = client.request(
+        "PATCH",
+        f"/agent/bill-candidates/{bill_candidate_id}",
+        {
+            "amount": 32.5,
+            "merchant": "沙县小吃",
+            "category": "餐饮",
+            "payment_method": "微信支付",
+        },
+    )
+    _assert(status == 200, "Bill candidate update should return 200")
+    _assert(float(patched_bill["data"]["amount"]) == 32.5, "Bill candidate amount should update")
+    _assert(patched_bill["data"]["merchant"] == "沙县小吃", "Bill candidate merchant should update")
+
+    status, task_candidate = client.request(
+        "POST",
+        "/agent/parse-task",
+        {
+            "text": "明天 8 点提醒我交材料",
+            "source": "ai_chat",
+        },
+    )
+    _assert(status == 200, "Task candidate edit setup should parse task")
+    task_candidate_id = task_candidate["candidate_id"]
+    status, patched_task = client.request(
+        "PATCH",
+        f"/agent/task-candidates/{task_candidate_id}",
+        {
+            "title": "提交项目材料",
+            "category": "工作",
+            "priority": "high",
+        },
+    )
+    _assert(status == 200, "Task candidate update should return 200")
+    _assert(patched_task["data"]["title"] == "提交项目材料", "Task candidate title should update")
+    _assert(patched_task["data"]["priority"] == "high", "Task candidate priority should update")
+
+    status, diary_body = client.request(
+        "POST",
+        "/chat/messages",
+        {"message": "写日记：今天完成了候选编辑联调，晴天，心情很平静"},
+    )
+    _assert(status == 200, "Diary candidate edit setup should create candidate")
+    diary_candidate_id = diary_body["candidate_id"]
+    status, patched_diary = client.request(
+        "PATCH",
+        f"/agent/diary-candidates/{diary_candidate_id}",
+        {
+            "title": "候选编辑联调完成",
+            "content": "今天补齐了候选编辑接口测试，确认前可以更稳地修改 AI 结果。",
+            "mood": "calm",
+            "weather": "晴天",
+            "tags": ["工作", "成长"],
+        },
+    )
+    _assert(status == 200, "Diary candidate update should return 200")
+    _assert(patched_diary["data"]["title"] == "候选编辑联调完成", "Diary candidate title should update")
+    _assert(patched_diary["data"]["tags"] == ["工作", "成长"], "Diary candidate tags should update")
 
 def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     message = "\u660e\u5929\u4e0b\u5348 3 \u70b9\u63d0\u9192\u6211\u53bb\u533b\u9662\u590d\u8bca"
@@ -1722,6 +1802,7 @@ def _check_data_export_and_clear(client: ApiClient) -> None:
     _assert(body["tasks"], "Data export should include created tasks")
     _assert(body["bill_candidates"], "Data export should include bill candidates")
     _assert(body["task_candidates"], "Data export should include task candidates")
+    _assert(body["diary_candidates"], "Data export should include diary candidates")
 
     status, bills_csv = client.request("GET", "/data/export/bills.csv")
     _assert(status == 200, "GET /data/export/bills.csv should return 200")
