@@ -1958,6 +1958,7 @@ function resetChatSession() {
 }
 
 async function submitChatMessage(formData) {
+  if (state.saving) return;
   const message = String(formData.get("message") || "").trim();
   const attachments = state.chatAttachments.filter((attachment) => attachment.status === "uploaded");
   const hasUploading = state.chatAttachments.some((attachment) => attachment.status === "uploading");
@@ -2444,7 +2445,7 @@ function dateTimeValueOrNull(value) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 async function confirmChatAction(actionType, candidateId) {
-  if (!actionType || !candidateId) {
+  if (state.saving || !actionType || !candidateId) {
     return;
   }
 
@@ -2455,7 +2456,7 @@ async function confirmChatAction(actionType, candidateId) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": `web-chat-confirm-${candidateId}-${crypto.randomUUID()}`,
+        "Idempotency-Key": `web-chat-confirm-${actionType}-${candidateId}`,
       },
       body: JSON.stringify({ action_type: actionType, candidate_id: candidateId }),
     });
@@ -2485,7 +2486,7 @@ async function confirmChatAction(actionType, candidateId) {
 }
 
 async function discardChatAction(actionType, candidateId) {
-  if (!actionType || !candidateId) {
+  if (state.saving || !actionType || !candidateId) {
     return;
   }
 
@@ -2496,7 +2497,7 @@ async function discardChatAction(actionType, candidateId) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": `web-chat-discard-${candidateId}-${crypto.randomUUID()}`,
+        "Idempotency-Key": `web-chat-discard-${actionType}-${candidateId}`,
       },
       body: JSON.stringify({ action_type: actionType, candidate_id: candidateId }),
     });
@@ -2950,6 +2951,13 @@ function integrationGuideText(commandKey) {
       "$env:LIFESNAP_OCR_API_KEY = \"optional-secret\"",
       "$env:LIFESNAP_OCR_PROVIDER = \"external_http\"",
       "$env:LIFESNAP_OCR_TIMEOUT_SECONDS = \"15\"",
+      "$env:LIFESNAP_LLM_API_KEY = \"your-api-key\"",
+      "$env:LIFESNAP_LLM_MODEL = \"your-model-name\"",
+      "$env:LIFESNAP_LLM_BASE_URL = \"https://api.openai.com/v1\"",
+      "$env:LIFESNAP_LLM_PROVIDER = \"openai_compatible\"",
+      "$env:LIFESNAP_LLM_TIMEOUT_SECONDS = \"20\"",
+      "$env:LIFESNAP_LLM_RESPONSE_FORMAT = \"json_object\"",
+      "# 如果你已有自建解析服务，也可以继续使用旧协议：",
       "$env:LIFESNAP_AI_PARSE_ENDPOINT = \"https://your-ai-service.example.com/parse\"",
       "$env:LIFESNAP_AI_PARSE_API_KEY = \"optional-secret\"",
       "$env:LIFESNAP_AI_PARSE_PROVIDER = \"external_http\"",
@@ -2984,7 +2992,7 @@ function integrationGuideText(commandKey) {
       "",
       "chat_intent response:",
       "{",
-      "  \"intent\": \"create_bill | create_task | diary_reflection | unsupported\",",
+      "  \"intent\": \"create_bill | create_task | create_diary | diary_reflection | unsupported\",",
       "  \"confidence\": 0.88,",
       "  \"reply\": \"我先整理成一个待确认事项。\",",
       "  \"warnings\": []",
@@ -5810,7 +5818,7 @@ function renderSettingsPage() {
         ${metric("待办", summary.task_count ?? 0, "small")}
         ${metric("日记", summary.diary_count ?? state.diaryEntries.length ?? 0, "small")}
         ${metric("附件", summary.attachment_count ?? 0, "small")}
-        ${metric("候选", Number(summary.bill_candidate_count ?? 0) + Number(summary.task_candidate_count ?? 0), "small")}
+        ${metric("候选", Number(summary.bill_candidate_count ?? 0) + Number(summary.task_candidate_count ?? 0) + Number(summary.diary_candidate_count ?? 0), "small")}
       </div>
       <div class="settings-list">
         ${settingsRow(
@@ -5836,6 +5844,11 @@ function renderSettingsPage() {
             </button>
             <a class="button ghost" href="/data/export/bills.csv" download>${icon("download")}账单 CSV</a>
             <a class="button ghost" href="/data/export/tasks.csv" download>${icon("download")}待办 CSV</a>
+            <a class="button ghost" href="/data/export/diaries.csv" download>${icon("download")}日记 CSV</a>
+            <a class="button ghost" href="/data/export/attachments.csv" download>${icon("download")}附件 CSV</a>
+            <a class="button ghost" href="/data/export/bill-candidates.csv" download>${icon("download")}账单候选 CSV</a>
+            <a class="button ghost" href="/data/export/task-candidates.csv" download>${icon("download")}待办候选 CSV</a>
+            <a class="button ghost" href="/data/export/diary-candidates.csv" download>${icon("download")}日记候选 CSV</a>
           `,
         )}
         ${settingsRow(
@@ -8028,6 +8041,8 @@ function integrationCodeLabel(code) {
     external_ai_parser_failed: "外部 AI 解析请求失败",
     external_ai_parser_invalid_response: "外部 AI 解析响应格式异常",
     external_chat_intent_invalid_response: "外部聊天意图响应格式异常",
+    llm_agent_failed: "大模型 Agent 请求失败",
+    llm_agent_invalid_response: "大模型 Agent 响应格式异常",
   }[code] ?? code;
 }
 
@@ -8039,6 +8054,7 @@ function integrationCapabilityLabel(value) {
     task_candidate_parsing: "待办候选",
     chat_intent_routing: "聊天路由",
     chat_candidate_flow: "候选确认",
+    llm_agent_reasoning: "大模型 Agent",
   }[value] ?? value;
 }
 

@@ -13,7 +13,7 @@ from app.schemas.chat import (
     ChatMessageResponse,
 )
 from app.schemas.diary import DiaryMood, DiarySource
-from app.schemas.task import TaskSource
+from app.schemas.task import TaskSource, TaskType
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
 from app.services.diary_candidate_store import diary_candidate_store
@@ -142,6 +142,13 @@ class RuleBasedChatService:
         text: str,
         route: ExternalChatRoute,
     ) -> ChatMessageResponse:
+        if route.intent == ChatIntent.create_diary:
+            return self._diary_candidate_response(
+                text,
+                reply=route.reply,
+                route_confidence=route.confidence,
+                fallback_warnings=route.warnings,
+            )
         if route.intent == ChatIntent.create_task:
             return self._task_candidate_response(
                 text,
@@ -201,9 +208,15 @@ class RuleBasedChatService:
         candidate = task_candidate_store.save(
             parser.parse_task(ParseTaskRequest(text=text, source=TaskSource.ai_chat))
         )
+        confirmable = task_candidate_store.is_confirmable(candidate)
+        waiting_status = (
+            ChatAgentStepStatus.needs_confirmation
+            if confirmable
+            else ChatAgentStepStatus.blocked
+        )
         return ChatMessageResponse(
             message_id=uuid4(),
-            reply=reply or "我先整理成一个待确认事项，你确认或修改后再保存。",
+            reply=self._task_candidate_reply(candidate, reply, confirmable),
             intent=ChatIntent.create_task,
             confidence=self._combined_confidence(candidate.confidence, route_confidence),
             assistant_tool_id="task_candidate",
@@ -215,14 +228,13 @@ class RuleBasedChatService:
                 self._agent_step("理解意图", "识别为提醒或待办请求。"),
                 self._agent_step("整理候选", "已提取标题、时间、分类和优先级。"),
                 self._agent_step(
-                    "等待确认",
-                    "保存前需要你确认候选提醒。",
-                    ChatAgentStepStatus.needs_confirmation,
+                    "等待确认" if confirmable else "等待补充",
+                    "保存前需要你确认候选提醒。" if confirmable else self._task_missing_detail(candidate),
+                    waiting_status,
                 ),
             ],
             need_user_confirmation=True,
         )
-
     def _bill_candidate_response(
         self,
         text: str,
@@ -235,9 +247,15 @@ class RuleBasedChatService:
         candidate = bill_candidate_store.save(
             parser.parse_bill(ParseBillRequest(text=text, source=BillSource.ai_chat))
         )
+        confirmable = bill_candidate_store.is_confirmable(candidate)
+        waiting_status = (
+            ChatAgentStepStatus.needs_confirmation
+            if confirmable
+            else ChatAgentStepStatus.blocked
+        )
         return ChatMessageResponse(
             message_id=uuid4(),
-            reply=reply or "我先整理成一个待确认账单，你确认或修改后再保存。",
+            reply=self._bill_candidate_reply(candidate, reply, confirmable),
             intent=ChatIntent.create_bill,
             confidence=self._combined_confidence(candidate.confidence, route_confidence),
             assistant_tool_id="bill_candidate",
@@ -249,14 +267,13 @@ class RuleBasedChatService:
                 self._agent_step("理解意图", "识别为记账请求。"),
                 self._agent_step("整理候选", "已提取金额、商户、分类和时间。"),
                 self._agent_step(
-                    "等待确认",
-                    "保存前需要你确认候选账单。",
-                    ChatAgentStepStatus.needs_confirmation,
+                    "等待确认" if confirmable else "等待补充",
+                    "保存前需要你确认候选账单。" if confirmable else self._bill_missing_detail(candidate),
+                    waiting_status,
                 ),
             ],
             need_user_confirmation=True,
         )
-
     def _diary_reflection_response(
         self,
         text: str,
@@ -310,6 +327,52 @@ class RuleBasedChatService:
             need_user_confirmation=True,
         )
 
+    def _bill_candidate_reply(
+        self,
+        candidate,
+        preferred_reply: str | None,
+        confirmable: bool,
+    ) -> str:
+        if confirmable:
+            return preferred_reply or "我先整理成一个待确认账单，你确认或修改后再保存。"
+        missing = "、".join(self._bill_missing_fields(candidate))
+        return f"我看出这是记账请求，但还缺{missing}。请补充一下，也可以点编辑把字段补齐。"
+
+    def _bill_missing_detail(self, candidate) -> str:
+        missing = "、".join(self._bill_missing_fields(candidate))
+        return f"缺少{missing}，暂时不能确认保存。"
+
+    def _bill_missing_fields(self, candidate) -> list[str]:
+        fields: list[str] = []
+        if candidate.data.amount is None:
+            fields.append("金额")
+        if candidate.data.merchant is None:
+            fields.append("商户")
+        return fields or ["必要字段"]
+
+    def _task_candidate_reply(
+        self,
+        candidate,
+        preferred_reply: str | None,
+        confirmable: bool,
+    ) -> str:
+        if confirmable:
+            return preferred_reply or "我先整理成一个待确认事项，你确认或修改后再保存。"
+        missing = "、".join(self._task_missing_fields(candidate))
+        return f"我看出这是提醒或待办请求，但还缺{missing}。请补充一下，也可以点编辑把字段补齐。"
+
+    def _task_missing_detail(self, candidate) -> str:
+        missing = "、".join(self._task_missing_fields(candidate))
+        return f"缺少{missing}，暂时不能确认保存。"
+
+    def _task_missing_fields(self, candidate) -> list[str]:
+        fields: list[str] = []
+        if candidate.data.title is None:
+            fields.append("标题")
+        if candidate.data.task_type == TaskType.reminder and candidate.data.remind_at is None:
+            fields.append("提醒时间")
+        return fields or ["必要字段"]
+
     def _unsupported_response(
         self,
         reply: str,
@@ -353,6 +416,8 @@ class RuleBasedChatService:
                 "external_ai_parser_invalid_response",
                 "external_ai_parser_skipped",
                 "external_chat_intent_invalid_response",
+                "llm_agent_failed",
+                "llm_agent_invalid_response",
             }
             for warning in warnings
         )
@@ -366,6 +431,10 @@ class RuleBasedChatService:
         return self._money_pattern.search(text.casefold()) is not None
 
     def _looks_like_task(self, text: str) -> bool:
+        if any(keyword in text for keyword in ("提醒", "待办", "任务", "记得", "别忘", "todo")):
+            return True
+        if self._looks_like_bill(text):
+            return False
         return any(keyword.casefold() in text.casefold() for keyword in self._task_keywords)
 
     def _looks_like_diary(self, text: str) -> bool:

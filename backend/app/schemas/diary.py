@@ -2,6 +2,8 @@ from datetime import date, datetime
 from enum import Enum
 from uuid import UUID
 
+from app.schemas.patch import PatchModel
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -50,7 +52,9 @@ class DiaryCreate(BaseModel):
         return _normalize_tag_values(value)
 
 
-class DiaryUpdate(BaseModel):
+class DiaryUpdate(PatchModel):
+    non_nullable_fields = frozenset(["entry_date","title","content","mood","source","attachment_ids","tags"])
+
     entry_date: date | None = None
     title: str | None = Field(default=None, min_length=1, max_length=120)
     content: str | None = Field(default=None, min_length=1, max_length=5000)

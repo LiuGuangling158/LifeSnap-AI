@@ -6,8 +6,8 @@ FastAPI backend for LifeSnap AI.
 
 The backend currently provides the MVP shell, health check, bill management,
 task/reminder management, attachment metadata, dashboard summary, and rule-based
-AI candidate flows for bills and tasks. OCR and AI parsing can also delegate to
-configured external HTTP providers while keeping local fallback behavior.
+AI candidate flows for bills, tasks, and diaries. OCR and AI parsing can delegate to
+configured providers, including a direct OpenAI-compatible LLM Agent, while keeping local fallback behavior.
 
 ## Local Run
 
@@ -160,6 +160,14 @@ soft-deleted bills and tasks so the restore bin survives local persistence.
 Deleting a snapshot also requires `confirm=true`.
 
 Local JSON persistence:
+
+Set `LIFESNAP_DATA_DIR` to an absolute directory to isolate all JSON data,
+snapshots and retained attachments. The default remains `backend/data`.
+The smoke test uses a temporary data directory and disables external OCR/AI
+endpoints in its child process, so it does not clear user data or call providers.
+
+Diary CSV exports include active entries only, with full content, mood, weather,
+tags and attachment IDs. CSV is a readable export; use JSON for backup/import.
 
 Bills are stored at `backend/data/bills.json`, tasks are stored at
 `backend/data/tasks.json`, and diary entries are stored at
@@ -403,11 +411,50 @@ DELETE /agent/task-candidates/{candidate_id}
 
 ## AI Parser
 
-Bill and task parsing can use either the built-in rule-based parser or a
-configured external HTTP AI parser. When no external parser is configured, all
-parse endpoints keep the current rule-based fallback behavior.
+Bill and task parsing can use one of three paths:
 
-Configure an external AI parser:
+- direct OpenAI-compatible LLM Agent via `LIFESNAP_LLM_*`
+- custom external HTTP parser via `LIFESNAP_AI_PARSE_ENDPOINT`
+- built-in rule-based fallback when no external parser is available or the call fails
+
+The direct LLM Agent has priority when configured. It calls a
+`/chat/completions` endpoint, asks the model for strict JSON, validates the
+result with the current Pydantic schemas, and still returns only a candidate.
+Formal bills and tasks are created only after user confirmation.
+
+Configure a direct LLM Agent:
+
+```powershell
+$env:LIFESNAP_LLM_API_KEY = "your-api-key"
+$env:LIFESNAP_LLM_MODEL = "your-model-name"
+$env:LIFESNAP_LLM_BASE_URL = "https://api.openai.com/v1"
+$env:LIFESNAP_LLM_PROVIDER = "openai_compatible"
+$env:LIFESNAP_LLM_TIMEOUT_SECONDS = "20"
+$env:LIFESNAP_LLM_RESPONSE_FORMAT = "json_object"
+```
+
+`LIFESNAP_LLM_BASE_URL` may point to OpenAI or any compatible provider. If the
+base URL is omitted while `LIFESNAP_LLM_API_KEY` and `LIFESNAP_LLM_MODEL` are
+set, it defaults to `https://api.openai.com/v1`. For local compatible gateways,
+the API key can be omitted as long as `LIFESNAP_LLM_BASE_URL` and
+`LIFESNAP_LLM_MODEL` are set.
+
+Privacy still gates external processing. Because privacy defaults to local-only
+mode, external OCR/AI calls remain blocked until you update privacy settings:
+
+```http
+PATCH /settings/privacy
+Content-Type: application/json
+
+{
+  "local_only_mode": false,
+  "allow_ai_text_processing": true,
+  "save_original_attachments_by_default": true
+}
+```
+
+For existing custom parser services, the legacy HTTP contract is still
+supported:
 
 ```powershell
 $env:LIFESNAP_AI_PARSE_ENDPOINT = "https://your-ai-service.example.com/parse"
@@ -436,19 +483,6 @@ uvicorn app.main:app --reload
 
 The mock provider supports `/health`, `/recognize`, and `/parse`. `/parse`
 handles `kind: "bill"`, `kind: "task"`, and `kind: "chat_intent"`.
-Because privacy defaults to local-only mode, external calls remain blocked until
-you update privacy settings:
-
-```http
-PATCH /settings/privacy
-Content-Type: application/json
-
-{
-  "local_only_mode": false,
-  "allow_ai_text_processing": true,
-  "save_original_attachments_by_default": true
-}
-```
 
 You can validate the mock provider itself with:
 
@@ -456,7 +490,8 @@ You can validate the mock provider itself with:
 .\.venv\Scripts\python.exe scripts\mock_ai_provider.py --self-test
 ```
 
-The backend sends this JSON payload to the endpoint:
+The custom HTTP parser receives this JSON payload. The direct LLM Agent receives
+the same contract embedded in the model prompt:
 
 ```json
 {
@@ -470,12 +505,12 @@ The backend sends this JSON payload to the endpoint:
 ```
 
 Supported `kind` values are `bill`, `task`, and `chat_intent`. `bill` and
-`task` return structured candidate fields. `chat_intent` only routes a chat
-message to `create_bill`, `create_task`, or `unsupported`; the backend then
-reuses the bill/task parser and candidate confirmation flow.
+`task` return structured candidate fields. `chat_intent` routes a chat message
+to `create_bill`, `create_task`, `create_diary`, `diary_reflection`, or
+`unsupported`; the backend then reuses the matching candidate flow.
 
-For bills, the provider should return either top-level candidate fields or a
-`data` object containing fields compatible with `BillCandidateData`:
+For bills, the provider/model should return either top-level candidate fields or
+a `data` object compatible with `BillCandidateData`:
 
 ```json
 {
@@ -527,14 +562,14 @@ For chat intent routing, return an intent and optional reply:
 }
 ```
 
-The backend always keeps the original request `source`, validates the provider
-response against current schemas, and still requires user confirmation before
-creating formal bills or tasks. If the external parser fails, returns invalid
-JSON, or is blocked by local-only privacy mode, parsing falls back to the
-rule-based parser with a warning such as `external_ai_parser_failed`. Chat
-intent routing also falls back to the local keyword router with warnings such as
+The backend always keeps the original request `source`, normalizes confidence,
+validates the provider/model response against current schemas, and requires user
+confirmation before creating formal bills or tasks. If the LLM or custom parser
+fails, returns invalid JSON, or is blocked by local-only privacy mode, parsing
+falls back to the rule-based parser with warnings such as
+`external_ai_parser_failed` or `external_ai_parser_skipped`. Chat intent routing
+falls back to the local keyword router with warnings such as
 `external_chat_intent_invalid_response`.
-
 ## Chat
 
 Send a user message to the MVP AI entry:
@@ -684,6 +719,7 @@ Export local data as CSV:
 ```text
 GET /data/export/bills.csv
 GET /data/export/tasks.csv
+GET /data/export/diaries.csv
 GET /data/export/attachments.csv
 GET /data/export/bill-candidates.csv
 GET /data/export/task-candidates.csv

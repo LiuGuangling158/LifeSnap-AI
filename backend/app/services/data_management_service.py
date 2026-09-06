@@ -371,6 +371,16 @@ class DataManagementService:
             ],
         )
 
+    def export_diaries_csv(self) -> str:
+        return self._write_csv(
+            [
+                "id", "entry_date", "title", "content", "mood", "weather",
+                "source", "tags", "attachment_ids", "created_at",
+                "updated_at", "deleted_at",
+            ],
+            [diary.model_dump() for diary in diary_store.all()],
+        )
+
     def export_attachments_csv(self) -> str:
         return self._write_csv(
             [

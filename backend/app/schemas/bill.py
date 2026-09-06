@@ -3,6 +3,8 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
+from app.schemas.patch import PatchModel
+
 from pydantic import BaseModel, Field
 
 
@@ -34,7 +36,9 @@ class BillCreate(BaseModel):
     source: BillSource = BillSource.manual
 
 
-class BillUpdate(BaseModel):
+class BillUpdate(PatchModel):
+    non_nullable_fields = frozenset(["amount", "currency", "merchant", "category", "transaction_type", "source", "paid_at"])
+
     amount: Decimal | None = Field(default=None, gt=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     merchant: str | None = Field(default=None, min_length=1, max_length=120)

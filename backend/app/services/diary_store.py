@@ -134,7 +134,7 @@ class LocalDiaryStore:
             return None
 
         data = existing.model_dump()
-        update_data = payload.model_dump(exclude_none=True, exclude_unset=True)
+        update_data = payload.model_dump(exclude_unset=True)
         next_entry_date = update_data.get("entry_date")
         if next_entry_date is not None and next_entry_date != existing.entry_date:
             same_date = self.get_by_date(next_entry_date)

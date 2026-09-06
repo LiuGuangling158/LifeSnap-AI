@@ -54,7 +54,7 @@ class RuleBasedBillParser:
             merchant=merchant,
             category=category,
             payment_method=payment_method,
-            transaction_type=TransactionType.expense,
+            transaction_type=self._extract_transaction_type(text),
             note="规则解析生成的候选账单",
             source=payload.source,
         )
@@ -74,7 +74,8 @@ class RuleBasedBillParser:
             if match is None:
                 continue
             try:
-                return Decimal(match.group(1))
+                amount = Decimal(match.group(1))
+                return amount if amount > 0 else None
             except InvalidOperation:
                 return None
         return None
@@ -90,6 +91,17 @@ class RuleBasedBillParser:
                 continue
             return line
         return None
+
+    def _extract_transaction_type(self, text: str) -> TransactionType:
+        for keywords, transaction_type in (
+            (("退款", "退回"), TransactionType.refund),
+            (("工资", "收入", "奖金"), TransactionType.income),
+            (("充值", "储值"), TransactionType.top_up),
+            (("转账",), TransactionType.transfer),
+        ):
+            if any(keyword in text for keyword in keywords):
+                return transaction_type
+        return TransactionType.expense
 
     def _extract_payment_method(self, text: str) -> str | None:
         normalized_text = text.casefold()

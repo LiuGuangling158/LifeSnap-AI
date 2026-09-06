@@ -134,7 +134,7 @@ class LocalBillStore:
             return None
 
         data = existing.model_dump()
-        data.update(payload.model_dump(exclude_none=True, exclude_unset=True))
+        data.update(payload.model_dump(exclude_unset=True))
         data["updated_at"] = datetime.now(timezone.utc)
 
         updated = BillRead(**data)

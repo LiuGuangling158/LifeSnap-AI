@@ -154,9 +154,13 @@ class DiagnosticsService:
 
         if not configured:
             warnings.append("rule_based_parser_fallback")
-            next_action = "Set LIFESNAP_AI_PARSE_ENDPOINT to enable external bill and task parsing."
+            next_action = "Set LIFESNAP_LLM_MODEL and LIFESNAP_LLM_API_KEY for the LLM agent, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
         elif blockers:
             next_action = "Disable local-only mode and allow AI text processing before using external AI parsing."
+
+        capabilities = ["bill_candidate_parsing", "task_candidate_parsing"]
+        if settings.real_llm_agent_enabled:
+            capabilities.append("llm_agent_reasoning")
 
         return IntegrationCheck(
             name="ai_parser",
@@ -164,10 +168,14 @@ class DiagnosticsService:
             status=self._integration_check_status(configured, blockers),
             configured=configured,
             ready=configured and not blockers,
-            endpoint_configured=bool(settings.external_ai_parser_endpoint),
-            api_key_configured=bool(settings.external_ai_parser_api_key),
-            timeout_seconds=settings.external_ai_parser_timeout_seconds,
-            capabilities=["bill_candidate_parsing", "task_candidate_parsing"],
+            endpoint_configured=bool(settings.external_ai_parser_endpoint or settings.llm_agent_base_url),
+            api_key_configured=bool(settings.external_ai_parser_api_key or settings.llm_agent_api_key),
+            timeout_seconds=(
+                settings.llm_agent_timeout_seconds
+                if settings.real_llm_agent_enabled
+                else settings.external_ai_parser_timeout_seconds
+            ),
+            capabilities=capabilities,
             privacy_blockers=blockers,
             warnings=warnings,
             next_action=next_action,
@@ -181,9 +189,13 @@ class DiagnosticsService:
 
         if not configured:
             warnings.append("keyword_router_fallback")
-            next_action = "Set LIFESNAP_AI_PARSE_ENDPOINT to enable external chat intent routing."
+            next_action = "Set LIFESNAP_LLM_MODEL and LIFESNAP_LLM_API_KEY for LLM chat routing, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
         elif blockers:
             next_action = "Disable local-only mode and allow AI text processing before using external chat intent routing."
+
+        capabilities = ["chat_intent_routing", "chat_candidate_flow"]
+        if settings.real_llm_agent_enabled:
+            capabilities.append("llm_agent_reasoning")
 
         return IntegrationCheck(
             name="chat_intent",
@@ -191,15 +203,18 @@ class DiagnosticsService:
             status=self._integration_check_status(configured, blockers),
             configured=configured,
             ready=configured and not blockers,
-            endpoint_configured=bool(settings.external_ai_parser_endpoint),
-            api_key_configured=bool(settings.external_ai_parser_api_key),
-            timeout_seconds=settings.external_ai_parser_timeout_seconds,
-            capabilities=["chat_intent_routing", "chat_candidate_flow"],
+            endpoint_configured=bool(settings.external_ai_parser_endpoint or settings.llm_agent_base_url),
+            api_key_configured=bool(settings.external_ai_parser_api_key or settings.llm_agent_api_key),
+            timeout_seconds=(
+                settings.llm_agent_timeout_seconds
+                if settings.real_llm_agent_enabled
+                else settings.external_ai_parser_timeout_seconds
+            ),
+            capabilities=capabilities,
             privacy_blockers=blockers,
             warnings=warnings,
             next_action=next_action,
         )
-
     def _probe_ocr(self) -> IntegrationProbeResult:
         configured = settings.real_ocr_enabled
         blockers = self._external_ai_privacy_blockers()

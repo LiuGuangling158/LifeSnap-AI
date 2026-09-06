@@ -2,6 +2,8 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
+from app.schemas.patch import PatchModel
+
 from pydantic import BaseModel, Field
 
 
@@ -38,7 +40,9 @@ class TaskCreate(BaseModel):
     source: TaskSource = TaskSource.manual
 
 
-class TaskUpdate(BaseModel):
+class TaskUpdate(PatchModel):
+    non_nullable_fields = frozenset(["title","category","task_type","status","priority","source"])
+
     title: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=500)
     category: str | None = Field(default=None, min_length=1, max_length=40)

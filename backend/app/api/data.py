@@ -68,6 +68,18 @@ def export_tasks_csv(request: Request) -> Response:
     )
 
 
+@router.get("/export/diaries.csv")
+def export_diaries_csv(request: Request) -> Response:
+    content = data_management_service.export_diaries_csv()
+    audit_log_store.record(
+        action="data_exported",
+        entity_type="data",
+        request=request,
+        metadata={"format": "csv", "dataset": "diaries"},
+    )
+    return _csv_response(content, filename="lifesnap-diaries.csv")
+
+
 @router.get("/export/attachments.csv")
 def export_attachments_csv(request: Request) -> Response:
     audit_log_store.record(

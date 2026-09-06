@@ -138,7 +138,7 @@ def update_diary(diary_id: UUID, payload: DiaryUpdate, request: Request) -> Diar
         entity_type="diary",
         entity_id=diary_id,
         request=request,
-        metadata={"updated_fields": payload.model_dump(exclude_none=True, exclude_unset=True)},
+        metadata={"updated_fields": payload.model_dump(exclude_unset=True)},
     )
     return diary
 

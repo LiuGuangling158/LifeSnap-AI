@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -8,7 +10,9 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 
@@ -77,6 +81,18 @@ class ApiClient:
 
 
 def main() -> int:
+    with TemporaryDirectory(prefix="lifesnap-smoke-") as data_dir:
+        return _run_isolated_smoke(data_dir)
+
+
+def _run_isolated_smoke(data_dir: str) -> int:
+    test_env = os.environ.copy()
+    test_env["LIFESNAP_DATA_DIR"] = data_dir
+    test_env["LIFESNAP_OCR_ENDPOINT"] = ""
+    test_env["LIFESNAP_AI_PARSE_ENDPOINT"] = ""
+    test_env["LIFESNAP_LLM_BASE_URL"] = ""
+    test_env["LIFESNAP_LLM_API_KEY"] = ""
+    test_env["LIFESNAP_LLM_MODEL"] = ""
     port = _free_port()
     process = subprocess.Popen(
         [
@@ -93,6 +109,7 @@ def main() -> int:
             "warning",
         ],
         cwd=BACKEND_DIR,
+        env=test_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -108,6 +125,7 @@ def main() -> int:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
+            process.wait(timeout=5)
 
     print("Smoke test passed")
     return 0
@@ -123,6 +141,8 @@ def _run_checks(client: ApiClient) -> None:
     _check_task_statistics_overview(client)
     _check_candidate_discard_flow(client)
     _check_candidate_edit_flow(client)
+    _check_chat_clarifying_questions(client)
+    _check_workflow_regressions(client)
     _check_chat_task_candidate_confirmation(client)
     _check_chat_diary_reflection(client)
     _check_chat_diary_candidate_confirmation(client)
@@ -142,12 +162,98 @@ def _run_checks(client: ApiClient) -> None:
     _check_data_quality_diagnostics(client)
     _check_dashboard_summary(client)
     _check_data_export_and_clear(client)
+    _check_diary_csv_export(client)
+
+
+def _check_diary_csv_export(client: ApiClient) -> None:
+    payload = {
+        "entry_date": "2001-02-03",
+        "title": '日记, "导出"',
+        "content": '第一行,保留逗号\n第二行 "保留引号"',
+        "mood": "calm",
+        "weather": None,
+        "tags": ["生活", "记录"],
+    }
+    status, diary = client.request("POST", "/diaries", payload)
+    _assert(status == 201, "CSV fixture diary should be created")
+    with urllib.request.urlopen(f"{client.base_url}/data/export/diaries.csv", timeout=5) as response:
+        _assert(response.status == 200, "Diary CSV should return 200")
+        _assert("text/csv" in response.headers["Content-Type"], "Diary export must be CSV")
+        _assert("lifesnap-diaries.csv" in response.headers["Content-Disposition"], "CSV should be downloadable")
+        rows = list(csv.DictReader(StringIO(response.read().decode("utf-8"))))
+    row = next(item for item in rows if item["id"] == diary["id"])
+    for field in ("entry_date", "title", "content", "mood"):
+        _assert(row[field] == payload[field], f"Diary CSV should preserve {field}")
+    _assert(row["tags"] == "生活;记录", "Diary CSV should export tags")
+    _assert(row["weather"] == "", "Null weather should be empty")
+    _assert(row["source"] == "manual", "Diary source should use the enum value")
+    status, _ = client.request("DELETE", f"/diaries/{diary['id']}")
+    _assert(status == 204, "CSV fixture should be soft-deleted")
+    status, exported = client.request("GET", "/data/export/diaries.csv")
+    _assert(status == 200, "Diary CSV should still work after deletion")
+    rows = list(csv.DictReader(StringIO(exported)))
+    _assert(all(item["id"] != diary["id"] for item in rows), "Deleted diaries must not be exported")
 
 
 def _check_health(client: ApiClient) -> None:
     status, body = client.request("GET", "/health")
     _assert(status == 200, "GET /health should return 200")
     _assert(body["status"] == "ok", "GET /health should return ok")
+
+
+def _check_workflow_regressions(client: ApiClient) -> None:
+    fixtures = [
+        ("/bills", {"amount": "28", "merchant": "Cafe", "note": "editable"},
+         ["amount", "currency", "merchant", "category", "transaction_type", "source", "paid_at"], "note"),
+        ("/tasks", {"title": "Meeting", "description": "editable"},
+         ["title", "category", "task_type", "status", "priority", "source"], "description"),
+        ("/diaries", {"entry_date": "2002-03-04", "title": "Day", "content": "Notes", "weather": "Sunny"},
+         ["entry_date", "title", "content", "mood", "source", "attachment_ids", "tags"], "weather"),
+    ]
+    for path, payload, required_fields, nullable_field in fixtures:
+        status, created = client.request("POST", path, payload)
+        _assert(status == 201, f"{path} fixture should be created")
+        item_path = f"{path}/{created['id']}"
+        for field in required_fields:
+            status, error = client.request("PATCH", item_path, {field: None})
+            _assert(status == 422, f"{path}.{field} null must be rejected before saving")
+            _assert(error["error"]["code"] == "validation_error", "Use the standard validation response")
+        status, unchanged = client.request("GET", item_path)
+        _assert(unchanged == created, "Rejected updates must not mutate the saved record")
+        status, updated = client.request("PATCH", item_path, {nullable_field: None})
+        _assert(status == 200 and updated[nullable_field] is None, "Optional fields must remain clearable")
+        client.request("DELETE", item_path)
+
+    for message, intent, transaction_type in [
+        ("今天点了咖啡 28 元", "create_bill", "expense"),
+        ("工资收入 6800 元", "create_bill", "income"),
+        ("商店退款 28 元", "create_bill", "refund"),
+        ("提醒我明天 10 点支付 28 元", "create_task", None),
+    ]:
+        status, result = client.request("POST", "/chat/messages", {"message": message})
+        _assert(status == 200 and result["intent"] == intent, f"Incorrect routing for {message}")
+        if transaction_type is not None:
+            _assert(result["candidate"]["data"]["transaction_type"] == transaction_type, "Preserve transaction meaning")
+        client.request("POST", "/chat/discard-action", {
+            "action_type": result["action_type"], "candidate_id": result["candidate_id"],
+        })
+
+    status, candidate = client.request("POST", "/agent/parse-bill", {"text": "Cafe\n0 元"})
+    _assert(status == 200 and candidate["data"]["amount"] is None, "Zero amounts should need clarification")
+    candidate_path = f"/agent/bill-candidates/{candidate['candidate_id']}"
+    for payload in ({"currency": None}, {"category": None}, {"amount": -1}):
+        status, _ = client.request("PATCH", candidate_path, payload)
+        _assert(status == 422, "Invalid candidate edits must be rejected")
+    status, _ = client.request("PATCH", candidate_path, {"amount": "28"})
+    _assert(status == 200, "Candidate should remain editable after validation errors")
+    action = {"action_type": "bill_candidate", "candidate_id": candidate["candidate_id"]}
+    headers = {"Idempotency-Key": f"workflow-confirm-{candidate['candidate_id']}"}
+    status, first = client.request("POST", "/chat/confirm-action", action, headers)
+    _assert(status == 200, "Corrected candidate should confirm")
+    status, replay = client.request("POST", "/chat/confirm-action", action, headers)
+    _assert(status == 200 and replay == first, "Retry must return the original confirmation")
+
+
 
 
 def _check_standard_error_responses(client: ApiClient) -> None:
@@ -737,6 +843,43 @@ def _check_candidate_edit_flow(client: ApiClient) -> None:
     _assert(status == 200, "Diary candidate update should return 200")
     _assert(patched_diary["data"]["title"] == "候选编辑联调完成", "Diary candidate title should update")
     _assert(patched_diary["data"]["tags"] == ["工作", "成长"], "Diary candidate tags should update")
+
+def _check_chat_clarifying_questions(client: ApiClient) -> None:
+    status, bill_body = client.request("POST", "/chat/messages", {"message": "记一笔早餐"})
+    _assert(status == 200, "Incomplete bill chat should still be handled")
+    _assert(bill_body["intent"] == "create_bill", "Incomplete bill should keep bill intent")
+    _assert(
+        bill_body["candidate"]["data"]["amount"] is None,
+        "Incomplete bill should keep missing amount empty",
+    )
+    _assert(
+        "金额" in bill_body["reply"] and "补充" in bill_body["reply"],
+        "Incomplete bill should ask the user for missing amount",
+    )
+    _assert(
+        bill_body["agent_steps"][-1]["status"] == "blocked",
+        "Incomplete bill should wait for user-supplied fields",
+    )
+
+    status, task_body = client.request(
+        "POST",
+        "/chat/messages",
+        {"message": "提醒我去医院复诊"},
+    )
+    _assert(status == 200, "Incomplete reminder chat should still be handled")
+    _assert(task_body["intent"] == "create_task", "Incomplete reminder should keep task intent")
+    _assert(
+        task_body["candidate"]["data"]["remind_at"] is None,
+        "Incomplete reminder should keep missing reminder time empty",
+    )
+    _assert(
+        "提醒时间" in task_body["reply"] and "补充" in task_body["reply"],
+        "Incomplete reminder should ask the user for missing reminder time",
+    )
+    _assert(
+        task_body["agent_steps"][-1]["status"] == "blocked",
+        "Incomplete reminder should wait for user-supplied fields",
+    )
 
 def _check_chat_task_candidate_confirmation(client: ApiClient) -> None:
     message = "\u660e\u5929\u4e0b\u5348 3 \u70b9\u63d0\u9192\u6211\u53bb\u533b\u9662\u590d\u8bca"

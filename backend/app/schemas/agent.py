@@ -2,6 +2,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
+from app.schemas.patch import PatchModel
+
 from pydantic import BaseModel, Field
 
 from app.schemas.bill import BillSource, TransactionType
@@ -20,9 +22,9 @@ class ParseTaskRequest(BaseModel):
 
 
 class BillCandidateData(BaseModel):
-    amount: Decimal | None = None
+    amount: Decimal | None = Field(default=None, gt=0)
     currency: str = Field(default="CNY", min_length=3, max_length=3)
-    merchant: str | None = Field(default=None, max_length=120)
+    merchant: str | None = Field(default=None, min_length=1, max_length=120)
     category: str = Field(default="其他", min_length=1, max_length=40)
     payment_method: str | None = Field(default=None, max_length=40)
     paid_at: datetime | None = None
@@ -31,7 +33,9 @@ class BillCandidateData(BaseModel):
     source: BillSource = BillSource.screenshot
 
 
-class BillCandidateUpdate(BaseModel):
+class BillCandidateUpdate(PatchModel):
+    non_nullable_fields = frozenset(["currency","category","transaction_type","source"])
+
     amount: Decimal | None = Field(default=None, gt=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     merchant: str | None = Field(default=None, min_length=1, max_length=120)
@@ -44,7 +48,7 @@ class BillCandidateUpdate(BaseModel):
 
 
 class TaskCandidateData(BaseModel):
-    title: str | None = Field(default=None, max_length=120)
+    title: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=500)
     category: str = Field(default="生活", min_length=1, max_length=40)
     task_type: TaskType = TaskType.todo
@@ -54,7 +58,9 @@ class TaskCandidateData(BaseModel):
     source: TaskSource = TaskSource.ai_chat
 
 
-class TaskCandidateUpdate(BaseModel):
+class TaskCandidateUpdate(PatchModel):
+    non_nullable_fields = frozenset(["category","task_type","priority","source"])
+
     title: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=500)
     category: str | None = Field(default=None, min_length=1, max_length=40)
@@ -75,7 +81,9 @@ class DiaryCandidateData(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
-class DiaryCandidateUpdate(BaseModel):
+class DiaryCandidateUpdate(PatchModel):
+    non_nullable_fields = frozenset(["mood","source","tags"])
+
     entry_date: date | None = None
     title: str | None = Field(default=None, min_length=1, max_length=120)
     content: str | None = Field(default=None, min_length=1, max_length=5000)
