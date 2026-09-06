@@ -5,7 +5,7 @@ const routes = [
     icon: "home",
     eyebrow: "本地体验",
     title: "今天先把账记顺",
-    subtitle: "查看本月支出、最近账单和待办提醒；数据来自当前 FastAPI 后端。",
+    subtitle: "记下收支，随时知道钱花在哪里。",
   },
   {
     id: "bills",
@@ -13,7 +13,7 @@ const routes = [
     icon: "receipt",
     eyebrow: "手动记录",
     title: "账单列表",
-    subtitle: "第一步先支持手动新增、列表查看，后续接入截图识别候选确认。",
+    subtitle: "查找、核对和修改每一笔收支。",
   },
   {
     id: "tasks",
@@ -21,7 +21,7 @@ const routes = [
     icon: "check",
     eyebrow: "提醒辅助",
     title: "待办提醒",
-    subtitle: "管理后端待办数据，支持新增、编辑、完成、延后和重复提醒。",
+    subtitle: "把要做的事记下来。",
   },
   {
     id: "diary",
@@ -29,13 +29,13 @@ const routes = [
     icon: "book",
     eyebrow: "生活记录",
     title: "日记",
-    subtitle: "记录文字、心情和图片片段；数据保存到当前后端。",
+    subtitle: "留下一点今天的心情。",
   },
   {
     id: "assistant",
     label: "助手",
     icon: "spark",
-    eyebrow: "意图识别",
+    eyebrow: "帮你整理",
     title: "智能助手",
     subtitle: "把一句话、图片或语音整理成可确认的生活操作。",
   },
@@ -45,7 +45,7 @@ const routes = [
     icon: "settings",
     eyebrow: "隐私与数据",
     title: "设置",
-    subtitle: "管理本地数据、导入导出和快照恢复。",
+    subtitle: "管理个人偏好和数据备份。",
   },
 ];
 
@@ -90,6 +90,7 @@ const state = {
   toast: "",
   modalOpen: false,
   billRangeOpen: false,
+  billDetailsOpen: false,
   notificationOpen: false,
   editingBill: null,
   billDraft: null,
@@ -146,7 +147,7 @@ const state = {
     q: "",
   },
   taskFilters: {
-    view: "today",
+    view: "all",
     category: "",
     sort: "time",
     dateKey: todayDateKey(),
@@ -195,13 +196,34 @@ const state = {
 };
 
 const app = document.querySelector("#app");
+let toastDismissTimer;
+let timedToast = "";
 
 window.addEventListener("hashchange", () => {
   state.route = getRoute();
   render();
+  window.scrollTo({ top: 0, behavior: "instant" });
 });
 
 document.addEventListener("click", (event) => {
+  const pageButton = event.target.closest("[data-bill-page]");
+  if (pageButton) {
+    state.billListMeta.page = Number(pageButton.dataset.billPage);
+    loadData();
+    return;
+  }
+  if (event.target.closest("[data-bill-all-time]")) {
+    state.billFilters = { ...state.billFilters, period: "all", year: "", month: "", start_date: "", end_date: "" };
+    state.billListMeta.page = 1;
+    loadData();
+    return;
+  }
+  if (event.target.closest("[data-clear-bill-search]")) {
+    state.billFilters.q = "";
+    state.billListMeta.page = 1;
+    loadData();
+    return;
+  }
   const routeButton = event.target.closest("[data-route]");
   if (routeButton) {
     window.location.hash = routeButton.dataset.route;
@@ -209,6 +231,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-open-bill-modal]")) {
+    state.billDetailsOpen = false;
     state.editingBill = null;
     state.billDraft = null;
     state.modalOpen = true;
@@ -510,7 +533,7 @@ document.addEventListener("click", (event) => {
 
   const editButton = event.target.closest("[data-edit-bill]");
   if (editButton) {
-    state.editingBill = state.bills.find((bill) => bill.id === editButton.dataset.editBill) ?? null;
+    state.billDetailsOpen = false;    state.editingBill = [...state.bills, ...(state.bootstrap?.dashboard?.recent_bills ?? [])].find((bill) => bill.id === editButton.dataset.editBill) ?? null;
     state.billDraft = null;
     state.modalOpen = Boolean(state.editingBill);
     render();
@@ -519,7 +542,8 @@ document.addEventListener("click", (event) => {
 
   const deleteButton = event.target.closest("[data-delete-bill]");
   if (deleteButton) {
-    state.deleteTarget = state.bills.find((bill) => bill.id === deleteButton.dataset.deleteBill) ?? null;
+    state.deleteTarget = state.editingBill ?? state.bills.find((bill) => bill.id === deleteButton.dataset.deleteBill) ?? null;
+    state.modalOpen = false;
     render();
     return;
   }
@@ -551,6 +575,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-close-modal]")) {
+    if (state.saving) return;
     state.modalOpen = false;
     state.billRangeOpen = false;
     state.notificationOpen = false;
@@ -643,6 +668,7 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-reset-bill-filters]")) {
     state.billFilters = defaultBillFilters();
+    state.billListMeta.page = 1;
     state.billRangeOpen = false;
     loadData();
     return;
@@ -805,6 +831,16 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.saving) return;
+  if (event.key === "Tab") {
+    const dialogs = app.querySelectorAll('[role="dialog"]');
+    const dialog = dialogs[dialogs.length - 1];
+    const focusable = dialog ? [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')].filter(node => node.getClientRects().length) : [];
+    if (focusable.length && ((event.shiftKey && document.activeElement === focusable[0]) || (!event.shiftKey && document.activeElement === focusable[focusable.length - 1]))) {
+      event.preventDefault();
+      focusable[event.shiftKey ? focusable.length - 1 : 0].focus();
+    }
+  }
   if (
     event.target.matches("[data-chat-input]")
     && event.key === "Enter"
@@ -871,11 +907,18 @@ document.addEventListener("keydown", (event) => {
     state.diagnosticsOpen = false;
     state.auditLogOpen = false;
     state.recycleBinOpen = false;
+    state.chatCandidateEditor = null;
     render();
   }
 });
 
 document.addEventListener("input", (event) => {
+  const billForm = event.target.closest("[data-bill-form]");
+  if (billForm && !state.saving) {
+    const draft = Object.fromEntries(new FormData(billForm));
+    state.billDraft = { ...(state.billDraft ?? state.editingBill ?? {}), ...draft };
+    state.billDetailsOpen = Boolean(billForm.querySelector("[data-bill-details]")?.open);
+  }
   if (event.target.matches("[data-chat-input]")) {
     state.chatDraft = event.target.value;
     saveAssistantSession();
@@ -905,6 +948,13 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.matches("[data-bill-search-form]")) {
+    event.preventDefault();
+    state.billFilters.q = String(new FormData(event.target).get("q") || "").trim();
+    state.billListMeta.page = 1;
+    loadData();
+    return;
+  }
   if (event.target.matches("[data-bill-filter]")) {
     event.preventDefault();
     applyBillFilters(new FormData(event.target));
@@ -1055,24 +1105,29 @@ async function loadData() {
 }
 
 async function submitBill(formData) {
+  if (state.saving) return;
   const amount = Number(formData.get("amount"));
   const paidAt = formData.get("paid_at");
   const editingBill = state.editingBill;
   const isEditing = Boolean(editingBill?.id);
-  const defaultBillCategory = getCategorySettings().bill_categories[0] || "其他";
+  const defaultBillCategory = "其他";
   const payload = {
     amount,
     merchant: String(formData.get("merchant") || "").trim(),
     category: String(formData.get("category") || defaultBillCategory).trim(),
     payment_method: String(formData.get("payment_method") || "").trim() || null,
     transaction_type: formData.get("transaction_type"),
-    paid_at: paidAt ? new Date(paidAt).toISOString() : null,
+    paid_at: paidAt ? new Date(paidAt).toISOString() : new Date().toISOString(),
     note: String(formData.get("note") || "").trim() || null,
   };
   if (!isEditing) {
     payload.source = state.billDraft?.source || "manual";
   }
 
+  const requestPayload = JSON.stringify(payload);
+  const requestKey = state.billDraft?.request_payload === requestPayload ? state.billDraft.request_key : crypto.randomUUID();
+  state.billDraft = { ...state.billDraft, ...payload, request_key: requestKey, request_payload: requestPayload };
+  state.billDetailsOpen = Boolean(app.querySelector("[data-bill-details]")?.open);
   state.billRestoreTarget = null;
   state.saving = true;
   render();
@@ -1081,7 +1136,7 @@ async function submitBill(formData) {
       method: isEditing ? "PATCH" : "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(isEditing ? {} : { "Idempotency-Key": `web-bill-${crypto.randomUUID()}` }),
+        ...(isEditing ? {} : { "Idempotency-Key": `web-bill-${state.billDraft.request_key}` }),
       },
       body: JSON.stringify(payload),
     });
@@ -1090,10 +1145,7 @@ async function submitBill(formData) {
     state.billDraft = null;
     state.toast = isEditing ? "账单已更新" : "账单已保存";
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     state.toast = error.message || "保存失败";
     render();
@@ -1130,11 +1182,12 @@ async function importBillImage(file) {
     state.editingBill = null;
     if (result.status === "candidate_created" && result.candidate) {
       state.billDraft = billDraftFromCandidate(result.candidate, uploaded);
-      state.toast = "图片已整理成候选账单，请确认后保存";
+      state.toast = "已读出账单，请核对金额后保存";
     } else {
       state.billDraft = fallbackBillDraftFromAttachment(uploaded, result);
-      state.toast = "图片已上传，当前 OCR 需要手动补充账单字段";
+      state.toast = "暂时没能读出图片内容，请填写金额和商家";
     }
+    state.billDetailsOpen = false;
     state.modalOpen = true;
   } catch (error) {
     state.toast = error.message || "图片导入失败";
@@ -1162,29 +1215,11 @@ function billDraftFromCandidate(candidate, attachment) {
 }
 
 function fallbackBillDraftFromAttachment(attachment, result) {
-  const warnings = result?.warnings?.length
-    ? result.warnings.join("、")
-    : "ocr_engine_not_configured";
-  return {
-    amount: "",
-    merchant: "",
-    category: "其他",
-    payment_method: "",
-    transaction_type: "expense",
-    paid_at: new Date().toISOString(),
-    note: `来自图片导入：${attachment.filename || "支付截图"}。请手动补充金额和商户。${warnings ? `识别提示：${warnings}` : ""}`,
-    source: "album",
-    attachment_id: attachment.id,
-    warnings: result?.warnings ?? [],
-  };
+  return { amount: "", merchant: "", category: "其他", payment_method: "", transaction_type: "expense", paid_at: new Date().toISOString(), note: "", source: "album", attachment_id: attachment.id, warnings: result?.warnings ?? [], needs_manual_entry: true };
 }
 
 function billDraftNote(candidate, attachment) {
-  const confidence = Math.round(Number(candidate.confidence ?? 0) * 100);
-  const warnings = candidate.warnings?.length
-    ? `；提示：${candidate.warnings.join("、")}`
-    : "";
-  return `来自图片导入：${attachment.filename || "支付截图"}；候选可信度 ${confidence}%${warnings}`;
+  return candidate.data?.note || "";
 }
 
 async function deleteBill() {
@@ -1212,7 +1247,7 @@ async function deleteBill() {
       ) {
         state.billRestoreTarget = null;
         state.toast = "";
-        render();
+        app.querySelector(".toast")?.remove();
       }
     }, 2200);
   } catch (error) {
@@ -1246,7 +1281,7 @@ async function restoreDeletedBill() {
     window.setTimeout(() => {
       if (state.toast === "账单已恢复") {
         state.toast = "";
-        render();
+        app.querySelector(".toast")?.remove();
       }
     }, 2200);
   } catch (error) {
@@ -1287,7 +1322,7 @@ async function deleteDiary() {
       ) {
         state.diaryRestoreTarget = null;
         state.toast = "";
-        render();
+        app.querySelector(".toast")?.remove();
       }
     }, 2200);
   } catch (error) {
@@ -1325,7 +1360,7 @@ async function deleteTask() {
       ) {
         state.taskRestoreTarget = null;
         state.toast = "";
-        render();
+        app.querySelector(".toast")?.remove();
       }
     }, 2200);
   } catch (error) {
@@ -1361,7 +1396,7 @@ async function restoreDeletedDiary() {
     window.setTimeout(() => {
       if (state.toast === "日记已恢复") {
         state.toast = "";
-        render();
+        app.querySelector(".toast")?.remove();
       }
     }, 2200);
   } catch (error) {
@@ -1395,7 +1430,7 @@ async function restoreDeletedTask() {
     window.setTimeout(() => {
       if (state.toast === "待办已恢复") {
         state.toast = "";
-        render();
+        app.querySelector(".toast")?.remove();
       }
     }, 2200);
   } catch (error) {
@@ -1523,10 +1558,7 @@ async function submitTask(formData) {
     state.editingTask = null;
     state.toast = isEditing ? "待办已更新" : "待办已创建";
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     state.toast = error.message || "创建失败";
     render();
@@ -1586,10 +1618,7 @@ async function submitRepeatTask(formData) {
     state.repeatTaskModalOpen = false;
     state.toast = `已创建 ${createdCount} 条重复提醒`;
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     if (createdCount) {
       state.toast = `已创建 ${createdCount} 条，后续创建失败：${error.message || "请稍后重试"}`;
@@ -1695,12 +1724,9 @@ async function submitDiary(formData) {
     state.diaryEntries = upsertDiaryEntry(state.diaryEntries, normalizeDiaryEntry(saved));
     state.diaryModalOpen = false;
     state.diaryDraft = null;
-    state.toast = hadEntry ? "日记已更新" : "日记已保存到后端";
+    state.toast = hadEntry ? "日记已更新" : "日记已保存";
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     state.toast = error.message || "日记保存失败";
     render();
@@ -1756,10 +1782,7 @@ async function uploadDiaryImages(fileList) {
     state.diaryEntries = upsertDiaryEntry(state.diaryEntries, normalizeDiaryEntry(saved));
     state.toast = `已添加 ${uploadedIds.length} 张日记图片`;
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     state.toast = error.message || "日记图片上传失败";
   } finally {
@@ -1810,10 +1833,7 @@ async function removeDiaryImage(attachmentId) {
 
     state.toast = cleanupFailed ? "图片已移除，附件清理稍后重试" : "日记图片已移除";
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     state.toast = error.message || "图片移除失败";
     render();
@@ -2099,7 +2119,7 @@ function chatMessageFromAttachmentResult(attachment, result) {
 
   return {
     role: "assistant",
-    text: `图片「${attachment.name}」已上传，但当前本地 OCR 还没有识别出文字。你可以补充商户、金额或提醒内容，我再继续整理。`,
+    text: `图片「${attachment.name}」已上传，但暂时没能读出内容。可以输入商家、金额或要记录的事项。`,
     response: {
       intent: "create_bill",
       confidence: result.confidence ?? 0,
@@ -2311,11 +2331,11 @@ function stopVoiceInput(shouldRender = true) {
 function openChatCandidateEditor(candidateId) {
   const message = state.chatMessages.find((item) => getChatCandidateId(item.response) === String(candidateId));
   if (!message?.response?.candidate) {
-    showToast("没有找到可编辑的候选记录。");
+    showToast("没找到这条待保存记录，请重新整理。");
     return;
   }
   if (message.handled) {
-    showToast("已处理的候选记录不能继续编辑。");
+    showToast("这条记录已处理。已保存的内容可以在对应列表中修改。");
     return;
   }
   state.chatCandidateEditor = {
@@ -2335,7 +2355,7 @@ async function submitChatCandidateEdit(formData) {
   const endpoint = chatCandidateEndpoint(editor.actionType, editor.candidateId);
   const payload = chatCandidateUpdatePayload(editor.actionType, formData);
   if (!endpoint || !payload) {
-    showToast("当前候选暂不支持编辑。");
+    showToast("这条记录暂时无法修改，请重新整理。");
     return;
   }
 
@@ -2349,9 +2369,9 @@ async function submitChatCandidateEdit(formData) {
     });
     updateChatCandidateInMessages(editor.candidateId, candidate);
     state.chatCandidateEditor = null;
-    state.toast = "候选记录已更新";
+    state.toast = "信息已修改，请核对后保存";
   } catch (error) {
-    state.toast = error.message || "候选记录更新失败";
+    state.toast = error.message || "修改失败，请重试";
   } finally {
     state.saving = false;
     saveAssistantSession();
@@ -2470,7 +2490,7 @@ async function confirmChatAction(actionType, candidateId) {
       bill_candidate: "AI 账单已保存",
       task_candidate: "AI 待办已保存",
       diary_candidate: "AI 日记已保存",
-    }[actionType] || "AI 候选已保存";
+    }[actionType] || "记录已保存";
     await loadData();
   } catch (error) {
     state.chatMessages = [
@@ -2504,7 +2524,7 @@ async function discardChatAction(actionType, candidateId) {
     markChatCandidate(candidateId, "discarded");
     state.chatMessages = [
       ...state.chatMessages,
-      { role: "assistant", text: response.reply || "已丢弃候选记录。" },
+      { role: "assistant", text: response.reply || "这条记录没有保存。" },
     ];
     saveAssistantSession();
     await loadData();
@@ -2545,10 +2565,7 @@ async function completeTask(taskId) {
     });
     state.toast = "待办已完成";
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     state.toast = error.message || "操作失败";
     render();
@@ -2579,10 +2596,7 @@ async function submitSnooze(formData) {
     state.snoozeTarget = null;
     state.toast = "提醒时间已延后";
     await loadData();
-    window.setTimeout(() => {
-      state.toast = "";
-      render();
-    }, 2200);
+    scheduleToastDismissal();
   } catch (error) {
     state.toast = error.message || "延后失败";
     render();
@@ -2617,10 +2631,10 @@ async function saveSnapshot() {
   try {
     const result = await api("/data/snapshot/save", { method: "POST" });
     state.snapshotStatus = result;
-    state.toast = "本地快照已保存";
+    state.toast = "本机备份已保存";
     await loadData();
   } catch (error) {
-    state.toast = error.message || "保存快照失败";
+    state.toast = error.message || "备份失败，请重试";
     render();
   } finally {
     state.saving = false;
@@ -3058,21 +3072,21 @@ function openSettingsConfirm(action) {
     clear: {
       action,
       title: "清除本地数据",
-      message: "会清空账单、待办、日记、附件和候选记录。建议先保存快照或导出数据。",
+      message: "会清空账单、待办、日记、图片和未保存记录。建议先导出备份文件。",
       confirmLabel: "确认清除",
       danger: true,
     },
     loadSnapshot: {
       action,
-      title: "加载本地快照",
-      message: "会用快照内容覆盖当前本地数据。当前未保存的内存数据可能被替换。",
-      confirmLabel: "确认加载",
+      title: "恢复本机备份",
+      message: "恢复后，当前记录会被这份备份替换。建议先导出当前数据，再继续恢复。",
+      confirmLabel: "确认恢复",
       danger: true,
     },
     deleteSnapshot: {
       action,
       title: "删除本地快照",
-      message: "会删除 backend/data/local_snapshot.json。删除后无法通过快照恢复。",
+      message: "会删除这份本机备份。删除后无法再从这份备份恢复记录。",
       confirmLabel: "确认删除",
       danger: true,
     },
@@ -3106,7 +3120,7 @@ async function runSettingsConfirm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirm: true, reset_existing: true }),
       });
-      state.toast = "本地快照已加载";
+      state.toast = "本机备份已恢复";
     }
 
     if (action === "deleteSnapshot") {
@@ -3115,7 +3129,7 @@ async function runSettingsConfirm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirm: true }),
       });
-      state.toast = "本地快照已删除";
+      state.toast = "本机备份已删除";
     }
 
     state.settingsConfirm = null;
@@ -3188,6 +3202,8 @@ function applyBillPeriodMonth() {
     ...state.billFilters,
     ...current,
     transaction_type: state.billFilters.transaction_type,
+    category: state.billFilters.category,
+    q: state.billFilters.q,
   };
   state.billListMeta.page = 1;
   loadData();
@@ -3208,7 +3224,7 @@ function applyBillPeriodWeek() {
 }
 
 function buildBillListPath() {
-  const params = new URLSearchParams({ page_size: String(state.billListMeta.page_size) });
+  const params = new URLSearchParams({ page: String(state.billListMeta.page), page_size: String(state.billListMeta.page_size) });
   Object.entries(state.billFilters).forEach(([key, value]) => {
     if (["period", "start_date", "end_date"].includes(key)) {
       return;
@@ -3577,7 +3593,7 @@ function showToast(message) {
   window.setTimeout(() => {
     if (state.toast === message) {
       state.toast = "";
-      render();
+      app.querySelector(".toast")?.remove();
     }
   }, 2600);
 }
@@ -3592,8 +3608,9 @@ function render() {
   const primaryAction = getPrimaryAction();
   const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "assistant", "settings"].includes(state.route);
   app.innerHTML = `
-    <div class="app-shell mobile-shell">
-      <main class="main mobile-main">
+    <div class="app-shell mobile-shell simple-shell">
+      ${renderSidebar()}
+      <main class="main mobile-main" id="main-content">
         ${hasCustomHeader ? "" : renderTopbar(route, primaryAction)}
         ${renderPage()}
         ${renderMobileTabbar()}
@@ -3630,6 +3647,22 @@ function render() {
     </div>
   `;
   afterRender();
+  scheduleToastDismissal();
+}
+
+function scheduleToastDismissal() {
+  if (state.toast === timedToast) return;
+  window.clearTimeout(toastDismissTimer);
+  timedToast = state.toast;
+  if (!timedToast) return;
+  const message = timedToast;
+  toastDismissTimer = window.setTimeout(() => {
+    if (state.toast === message) {
+      state.toast = "";
+      app.querySelector(".toast")?.remove();
+    }
+    timedToast = "";
+  }, 4200);
 }
 
 function renderToast() {
@@ -3672,10 +3705,29 @@ function renderCategoryDatalists() {
 function afterRender() {
   if (state.route === "assistant") {
     const thread = app.querySelector(".assistant-thread");
-    if (thread) {
-      thread.scrollTop = thread.scrollHeight;
-    }
+    if (thread) thread.scrollTop = thread.scrollHeight;
   }
+  const dialogs = app.querySelectorAll('[role="dialog"]');
+  const dialog = dialogs[dialogs.length - 1];
+  app.querySelector("main")?.toggleAttribute("inert", Boolean(dialog));
+  app.querySelector(".simple-sidebar")?.toggleAttribute("inert", Boolean(dialog));
+  document.body.classList.toggle("has-dialog", Boolean(dialog));
+  if (dialog) {
+    const target = dialog.querySelector('input:not([type="hidden"]), textarea, select') || dialog.querySelector("button");
+    target?.focus({ preventScroll: true });
+  }
+}
+
+function friendlyAssistantText(value) {
+  const known = {
+    "Bill candidate confirmed and saved.": "这笔账已保存，可以在账单里查看。",
+    "Task candidate confirmed and saved.": "事项已保存，可以在待办里查看。",
+    "Diary candidate confirmed and saved.": "日记已保存，可以在日记里查看。",
+    "Bill candidate discarded.": "这笔账没有保存。",
+    "Task candidate discarded.": "这件事没有保存。",
+    "Diary candidate discarded.": "这篇日记没有保存。",
+  };
+  return String(known[value] || value).replaceAll("候选账单", "待核对账单").replaceAll("候选提醒", "待核对事项").replaceAll("候选记录", "待核对记录").replaceAll("候选日记", "待核对日记").replaceAll("候选结果", "待核对内容").replaceAll("字段", "信息").replaceAll("商户", "商家");
 }
 
 function renderTopbar(route, primaryAction) {
@@ -3712,46 +3764,26 @@ function getPrimaryAction() {
 }
 
 function renderSidebar() {
-  return `
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">${icon("spark")}</div>
-        <div>
-          <p class="brand-title">LifeSnap AI</p>
-          <p class="brand-subtitle">小事管家 MVP</p>
-        </div>
-      </div>
-      <nav class="nav" aria-label="主导航">
-        ${routes
-          .map(
-            (route) => `
-              <button class="nav-button ${state.route === route.id ? "is-active" : ""}"
-                type="button"
-                data-route="${route.id}">
-                ${icon(route.icon)}${route.label}
-              </button>
-            `,
-          )
-          .join("")}
-      </nav>
-      <div class="sidebar-footer">
-        <strong>当前阶段</strong><br />
-        阶段 3：页面骨架、本地体验、手动账单主路径。
-      </div>
-    </aside>
-  `;
+  const item = (id, label, symbol) => `<button class="nav-button ${state.route === id ? "is-active" : ""}" type="button" data-route="${id}" ${state.route === id ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${label}</span></button>`;
+  return `<aside class="sidebar simple-sidebar">
+    <a class="brand" href="#dashboard" aria-label="LifeSnap 首页"><span class="brand-mark">${icon("wallet")}</span><span><strong class="brand-title">LifeSnap</strong><small class="brand-subtitle">把每一笔，记清楚</small></span></a>
+    <nav class="nav" aria-label="主导航">
+      ${item("dashboard", "首页", "home")}${item("bills", "账单", "receipt")}${item("assistant", "AI 帮记", "spark")}
+      <p class="nav-group-label">生活小事</p>${item("tasks", "待办", "check")}${item("diary", "日记", "book")}
+      <p class="nav-group-label">管理</p>${item("settings", "设置", "settings")}
+    </nav><div class="simple-sidebar-note">${icon("check-circle")}每笔收支，由你确认。</div>
+  </aside>`;
 }
 
 function renderPage() {
   if (state.loading) {
-    return `<section class="surface"><p class="status-line">正在读取后端数据...</p></section>`;
+    return `<section class="surface"><p class="status-line">正在加载你的记录…</p></section>`;
   }
 
   if (state.error) {
     return `
       <section class="surface">
-        <p class="error">${escapeHtml(state.error)}</p>
-        <p class="status-line">请确认 FastAPI 后端正在运行，然后刷新页面。</p>
+        <h1 class="section-title">暂时无法加载记录</h1><p class="status-line">连接可能中断了，请稍后重试。</p><button class="button primary" type="button" data-refresh>重新加载</button><details class="simple-details"><summary>查看原因</summary><p class="error">${escapeHtml(state.error)}</p></details>
       </section>
     `;
   }
@@ -3768,222 +3800,84 @@ function renderDashboard() {
   const dashboard = state.bootstrap?.dashboard ?? {};
   const monthly = dashboard.monthly_statistics ?? {};
   const expense = Number(monthly.total_expense ?? 0);
-  const income = Number(monthly.total_income ?? 0);
-  const netAmount = Number(monthly.net_amount ?? income - expense);
-  const budget = getBudgetSettings();
-  const monthlyBudget = Number(budget.monthly_budget ?? 0);
-  const budgetRemaining = Math.max(0, monthlyBudget - expense);
-  const progress = financeProgress(monthly, budget);
-  const remainingPercent = monthlyBudget > 0
-    ? Math.max(0, Math.round((budgetRemaining / monthlyBudget) * 100))
-    : 0;
-  const homeTasks = [
-    ...(dashboard.today_tasks ?? []),
-    ...(dashboard.upcoming_reminders ?? []),
-  ].slice(0, 3);
-
-  return `
-    <div class="home-page">
-      <section class="home-hero">
-        <div class="home-hero-copy">
-          <h1 class="home-title">早安，<br />今天也要<span>轻松管理生活</span></h1>
-          <p class="home-subtitle">每一个小习惯，成就更好的自己</p>
-        </div>
-        <div class="home-illustration" aria-hidden="true">
-          <div class="home-window">
-            <span class="home-sun"></span>
-          </div>
-          <div class="home-cup"></div>
-          <div class="home-plant plant-left"></div>
-          <div class="home-plant plant-right"></div>
-          <div class="home-mascot"></div>
-        </div>
+  const budget = Number(getBudgetSettings().monthly_budget ?? 0);
+  const remaining = budget - expense;
+  const recent = (dashboard.recent_bills ?? []).slice(0, 5);
+  const now = new Date();
+  const dateLabel = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(now);
+  const tasks = [...new Map([...(dashboard.today_tasks ?? []), ...(dashboard.upcoming_reminders ?? [])].map(task => [task.id, task])).values()].slice(0, 3);
+  return `<div class="simple-home">
+    <header class="simple-page-header"><div><p class="simple-kicker">${escapeHtml(dateLabel)}</p><h1>记好每一笔，心里更有数。</h1><p>花了多少、花在哪里，打开就知道。</p></div><button class="button primary" type="button" data-open-bill-modal>${icon("plus")}记一笔</button></header>
+    <section class="entry-options" aria-label="选择记账方式">
+      <button class="entry-option" type="button" data-bill-photo-placeholder ${state.saving ? "disabled" : ""}><span class="entry-icon">${icon("camera")}</span><span><strong>${state.saving ? "正在读取图片…" : "上传截图记账"}</strong><small>选择支付截图，核对后保存</small></span>${icon("chevron-right")}</button>
+      <button class="entry-option" type="button" data-route="assistant"><span class="entry-icon blue">${icon("spark")}</span><span><strong>说一句，让 AI 帮记</strong><small>例如：今天午餐花了 28 元</small></span>${icon("chevron-right")}</button>
+    </section>
+    <section class="simple-finance" aria-label="本月收支">
+      <div class="simple-finance-main"><span>${now.getMonth() + 1} 月支出</span><strong>${money(expense)}</strong><small>已记录 ${Number(monthly.bill_count ?? 0)} 笔收支</small></div>
+      <div class="simple-finance-secondary"><span>本月收入</span><strong>${money(monthly.total_income)}</strong><span>本月退款 <b>${money(monthly.total_refund)}</b></span></div>
+      <button class="simple-budget" type="button" data-open-budget-settings><span><strong>${budget > 0 ? (remaining < 0 ? "已超出预算" : "本月预算还剩") : "设置月预算"}</strong>${icon("chevron-right")}</span><b>${budget > 0 ? money(Math.abs(remaining)) : "给花销定个小目标"}</b><span class="simple-budget-track" aria-hidden="true"><i style="width:${budget > 0 ? Math.min(100, expense / budget * 100) : 0}%"></i></span><small>${budget > 0 ? `月预算 ${money(budget)}` : "点这里设置，方便留意支出"}</small></button>
+    </section>
+    <div class="simple-home-columns">
+      <section class="surface simple-recent"><div class="simple-section-heading"><div><h2>最近账单</h2><p>点开一笔，就能查看和修改。</p></div><button class="button ghost" type="button" data-route="bills">全部账单 ${icon("chevron-right")}</button></div>
+        ${recent.length ? renderBillFeed(recent) : renderSimpleEmpty("从第一笔开始", "填金额和用途，就能记好一笔账。", '<button class="button primary" type="button" data-open-bill-modal>记下第一笔</button>')}
       </section>
-
-      <section class="surface finance-overview">
-        <div class="finance-header">
-          <div class="finance-title">
-            <span class="panel-icon">${icon("wallet")}</span>
-            <div>
-              <h2 class="section-title">本月财务概览</h2>
-            </div>
-          </div>
-          <button class="button ghost" type="button" data-route="bills">查看全部</button>
-        </div>
-        <div class="finance-body">
-          <div class="finance-main">
-            <div class="home-metrics">
-              ${homeMetric("本月支出", money(expense), "expense", `预算使用 ${progress}%`)}
-              ${homeMetric("本月收入", money(income), "income", `净额 ${money(netAmount)}`)}
-              ${homeMetric("预算剩余", money(budgetRemaining), "income", `月预算 ${money(monthlyBudget)} · 剩余 ${remainingPercent}%`)}
-            </div>
-            <div class="home-chart-wrap">
-              ${renderDailyChart(state.billOverview?.daily_breakdown ?? [], "home-chart")}
-              <div class="chart-axis" aria-hidden="true">
-                <span>1日</span>
-                <span>10日</span>
-                <span>20日</span>
-                <span>30日</span>
-              </div>
-            </div>
-          </div>
-          <div class="finance-ring-wrap">
-            ${renderProgressRing(progress)}
-            <p class="ring-label">预算进度</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="surface assistant-strip">
-        <div class="assistant-copy">
-          <div class="finance-title">
-            <span class="panel-icon blue">${icon("spark")}</span>
-            <h2 class="section-title">AI 助手</h2>
-          </div>
-          <span class="voice-pill">${icon("mic")}可语音输入</span>
-          <p class="assistant-title">说一句话，我来帮你</p>
-          <p class="assistant-note">记账、提醒、整理日程</p>
-        </div>
-        <button class="assistant-mic" type="button" data-voice-placeholder aria-label="语音操作">
-          ${icon("mic")}
-        </button>
-        <div class="assistant-bot" aria-hidden="true">
-          <span class="bot-ear left"></span>
-          <span class="bot-ear right"></span>
-          <span class="bot-head"><span></span></span>
-          <span class="bot-body"></span>
-        </div>
-      </section>
-
-      <div class="home-split">
-        <section class="surface home-task-panel">
-          <div class="section-header">
-            <div class="finance-title">
-              <span class="panel-icon">${icon("check")}</span>
-              <h2 class="section-title">待办提醒</h2>
-            </div>
-            <button class="button ghost" type="button" data-route="tasks">查看全部</button>
-          </div>
-          ${renderHomeTasks(homeTasks)}
-          <button class="text-action" type="button" data-open-task-modal>${icon("plus")}添加待办</button>
-        </section>
-        <section class="surface home-diary-panel">
-          <div class="section-header">
-            <div class="finance-title">
-              <span class="panel-icon">${icon("book")}</span>
-              <h2 class="section-title">日记</h2>
-            </div>
-            <button class="button ghost" type="button" data-route="diary">查看全部</button>
-          </div>
-          <div class="diary-preview">
-            <p>记录生活点滴，<br />留住每一个美好瞬间</p>
-            <div class="diary-book-art" aria-hidden="true">
-              <span class="book-cover"></span>
-              <span class="book-pen"></span>
-            </div>
-            <button class="button primary diary-button" type="button" data-open-diary-modal data-diary-date="today">
-              ${icon("edit")}记录今天的心情
-            </button>
-          </div>
-        </section>
-      </div>
-
-      <section class="quick-dock" aria-label="快捷操作">
-        ${quickAction("edit", "记一笔", "快速记账", "data-open-bill-modal")}
-        ${quickAction("check-circle", "添加待办", "新建任务", "data-open-task-modal")}
-        ${quickAction("book", "写日记", "记录心情", "data-open-diary-modal data-diary-date=\"today\"")}
-        ${quickAction("mic", "语音操作", "动口不动手", "data-voice-placeholder")}
+      <section class="surface simple-life"><div class="simple-section-heading"><div><h2>顺手记点小事</h2><p>账之外，也照顾好日常。</p></div></div>
+        <div class="simple-life-links"><button type="button" data-route="tasks">${icon("check")}<span><strong>待办事项</strong><small>${tasks.length ? "看看接下来要做的事" : "把要做的事记下来"}</small></span>${icon("chevron-right")}</button><button type="button" data-route="diary">${icon("book")}<span><strong>我的日记</strong><small>留下一点今天的心情</small></span>${icon("chevron-right")}</button></div>
+        ${tasks.length ? `<div class="simple-upcoming">${renderHomeTasks(tasks)}</div>` : '<p class="simple-note">生活记录随时可用，先从你需要的开始。</p>'}
       </section>
     </div>
-  `;
+  </div>`;
+}
+
+function renderSimpleEmpty(title, description, action = "") {
+  return `<div class="simple-empty">${icon("receipt")}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p>${action}</div>`;
 }
 
 function renderBillsPage() {
   const overview = state.billOverview ?? {};
-  const monthly = overview.monthly_statistics ?? state.bootstrap?.dashboard?.monthly_statistics ?? {};
+  const monthly = overview.monthly_statistics ?? {};
   const categories = monthly.category_breakdown ?? [];
-  const trend = overview.monthly_trend ?? [];
-  const previousMonth = trend.length > 1 ? trend[trend.length - 2] : null;
-  const expense = Number(monthly.total_expense ?? 0);
-  const income = Number(monthly.total_income ?? 0);
-  const netAmount = Number(monthly.net_amount ?? income - expense);
-
-  return `
-    <div class="mobile-page bills-mobile-page ledger-page">
-      <section class="ledger-hero">
-        <div>
-          <h1 class="ledger-title">记账</h1>
-          <p class="ledger-subtitle">轻松记录每一笔收支</p>
-        </div>
-        <div class="ledger-hero-art" aria-hidden="true">
-          <span class="ledger-leaf leaf-a"></span>
-          <span class="ledger-leaf leaf-b"></span>
-          <span class="ledger-calendar-art"></span>
-          <span class="ledger-mascot"></span>
-          <span class="ledger-coin"></span>
-        </div>
-      </section>
-
-      <section class="surface ledger-overview-panel">
-        ${renderBillControls()}
-        <section class="ledger-summary" aria-label="本月账单摘要">
-          ${ledgerMetric("本月结余", money(netAmount), metricTrend(netAmount, previousMonth?.net_amount), "balance", "eye")}
-          ${ledgerMetric("本月收入", money(income), metricTrend(income, previousMonth?.total_income), "income")}
-          ${ledgerMetric("本月支出", money(expense), metricTrend(expense, previousMonth?.total_expense, true), "expense")}
-        </section>
-        <div class="ledger-insights">
-          ${renderBillCategoryPanel(categories, expense)}
-          ${renderBillTrendPanel(overview.daily_breakdown ?? [])}
-        </div>
-      </section>
-
-      <section class="surface bill-feed-panel ledger-feed-panel">
-        <div class="ledger-feed-header">
-          <h2 class="section-title">最近账单</h2>
-          ${renderBillCategoryFilters(categories)}
-        </div>
-        ${state.bills.length ? renderBillFeed(state.bills) : empty("还没有账单，可以先新增一条手动记录。")}
-      </section>
-      ${renderBillActionDock()}
-    </div>
-  `;
+  const meta = state.billListMeta;
+  const extraFilters = [state.billFilters.category, state.billFilters.q].filter(Boolean);
+  return `<div class="simple-bills">
+    <header class="simple-page-header"><div><p class="simple-kicker">每一笔，都有记录</p><h1>账单</h1><p>查找收支，点开账单即可修改。</p></div><div class="action-row"><button class="button" type="button" data-bill-photo-placeholder ${state.saving ? "disabled" : ""}>${icon("camera")}上传截图</button><button class="button primary" type="button" data-open-bill-modal>${icon("plus")}记一笔</button></div></header>
+    <section class="surface simple-ledger">
+      ${renderBillControls()}
+      <form class="simple-search" data-bill-search-form role="search">${icon("search")}<label class="sr-only" for="bill-search">搜索商家或备注</label><input id="bill-search" name="q" type="search" maxlength="80" placeholder="搜索商家、用途或备注" value="${escapeHtml(state.billFilters.q)}" />${state.billFilters.q ? '<button class="button ghost" type="button" data-clear-bill-search>清除</button>' : ""}<button class="button" type="submit">搜索</button></form>
+      <div class="simple-list-caption"><span>${escapeHtml(billRangeLabel())} · ${meta.total} 笔${extraFilters.length ? ` · ${escapeHtml(extraFilters.join(" / "))}` : ""}</span>${extraFilters.length || state.billFilters.transaction_type || state.billFilters.period !== "month" ? '<button class="text-action" type="button" data-reset-bill-filters>重置筛选</button>' : ""}</div>
+      ${state.bills.length ? renderBillFeed(state.bills) : renderSimpleEmpty("这里还没有账单", "可以换个时间范围，或记下一笔新的收支。", '<button class="button" type="button" data-bill-all-time>查看全部时间</button>')}
+      ${meta.total_pages > 1 ? `<nav class="simple-pagination" aria-label="账单翻页"><button class="button" type="button" data-bill-page="${meta.page - 1}" ${meta.page <= 1 ? "disabled" : ""}>上一页</button><span>第 ${meta.page} / ${meta.total_pages} 页</span><button class="button" type="button" data-bill-page="${meta.page + 1}" ${meta.page >= meta.total_pages ? "disabled" : ""}>下一页</button></nav>` : ""}
+    </section>
+    <details class="surface simple-details simple-monthly"><summary><span>${icon("pie-chart")}本月花在哪里</span><small>展开统计 ${icon("chevron-right")}</small></summary><div class="simple-details-content">
+      <p class="simple-note">${monthly.year ?? new Date().getFullYear()} 年 ${monthly.month ?? new Date().getMonth() + 1} 月的全部收支，独立于上方列表筛选。</p>
+      <div class="simple-stat-row"><div><span>支出</span><strong>${money(monthly.total_expense)}</strong></div><div><span>收入</span><strong>${money(monthly.total_income)}</strong></div><div><span>退款</span><strong>${money(monthly.total_refund)}</strong></div></div>
+      <div class="ledger-insights">${renderBillCategoryPanel(categories, Number(monthly.total_expense ?? 0))}${renderBillTrendPanel(overview.daily_breakdown ?? [])}</div>
+    </div></details>
+  </div>`;
 }
 
 function renderBillControls() {
-  const activeType = state.billFilters.transaction_type || "expense";
-  const activePeriod = state.billFilters.period || "month";
-  return `
-    <div class="ledger-controls">
-      <div class="ledger-period-tabs" aria-label="时间范围">
-        <button class="ledger-tab ${activePeriod === "month" ? "is-active" : ""}" type="button" data-bill-period="month">本月</button>
-        <button class="ledger-tab ${activePeriod === "week" ? "is-active" : ""}" type="button" data-bill-period="week">本周</button>
-        <button class="ledger-tab ${activePeriod === "custom" ? "is-active" : ""}" type="button" data-bill-period="custom">自定义</button>
-        <button class="ledger-icon-tab ${activePeriod === "custom" ? "is-active" : ""}" type="button" data-bill-period="custom" aria-label="选择日期">
-          ${icon("calendar")}
-        </button>
-      </div>
-      <div class="ledger-type-toggle" aria-label="收支类型">
-        <button class="ledger-type ${activeType !== "income" ? "is-active" : ""}" type="button" data-bill-type="expense">支出</button>
-        <button class="ledger-type ${activeType === "income" ? "is-active" : ""}" type="button" data-bill-type="income">收入</button>
-      </div>
-    </div>
-    <p class="ledger-range-note">${escapeHtml(billRangeLabel())}</p>
-  `;
+  const type = state.billFilters.transaction_type;
+  const period = state.billFilters.period;
+  return `<div class="simple-filter-bar"><div class="simple-segments" role="group" aria-label="收支类型">${[["", "全部"], ["expense", "支出"], ["income", "收入"], ["refund", "退款"]].map(([value, label]) => `<button type="button" data-bill-type="${value}" aria-pressed="${type === value}" class="${type === value ? "is-active" : ""}">${label}</button>`).join("")}</div>
+    <div class="simple-periods" role="group" aria-label="时间范围"><button class="button ${period === "month" ? "is-selected" : "ghost"}" type="button" data-bill-period="month" aria-pressed="${period === "month"}">本月</button><button class="button ${period === "week" ? "is-selected" : "ghost"}" type="button" data-bill-period="week" aria-pressed="${period === "week"}">本周</button><button class="button ${period === "all" ? "is-selected" : "ghost"}" type="button" data-bill-all-time aria-pressed="${period === "all"}">全部时间</button><button class="button" type="button" data-bill-filter-panel>${icon("filter")}筛选</button></div>
+  </div>`;
 }
 
 function billRangeLabel() {
   const filters = state.billFilters;
+  if (filters.period === "all") return "全部时间";
   if (filters.period === "week") {
-    return `当前列表：本周 ${diaryDateLabel(filters.start_date)} 至 ${diaryDateLabel(filters.end_date)}`;
+    return `本周 ${diaryDateLabel(filters.start_date)} 至 ${diaryDateLabel(filters.end_date)}`;
   }
   if (filters.period === "custom") {
     const start = filters.start_date ? diaryDateLabel(filters.start_date) : "不限开始";
     const end = filters.end_date ? diaryDateLabel(filters.end_date) : "不限结束";
-    return `当前列表：${start} 至 ${end}`;
+    return `${start} 至 ${end}`;
   }
   const year = filters.year || String(new Date().getFullYear());
   const month = filters.month || String(new Date().getMonth() + 1);
-  return `当前列表：${year} 年 ${month} 月`;
+  return `${year} 年 ${month} 月`;
 }
 
 function ledgerMetric(label, value, hint, tone, iconName = "") {
@@ -4207,63 +4101,18 @@ function renderBillActionDock() {
 function renderTasksPage() {
   const groups = getReminderTaskGroups();
   const visibleTasks = getVisibleReminderTasks(groups);
-  const summary = getReminderSummary(groups);
-  const totalForProgress = summary.pending + summary.done;
-  const progress = totalForProgress ? Math.round((summary.done / totalForProgress) * 100) : 0;
   const hasHiddenTasks = !state.taskListExpanded && state.taskListMeta.total > visibleTasks.length;
-
-  return `
-    <div class="mobile-page reminders-mobile-page reminder-page">
-      <section class="reminder-hero">
-        <div>
-          <h1 class="reminder-title">提醒</h1>
-          <p class="reminder-subtitle">安排好今天，每件事都不遗漏</p>
-        </div>
-        <div class="reminder-hero-art" aria-hidden="true">
-          <span class="reminder-leaf reminder-leaf-left"></span>
-          <span class="reminder-leaf reminder-leaf-right"></span>
-          <span class="reminder-bell-art"></span>
-          <span class="reminder-mascot"></span>
-          <span class="reminder-calendar-art"></span>
-        </div>
-      </section>
-
-      <section class="surface reminder-overview-panel">
-        ${renderReminderViewTabs()}
-        ${renderReminderCategoryTabs()}
-        <section class="reminder-summary" aria-label="今日提醒摘要">
-          ${reminderStat(`${taskDateLabel(taskSelectedDateKey())}待办`, summary.today, "待完成事项")}
-          ${reminderStat("已完成", summary.done, "已完成事项", "success")}
-          ${reminderStat("重要事项", summary.important, "需要优先处理", "danger")}
-          <div class="reminder-progress-summary">
-            <span>任务完成进度</span>
-            ${renderTaskProgressRing(progress)}
-            <strong>${summary.done}/${totalForProgress || 0} 已完成</strong>
-          </div>
-        </section>
-      </section>
-
-      <section class="surface reminder-list-panel">
-        <div class="reminder-list-header">
-          <h2 class="section-title">${reminderListTitle()}</h2>
-          <button class="reminder-sort-button" type="button" data-open-task-sort>
-            ${icon("list-filter")}${escapeHtml(taskSortLabel(state.taskFilters.sort))}
-          </button>
-        </div>
-        ${visibleTasks.length ? renderReminderTaskList(visibleTasks) : renderReminderEmpty()}
-        ${
-          hasHiddenTasks
-            ? `<button class="reminder-more-button" type="button" data-view-all-tasks>
-                查看全部 ${icon("chevron-right")}
-              </button>`
-            : ""
-        }
-      </section>
-
-      ${renderAiReminderAdvice(groups, summary)}
-      ${renderReminderActionDock()}
-    </div>
-  `;
+  return `<div class="simple-tasks">
+    <header class="simple-page-header"><div><p class="simple-kicker">一件一件，慢慢完成</p><h1>待办事项</h1><p>写下要做的事，完成后勾选即可。</p></div><button class="button primary" type="button" data-open-task-modal>${icon("plus")}添加事项</button></header>
+    <section class="surface simple-task-list">
+      ${renderReminderViewTabs()}
+      <div class="simple-section-heading"><h2>${reminderListTitle()}</h2><button class="button ghost" type="button" data-open-task-sort>${icon("list-filter")}排序</button></div>
+      ${visibleTasks.length ? renderReminderTaskList(visibleTasks) : renderSimpleEmpty("这里暂时没有待办", "可以添加新事项，或切换日期查看。", '<button class="button" type="button" data-open-task-modal>添加一件事</button>')}
+      ${hasHiddenTasks ? '<button class="reminder-more-button" type="button" data-view-all-tasks>显示更多事项</button>' : ""}
+    </section>
+    <details class="surface simple-details"><summary><span>分类与重复事项</span><small>需要时再设置 ${icon("chevron-right")}</small></summary><div class="simple-details-content">${renderReminderCategoryTabs()}<button class="button" type="button" data-open-repeat-task-modal>${icon("refresh")}添加重复事项</button></div></details>
+    <p class="simple-note">这里用于查看和安排事项，目前不会在后台自动发送通知。</p>
+  </div>`;
 }
 
 function getReminderTaskGroups() {
@@ -4330,7 +4179,7 @@ function countOverviewPriority(priority) {
 
 function getVisibleReminderTasks(groups) {
   const view = state.taskFilters.view;
-  let tasks = groups.today;
+  let tasks = view === "all" ? groups.pending : groups.today;
   if (view === "upcoming") {
     tasks = groups.upcoming.length ? groups.upcoming : groups.pending;
   } else if (view === "done") {
@@ -4345,8 +4194,8 @@ function getVisibleReminderTasks(groups) {
 
 function renderReminderViewTabs() {
   const tabs = [
-    ["today", "今天"],
-    ["upcoming", "即将到来"],
+    ["all", "待完成"],
+    ["today", taskSelectedDateKey() === todayDateKey() ? "今天" : taskDateLabel(taskSelectedDateKey())],
     ["done", "已完成"],
   ];
   return `
@@ -4381,7 +4230,7 @@ function renderTaskCalendarModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="task-calendar-title">提醒日历</h2>
-            <p class="section-note">选择日期后，会读取后端当天的提醒和待办；日历标记来自当前月份数据。</p>
+            <p class="section-note">选择日期，查看当天的待办事项。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -4499,7 +4348,8 @@ function renderTaskProgressRing(percent) {
 
 function reminderListTitle() {
   return {
-    today: `${taskDateLabel(taskSelectedDateKey())}提醒`,
+    all: "待完成事项",
+    today: `${taskDateLabel(taskSelectedDateKey())}待办`,
     upcoming: "即将到来",
     done: "已完成",
   }[state.taskFilters.view] ?? "今日提醒";
@@ -4555,7 +4405,7 @@ function renderReminderEmpty() {
       <span class="reminder-item-icon life">${icon("bell")}</span>
       <div>
         <p class="item-title">当前筛选下还没有提醒</p>
-        <p class="item-meta">可以先添加一条，页面会立即使用真实后端数据刷新。</p>
+        <p class="item-meta">添加一件要做的事，完成后就可以勾掉。</p>
       </div>
       <button class="button ghost" type="button" data-open-task-modal>${icon("plus")}添加</button>
     </div>
@@ -4760,35 +4610,12 @@ function iconForTask(task) {
 
 function renderDiaryMobilePage() {
   const diary = getDiarySnapshot();
-  return `
-    <div class="mobile-page diary-mobile-page diary-page">
-      <section class="diary-hero">
-        <div>
-          <h1 class="diary-title">日记</h1>
-          <p class="diary-subtitle">记录生活点滴，收藏今天的心情</p>
-        </div>
-        <div class="diary-hero-art" aria-hidden="true">
-          <span class="diary-window-art"></span>
-          <span class="diary-plant diary-plant-left"></span>
-          <span class="diary-plant diary-plant-right"></span>
-          <span class="diary-cup-art"></span>
-          <span class="diary-mascot-art"></span>
-          <span class="diary-book-art-hero"></span>
-          <span class="diary-pencil-art"></span>
-        </div>
-      </section>
-
-      <section class="surface diary-period-panel">
-        ${renderDiaryPeriodTabs()}
-      </section>
-
-      ${renderDiaryMoodSummary(diary)}
-      ${renderDiaryEntry(diary)}
-      ${renderDiaryGallery(diary)}
-      ${renderDiaryAiAssistant()}
-      ${renderDiaryActionDock(diary)}
-    </div>
-  `;
+  return `<div class="simple-diary">
+    <header class="simple-page-header"><div><p class="simple-kicker">给今天，留一点位置</p><h1>我的日记</h1><p>记下发生的小事，留住自己的感受。</p></div><button class="button primary" type="button" data-open-diary-modal data-diary-date="${escapeHtml(diary.dateKey)}">${icon("edit")}${diary.hasEntry ? "修改日记" : "写日记"}</button></header>
+    <section class="surface simple-diary-date"><strong>${escapeHtml(diary.dateLabel)}</strong><div class="action-row"><button class="button ghost" type="button" data-diary-calendar-today>今天</button><button class="button" type="button" data-open-diary-calendar>${icon("calendar")}选择日期</button></div></section>
+    ${diary.hasEntry ? renderDiaryEntry(diary) : `<section class="surface">${renderSimpleEmpty("这一天，还没写日记", "写一句话也可以，从此刻的心情开始。", `<button class="button" type="button" data-open-diary-modal data-diary-date="${escapeHtml(diary.dateKey)}">写下这一天</button>`)}</section>`}
+    ${diary.hasEntry && diary.attachmentIds.length ? renderDiaryGallery(diary) : ""}
+  </div>`;
 }
 
 function getDiarySnapshot() {
@@ -4981,7 +4808,7 @@ function renderDiaryCalendarModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="diary-calendar-title">日记日历</h2>
-            <p class="section-note">日历已读取后端日记记录，刷新后仍可通过本地快照恢复。</p>
+            <p class="section-note">有标记的日期写过日记，点开即可查看。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -5005,7 +4832,7 @@ function renderDiaryCalendarModal() {
         <div class="diary-calendar-footer">
           <div>
             <strong>${escapeHtml(diaryDateLabel(selectedKey))}</strong>
-            <span>${selectedEntry ? "已有后端日记" : "还没有保存日记"}</span>
+            <span>${selectedEntry ? "已写日记" : "还没有保存日记"}</span>
           </div>
           <div class="diary-calendar-actions">
             <button class="button ghost" type="button" data-diary-calendar-today>今天</button>
@@ -5314,64 +5141,22 @@ function renderDiaryPage() {
 }
 
 function renderProfilePage() {
-  const overview = state.billOverview ?? {};
-  const monthly = overview.monthly_statistics ?? state.bootstrap?.dashboard?.monthly_statistics ?? {};
   const summary = state.bootstrap?.data_summary ?? {};
-  const profile = normalizeProfileSettings(state.profile);
-  const expense = Number(monthly.total_expense ?? 0);
-  const income = Number(monthly.total_income ?? 0);
-  const netAmount = Number(monthly.net_amount ?? income - expense);
-  const completedTasks = Number(
-    state.taskOverview?.done_count ?? state.tasks.filter((task) => task.status === "done").length,
-  );
-  const diaryCount = Number(summary.diary_count ?? state.diaryEntries.length ?? 0);
-  const notificationCount = getProfileNotificationCount();
-
-  return `
-    <div class="mobile-page profile-mobile-page profile-page">
-      <section class="profile-hero">
-        <div class="profile-topline">
-          <h1 class="profile-title">我的</h1>
-          <div class="profile-top-actions">
-            <button class="profile-icon-button" type="button" data-profile-notification aria-label="通知中心">
-              ${icon("bell")}
-              ${notificationCount ? `<span class="profile-notification-badge">${notificationCount > 99 ? "99+" : notificationCount}</span>` : ""}
-            </button>
-            <button class="profile-icon-button" type="button" data-profile-preferences aria-label="个人设置">
-              ${icon("settings")}
-            </button>
-          </div>
-        </div>
-        <div class="profile-greeting">
-          <span class="profile-avatar tone-${escapeHtml(profile.avatarTone)}" aria-hidden="true">
-            <span class="avatar-face"></span>
-          </span>
-          <div class="profile-greeting-copy">
-            <h2>Hi，${escapeHtml(profile.displayName)}</h2>
-            <p>${escapeHtml(profile.signature)}</p>
-          </div>
-          <button class="profile-link-button" type="button" data-profile-placeholder aria-label="查看个人资料">
-            ${icon("chevron-right")}
-          </button>
-        </div>
-        <div class="profile-landscape" aria-hidden="true">
-          <span class="profile-cloud cloud-a"></span>
-          <span class="profile-cloud cloud-b"></span>
-          <span class="profile-mountain mountain-a"></span>
-          <span class="profile-mountain mountain-b"></span>
-          <span class="profile-field"></span>
-          <span class="profile-person"></span>
-          <span class="profile-leaves"></span>
-        </div>
-      </section>
-
-      ${renderProfileFinanceCard(expense, income, netAmount, monthly)}
-      ${renderProfileQuickLinks()}
-      ${renderProfileTools()}
-      ${renderProfileDataPanel(summary, completedTasks, diaryCount)}
-      ${renderProfileSafetyPanel()}
-    </div>
-  `;
+  const snapshot = state.snapshotStatus;
+  const row = (symbol, title, note, attribute) => `<button class="simple-setting-row" type="button" ${attribute} ${state.saving ? "disabled" : ""}>${icon(symbol)}<span><strong>${title}</strong><small>${note}</small></span>${icon("chevron-right")}</button>`;
+  return `<div class="simple-settings">
+    <header class="simple-page-header"><div><p class="simple-kicker">按你的习惯来</p><h1>更多与设置</h1><p>日常工具、个人偏好和数据管理。</p></div></header>
+    <section class="surface simple-settings-group"><h2>生活记录</h2>${row("check", "待办事项", "查看、新增和完成待办", 'data-route="tasks"')}${row("book", "我的日记", "记录文字、照片和心情", 'data-route="diary"')}</section>
+    <section class="surface simple-settings-group"><h2>记账偏好</h2>${row("pie-chart", "月预算", `当前预算 ${money(getBudgetSettings().monthly_budget)}`, "data-open-budget-settings")}${row("grid", "收支分类", "调整餐饮、交通等常用分类", "data-open-category-settings")}${row("settings", "隐私设置", "选择图片和文字是否允许交给外部 AI 处理", "data-open-privacy-settings")}</section>
+    <section class="surface simple-settings-group"><h2>我的数据</h2>${row("download", "导出备份文件", "下载账单、待办和日记，方便保留或迁移", "data-export-json")}${row("upload", "从备份文件恢复", "选择之前导出的文件，预览后再导入", "data-import-json")}${row("trash", "回收站", escapeHtml(recycleBinText(summary)), "data-open-recycle-bin")}</section>
+    <details class="surface simple-details"><summary><span>更多设置</span><small>个人资料、备份与问题排查 ${icon("chevron-right")}</small></summary><div class="simple-details-content">
+      ${row("user", "个人资料", "修改昵称和签名", "data-profile-placeholder")}${row("tag", "日记标签", "管理记录生活的常用标签", "data-open-tag-settings")}
+      ${row("save", "保存本机备份", "在当前设备上保留一份可恢复的记录", "data-snapshot-save")}
+      ${snapshot?.exists ? row("refresh", "恢复本机备份", escapeHtml(snapshotText(snapshot)), 'data-settings-action="loadSnapshot"') : ""}
+      ${row("file-text", "最近操作", "查看记录的新增、修改和删除操作", "data-open-audit-log")}${row("check-circle", "连接与问题排查", "识别不可用时，在这里查看原因", "data-open-diagnostics")}
+      <div class="simple-danger-zone">${row("trash", "清空所有记录", "清空前会再次确认，建议先导出备份", 'data-settings-action="clear"')}</div>
+    </div></details>
+  </div>`;
 }
 
 function renderProfileSettingsModal() {
@@ -5447,7 +5232,7 @@ function renderNotificationModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="notification-title">通知中心</h2>
-            <p class="section-note">聚合后端待办统计里的逾期、今日和即将到来的提醒。</p>
+            <p class="section-note">看看今天和接下来有哪些待办事项。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -5795,8 +5580,8 @@ function privacySummaryChip(label, enabled) {
 function privacySummaryText(privacy = {}) {
   const localText = privacy.local_only_mode ? "本地体验已开启" : "本地体验未开启";
   const aiText = privacy.allow_ai_text_processing ? "AI 解析开启" : "AI 解析关闭";
-  const attachmentText = privacy.save_original_attachments_by_default ? "默认保存原始附件" : "默认不保存原始附件";
-  const ocrText = privacy.keep_ocr_text ? "保留 OCR 文本" : "不保留 OCR 文本";
+  const attachmentText = privacy.save_original_attachments_by_default ? "保留上传的原图" : "默认不保存原始附件";
+  const ocrText = privacy.keep_ocr_text ? "保留图片识别出的文字" : "不保留图片识别出的文字";
   return `${localText}，${aiText}，${attachmentText}，${ocrText}。`;
 }
 
@@ -5968,30 +5753,8 @@ function quickAction(iconName, title, subtitle, attribute) {
 }
 
 function renderMobileTabbar() {
-  const tabs = [
-    ["dashboard", "首页", "home"],
-    ["bills", "记账", "wallet"],
-    ["assistant", "助手", "spark"],
-    ["tasks", "提醒", "bell"],
-    ["diary", "日记", "book"],
-    ["settings", "我的", "user"],
-  ];
-  return `
-    <nav class="mobile-tabbar" aria-label="底部导航">
-      ${tabs
-        .map(
-          ([route, label, iconName]) => `
-            <button class="tab-button ${state.route === route ? "is-active" : ""}"
-              type="button"
-              data-route="${route}">
-              ${icon(iconName)}
-              <span>${label}</span>
-            </button>
-          `,
-        )
-        .join("")}
-    </nav>
-  `;
+  const tabs = [["dashboard", "首页", "home"], ["bills", "账单", "receipt"], ["assistant", "AI 帮记", "spark"], ["settings", "更多", "grid"]];
+  return `<nav class="mobile-tabbar" aria-label="底部导航">${tabs.map(([id, label, symbol]) => `<button class="tab-button ${state.route === id || (id === "settings" && ["tasks", "diary"].includes(state.route)) ? "is-active" : ""}" type="button" data-route="${id}" ${state.route === id ? 'aria-current="page"' : ""}>${icon(symbol)}<span>${label}</span></button>`).join("")}</nav>`;
 }
 
 function renderDailyChart(items, extraClass = "") {
@@ -6060,7 +5823,7 @@ function renderBillRangeModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="bill-range-title">账单筛选</h2>
-            <p class="section-note">按日期、分类、类型和关键词查看真实后端账单列表。</p>
+            <p class="section-note">选择时间、分类或收支类型，找到你要的账单。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -6198,31 +5961,10 @@ function renderBillsTable(bills) {
 }
 
 function renderBillFeed(bills) {
-  return `
-    <div class="bill-feed">
-      ${bills
-        .map(
-          (bill) => `
-            <button class="bill-feed-item ledger-feed-item" type="button" data-edit-bill="${bill.id}">
-              <span class="bill-feed-icon">${icon(iconForBill(bill))}</span>
-              <div class="bill-feed-main">
-                <div class="bill-feed-topline">
-                  <h2>${escapeHtml(bill.merchant)}</h2>
-                  <span class="amount ${bill.transaction_type}">${signedMoney(bill)}</span>
-                </div>
-                <p class="item-meta">
-                  ${escapeHtml(bill.category)}
-                  · ${formatDate(bill.paid_at)}
-                </p>
-                ${bill.note ? `<p class="bill-note">${escapeHtml(bill.note)}</p>` : ""}
-              </div>
-              <span class="ledger-payment">${escapeHtml(bill.payment_method || labelTransaction(bill.transaction_type))}</span>
-            </button>
-          `,
-        )
-        .join("")}
-    </div>
-  `;
+  return `<div class="bill-feed simple-bill-feed">${bills.map(bill => `<button class="bill-feed-item simple-bill-row" type="button" data-edit-bill="${escapeHtml(bill.id)}" aria-label="查看账单：${escapeHtml(bill.merchant)}，${escapeHtml(labelTransaction(bill.transaction_type))} ${money(bill.amount)}">
+    <span class="bill-feed-icon">${icon(iconForBill(bill))}</span><span class="simple-bill-description"><strong>${escapeHtml(bill.merchant)}</strong><small>${escapeHtml(bill.category)} · ${formatDate(bill.paid_at)}${bill.payment_method ? ` · ${escapeHtml(bill.payment_method)}` : ""}</small></span>
+    <span class="simple-bill-amount ${escapeHtml(bill.transaction_type)}"><strong>${signedMoney(bill)}</strong><small>${escapeHtml(labelTransaction(bill.transaction_type))}</small></span>${icon("chevron-right")}
+  </button>`).join("")}</div>`;
 }
 
 function renderTaskList(tasks) {
@@ -6273,76 +6015,28 @@ function renderTaskList(tasks) {
 }
 
 function renderBillModal() {
-  const bill = state.editingBill ?? state.billDraft;
+  const bill = state.billDraft ?? state.editingBill;
   const isEditing = Boolean(state.editingBill?.id);
-  const isCandidate = !isEditing && Boolean(state.billDraft);
-  const defaultBillCategory = getCategorySettings().bill_categories[0] || "其他";
-  const title = isEditing ? "编辑账单" : isCandidate ? "确认候选账单" : "新增账单";
-  const description = isEditing
-    ? "修改后会立即更新列表和首页统计。"
-    : isCandidate
-      ? "图片导入结果不会自动入账，请确认或补齐字段后再保存。"
-      : "手动记录一笔收支，也可以从记账页底部导入支付截图。";
-  return `
-    <div class="modal-backdrop" role="presentation">
-      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="bill-modal-title">
-        <div class="modal-header">
-          <div>
-            <h2 class="modal-title" id="bill-modal-title">${title}</h2>
-            <p class="section-note">${description}</p>
-          </div>
-          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
-            ${icon("close")}
-          </button>
-        </div>
-        <form class="form" data-bill-form>
-          <div class="form-grid">
-            <div class="field">
-              <label for="amount">金额</label>
-              <input id="amount" name="amount" type="number" min="0.01" step="0.01" required placeholder="18.50"
-                value="${escapeHtml(bill?.amount ?? "")}" />
-            </div>
-            <div class="field">
-              <label for="transaction_type">类型</label>
-              <select id="transaction_type" name="transaction_type">
-                ${transactionOptions(bill?.transaction_type ?? "expense")}
-              </select>
-            </div>
-            <div class="field">
-              <label for="merchant">商户</label>
-              <input id="merchant" name="merchant" required maxlength="120" placeholder="早餐店"
-                value="${escapeHtml(bill?.merchant ?? "")}" />
-            </div>
-            <div class="field">
-              <label for="category">分类</label>
-              <input id="category" name="category" required maxlength="40" list="bill_category_options" placeholder="${escapeHtml(defaultBillCategory)}"
-                value="${escapeHtml(bill?.category ?? "")}" />
-            </div>
-            <div class="field">
-              <label for="payment_method">支付方式</label>
-              <input id="payment_method" name="payment_method" maxlength="40" placeholder="微信支付"
-                value="${escapeHtml(bill?.payment_method ?? "")}" />
-            </div>
-            <div class="field">
-              <label for="paid_at">时间</label>
-              <input id="paid_at" name="paid_at" type="datetime-local"
-                value="${escapeHtml(toDateTimeLocal(bill?.paid_at))}" />
-            </div>
-            <div class="field full">
-              <label for="note">备注</label>
-              <textarea id="note" name="note" maxlength="500" placeholder="可选">${escapeHtml(bill?.note ?? "")}</textarea>
-            </div>
-          </div>
-          <div class="form-actions">
-            <button class="button ghost" type="button" data-close-modal>取消</button>
-            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
-              ${icon("save")}${state.saving ? "保存中..." : (isEditing ? "更新账单" : "确认保存")}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  `;
+  const fromImage = Boolean(bill?.source === "album" || bill?.source === "screenshot");
+  const title = isEditing ? "修改账单" : fromImage ? "核对这笔账单" : "记一笔";
+  const categories = [...new Set(["其他", ...getCategorySettings().bill_categories, bill?.category].filter(Boolean))];
+  return `<div class="modal-backdrop" role="presentation"><section class="modal simple-bill-modal" role="dialog" aria-modal="true" aria-labelledby="bill-modal-title">
+    <div class="modal-header"><div><h2 class="modal-title" id="bill-modal-title">${title}</h2><p class="section-note">${fromImage ? "请核对金额、商家和日期，确认后才会记入账单。" : "填好金额和商家或用途，就能保存。"}</p></div><button class="button ghost" type="button" data-close-modal aria-label="关闭" ${state.saving ? "disabled" : ""}>${icon("close")}</button></div>
+    ${bill?.needs_manual_entry ? '<p class="simple-notice">暂时没能读出图片内容。请在下面补上金额和商家。</p>' : ""}
+    <form class="form" data-bill-form>
+      <div class="simple-amount-field"><div class="field"><label for="amount">金额（元）</label><input id="amount" name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required placeholder="0.00" value="${escapeHtml(bill?.amount ?? "")}" /></div><div class="field"><label for="transaction_type">收支类型</label><select id="transaction_type" name="transaction_type">${transactionOptions(bill?.transaction_type ?? "expense")}</select></div></div>
+      <div class="form-grid">
+        <div class="field full"><label for="merchant">商家或用途 <small>必填</small></label><input id="merchant" name="merchant" required maxlength="120" placeholder="例如：午餐、超市购物、工资" value="${escapeHtml(bill?.merchant ?? "")}" /></div>
+        <div class="field"><label for="category">分类</label><select id="category" name="category">${categories.map(value => `<option value="${escapeHtml(value)}" ${value === (bill?.category || "其他") ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></div>
+        <div class="field"><label for="paid_at">记账时间</label><input id="paid_at" name="paid_at" type="datetime-local" required value="${escapeHtml(toDateTimeLocal(bill?.paid_at || new Date().toISOString()))}" /></div>
+      </div>
+      <details class="simple-details simple-form-details" data-bill-details ${state.billDetailsOpen ? "open" : ""}><summary><span>支付方式和备注</span><small>选填 ${icon("chevron-right")}</small></summary><div class="simple-details-content form-grid">
+        <div class="field full"><label for="payment_method">支付方式</label><input id="payment_method" name="payment_method" list="payment-method-options" maxlength="40" placeholder="例如：微信、支付宝、现金" value="${escapeHtml(bill?.payment_method ?? "")}" /><datalist id="payment-method-options"><option value="微信支付"></option><option value="支付宝"></option><option value="银行卡"></option><option value="现金"></option></datalist></div>
+        <div class="field full"><label for="note">备注</label><textarea id="note" name="note" maxlength="500" placeholder="想补充的信息，留空也可以">${escapeHtml(bill?.note ?? "")}</textarea></div>
+      </div></details>
+      <div class="form-actions">${isEditing ? `<button class="button ghost danger simple-delete" type="button" data-delete-bill="${escapeHtml(state.editingBill.id)}" ${state.saving ? "disabled" : ""}>${icon("trash")}删除</button>` : ""}<button class="button ghost" type="button" data-close-modal ${state.saving ? "disabled" : ""}>取消</button><button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>${icon("check")}${state.saving ? "正在保存…" : isEditing ? "保存修改" : "保存账单"}</button></div>
+    </form>
+  </section></div>`;
 }
 
 function renderDeleteBillModal() {
@@ -6437,76 +6131,21 @@ function renderTaskModal() {
   const isEditing = Boolean(task?.id);
   const taskType = task?.task_type || "todo";
   const priority = task?.priority || "medium";
-  const defaultTaskCategory = getCategorySettings().task_categories[0] || "生活";
-  const title = isEditing ? "编辑待办" : "新增待办";
-  const description = isEditing
-    ? "修改后会同步更新后端任务记录和提醒页。"
-    : "手动创建待办或提醒，也可以稍后交给 AI 助手整理候选事项。";
-  return `
-    <div class="modal-backdrop" role="presentation">
-      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
-        <div class="modal-header">
-          <div>
-            <h2 class="modal-title" id="task-modal-title">${title}</h2>
-            <p class="section-note">${description}</p>
-          </div>
-          <button class="button ghost" type="button" data-close-modal aria-label="关闭">
-            ${icon("close")}
-          </button>
-        </div>
-        <form class="form" data-task-form>
-          <div class="form-grid">
-            <div class="field full">
-              <label for="task_title">标题</label>
-              <input id="task_title" name="title" required maxlength="120" placeholder="明天交房租"
-                value="${escapeHtml(task?.title || "")}" />
-            </div>
-            <div class="field">
-              <label for="task_type">类型</label>
-              <select id="task_type" name="task_type">
-                <option value="todo" ${taskType === "todo" ? "selected" : ""}>待办</option>
-                <option value="reminder" ${taskType === "reminder" ? "selected" : ""}>提醒</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="task_priority">优先级</label>
-              <select id="task_priority" name="priority">
-                <option value="medium" ${priority === "medium" ? "selected" : ""}>普通</option>
-                <option value="high" ${priority === "high" ? "selected" : ""}>高</option>
-                <option value="low" ${priority === "low" ? "selected" : ""}>低</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="task_category">分类</label>
-              <input id="task_category" name="category" required maxlength="40" list="task_category_options" placeholder="${escapeHtml(defaultTaskCategory)}"
-                value="${escapeHtml(task?.category || "")}" />
-            </div>
-            <div class="field">
-              <label for="task_due_at">截止时间</label>
-              <input id="task_due_at" name="due_at" type="datetime-local"
-                value="${escapeHtml(toDateTimeLocal(task?.due_at))}" />
-            </div>
-            <div class="field">
-              <label for="task_remind_at">提醒时间</label>
-              <input id="task_remind_at" name="remind_at" type="datetime-local"
-                value="${escapeHtml(toDateTimeLocal(task?.remind_at))}" />
-            </div>
-            <div class="field full">
-              <label for="task_description">备注</label>
-              <textarea id="task_description" name="description" maxlength="500" placeholder="可选">${escapeHtml(task?.description || "")}</textarea>
-            </div>
-          </div>
-          <p class="form-hint">待办优先使用截止时间，提醒优先使用提醒时间；留空也可以先创建。</p>
-          <div class="form-actions">
-            <button class="button ghost" type="button" data-close-modal>取消</button>
-            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
-              ${icon("save")}${state.saving ? "保存中..." : isEditing ? "保存修改" : "创建待办"}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  `;
+  return `<div class="modal-backdrop" role="presentation"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="task-modal-title">
+    <div class="modal-header"><div><h2 class="modal-title" id="task-modal-title">${isEditing ? "修改事项" : "添加事项"}</h2><p class="section-note">写下要做的事。还没定好时间，也可以先记下来。</p></div><button class="button ghost" type="button" data-close-modal aria-label="关闭">${icon("close")}</button></div>
+    <form class="form" data-task-form>
+      <div class="field"><label for="task_title">要做什么</label><input id="task_title" name="title" required maxlength="120" placeholder="例如：交房租、买牛奶" value="${escapeHtml(task?.title || "")}" /></div>
+      <div class="field"><label for="task_due_at">计划完成时间 <small>选填</small></label><input id="task_due_at" name="due_at" type="datetime-local" value="${escapeHtml(toDateTimeLocal(task?.due_at))}" /></div>
+      <details class="simple-details simple-form-details" ${isEditing ? "open" : ""}><summary><span>分类、重要程度和备注</span><small>选填 ${icon("chevron-right")}</small></summary><div class="simple-details-content form-grid">
+        <div class="field"><label for="task_category">分类</label><input id="task_category" name="category" maxlength="40" list="task_category_options" value="${escapeHtml(task?.category || "生活")}" /></div>
+        <div class="field"><label for="task_priority">重要程度</label><select id="task_priority" name="priority"><option value="medium" ${priority === "medium" ? "selected" : ""}>普通</option><option value="high" ${priority === "high" ? "selected" : ""}>重要</option><option value="low" ${priority === "low" ? "selected" : ""}>不着急</option></select></div>
+        <div class="field"><label for="task_type">事项类型</label><select id="task_type" name="task_type"><option value="todo" ${taskType === "todo" ? "selected" : ""}>普通待办</option><option value="reminder" ${taskType === "reminder" ? "selected" : ""}>定时事项</option></select></div>
+        <div class="field"><label for="task_remind_at">提醒时间 <small>仅用于页面查看</small></label><input id="task_remind_at" name="remind_at" type="datetime-local" value="${escapeHtml(toDateTimeLocal(task?.remind_at))}" /></div>
+        <div class="field full"><label for="task_description">备注</label><textarea id="task_description" name="description" maxlength="500" placeholder="需要带什么，或其他想补充的信息">${escapeHtml(task?.description || "")}</textarea></div>
+      </div></details>
+      <div class="form-actions"><button class="button ghost" type="button" data-close-modal>取消</button><button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>${icon("check")}${state.saving ? "正在保存…" : "保存事项"}</button></div>
+    </form>
+  </section></div>`;
 }
 
 function renderRepeatTaskModal() {
@@ -6600,7 +6239,7 @@ function renderDiaryModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="diary-modal-title">${modalTitle}</h2>
-            <p class="section-note">保存到 ${escapeHtml(diary.dateLabel)} 的后端日记记录，可随本地快照导出和恢复。</p>
+            <p class="section-note">记录在 ${escapeHtml(diary.dateLabel)}，保存后随时可以回来修改。</p>
           </div>
           <button class="button ghost" type="button" data-close-modal aria-label="关闭">
             ${icon("close")}
@@ -6658,76 +6297,26 @@ function renderDiaryModal() {
 }
 
 function renderAssistantPage() {
-  const messages = state.chatMessages.length
-    ? state.chatMessages
-    : [{ role: "assistant", text: "你可以直接说一句账单或提醒，我会先整理成候选记录，确认后再保存。" }];
-  return `
-    <div class="mobile-page assistant-page">
-      <section class="assistant-page-hero" aria-label="智能助手">
-        <div>
-          <span class="assistant-kicker">${icon("spark")}LifeSnap AI</span>
-          <h1 class="assistant-page-title">智能助手</h1>
-          <p class="assistant-page-subtitle">把生活里的小事说出来，也可以发图片，我会先整理成候选操作。</p>
-        </div>
-        <div class="assistant-hero-bot" aria-hidden="true">
-          <span class="bot-antenna"></span>
-          <span class="bot-face"></span>
-          <span class="bot-body"></span>
-        </div>
-      </section>
-
-      <section class="assistant-chat-page" aria-label="AI 对话">
-        <div class="assistant-session-bar">
-          <div>
-            <p class="assistant-session-label">当前会话</p>
-            <h2 class="assistant-session-title">生活意图识别</h2>
-          </div>
-          <div class="assistant-session-actions">
-            <button class="assistant-session-action" type="button"
-              data-chat-clear aria-label="清空当前会话">
-              ${icon("trash")}
-            </button>
-            <button class="assistant-session-action ${state.voiceListening ? "is-listening" : ""}" type="button"
-              data-assistant-voice aria-label="${state.voiceListening ? "停止语音输入" : "语音输入"}">
-              ${icon("mic")}
-            </button>
-          </div>
-        </div>
-
-        ${renderAssistantCapabilities()}
-        ${renderAssistantQuickPrompts()}
-
-        <div class="assistant-thread chat-thread" aria-live="polite">
-          ${messages.map((message, index) => renderChatMessage(message, index)).join("")}
-          ${state.saving ? `<div class="chat-message assistant"><span>${icon("spark")}</span><p>正在整理...</p></div>` : ""}
-        </div>
-
-        <form class="assistant-composer" data-chat-form>
-          ${renderChatAttachmentQueue()}
-          <label class="sr-only" for="chat_message">输入给助手的内容</label>
-          <textarea id="chat_message" name="message" maxlength="5000" data-chat-input
-            placeholder="${escapeHtml(assistantComposerPlaceholder())}">${escapeHtml(state.chatDraft)}</textarea>
-
-          <div class="assistant-composer-actions">
-            <label class="assistant-tool-button" aria-label="发送图片">
-              ${icon("image")}
-              <span>图片</span>
-              <input class="sr-only" type="file" accept="image/png,image/jpeg,image/webp"
-                multiple data-chat-image-input />
-            </label>
-            <button class="assistant-tool-button ${state.voiceListening ? "is-listening" : ""}" type="button"
-              data-assistant-voice>
-              ${icon("mic")}<span>${state.voiceListening ? "聆听中" : "语音"}</span>
-            </button>
-            <button class="assistant-send-button" type="submit"
-              ${state.saving || state.chatAttachments.some((attachment) => attachment.status === "uploading") ? "disabled" : ""}>
-              ${icon("send")}发送
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
-  `;
+  const messages = state.chatMessages;
+  const hasConversation = messages.some(message => message.role === "user");
+  const voiceAvailable = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  return `<div class="assistant-page simple-assistant">
+    <header class="simple-page-header"><div><p class="simple-kicker">${icon("spark")}省一点输入的时间</p><h1>AI 帮记</h1><p>说清楚要记什么，核对后再保存。</p></div>${hasConversation ? '<button class="button ghost" type="button" data-chat-clear>清空对话</button>' : ""}</header>
+    <section class="assistant-chat-page" aria-label="和助手记账">
+      <div class="assistant-thread chat-thread" aria-live="polite">
+        ${hasConversation ? messages.map((message, index) => renderChatMessage(message, index)).join("") : `<div class="simple-assistant-welcome"><span class="entry-icon">${icon("spark")}</span><h2>这次想记点什么？</h2><p>输入一句话，或上传支付截图。<br />我会整理成一张记录卡，等你核对。</p>${renderAssistantQuickPrompts()}<small>也可以记录待办和日记。</small></div>`}
+        ${state.saving ? `<div class="chat-message assistant" role="status"><span>${icon("spark")}</span><p>正在整理，请稍等…</p></div>` : ""}
+      </div>
+      <form class="assistant-composer" data-chat-form>
+        ${renderChatAttachmentQueue()}
+        <label class="sr-only" for="chat_message">想记录的内容</label><textarea id="chat_message" name="message" maxlength="5000" data-chat-input placeholder="例如：今天在沙县吃午餐，花了 28 元，用微信付的">${escapeHtml(state.chatDraft)}</textarea>
+        <div class="assistant-composer-actions"><label class="assistant-tool-button">${icon("image")}<span>上传图片</span><input class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" multiple data-chat-image-input /></label>
+          ${voiceAvailable ? `<button class="assistant-tool-button ${state.voiceListening ? "is-listening" : ""}" type="button" data-assistant-voice>${icon("mic")}<span>${state.voiceListening ? "停止听写" : "语音输入"}</span></button>` : ""}
+          <button class="assistant-send-button" type="submit" ${state.saving || state.chatAttachments.some(attachment => attachment.status === "uploading") ? "disabled" : ""}>${icon("send")}帮我整理</button>
+        </div><p class="simple-composer-note">整理后请在记录卡上保存。需要补充时，点「修改信息」。</p>
+      </form>
+    </section>
+  </div>`;
 }
 
 function renderAssistantCapabilities() {
@@ -6792,19 +6381,11 @@ function iconForAssistantTool(toolId) {
 }
 
 function renderAssistantQuickPrompts() {
-  return `
-    <div class="assistant-prompts" aria-label="快捷输入">
-      <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">
-        ${icon("utensils")}沙县午餐
-      </button>
-      <button type="button" data-chat-example="提醒我明天 10 点开会">
-        ${icon("bell")}明天开会
-      </button>
-      <button type="button" data-chat-example="工资收入 6800 元">
-        ${icon("income")}工资收入
-      </button>
-    </div>
-  `;
+  return `<div class="assistant-prompts" aria-label="试试这些例子">
+    <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">${icon("utensils")}记一笔午餐</button>
+    <button type="button" data-chat-example="工资收入 6800 元">${icon("income")}记一笔收入</button>
+    <button type="button" data-chat-example="提醒我明天 10 点开会">${icon("bell")}记一个待办</button>
+  </div>`;
 }
 
 function renderChatAttachmentQueue() {
@@ -6836,10 +6417,8 @@ function renderChatMessage(message, index) {
     <article class="chat-message ${role}" data-chat-message="${index}">
       <span>${icon(role === "user" ? "user" : "spark")}</span>
       <div>
-        <p>${escapeHtml(message.text ?? "")}</p>
+        <p>${escapeHtml(role === "assistant" ? friendlyAssistantText(message.text ?? "") : message.text ?? "")}</p>
         ${renderChatMessageAttachments(message.attachments)}
-        ${renderChatSelectedTool(message.response)}
-        ${renderChatAgentSteps(message.response?.agent_steps)}
         ${renderChatCandidate(message)}
         ${renderChatResult(message)}
       </div>
@@ -7033,9 +6612,9 @@ function renderChatCandidateEditorModal() {
   const actionType = editor?.actionType || "";
   const data = editor?.candidate?.data || {};
   const title = {
-    bill_candidate: "编辑候选账单",
-    task_candidate: "编辑候选提醒",
-    diary_candidate: "编辑候选日记",
+    bill_candidate: "修改账单信息",
+    task_candidate: "修改待办信息",
+    diary_candidate: "修改日记信息",
   }[actionType] || "编辑候选记录";
 
   return `
@@ -7044,7 +6623,7 @@ function renderChatCandidateEditorModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="chat-candidate-editor-title">${title}</h2>
-            <p class="section-note">先修正 AI 整理出的字段，再确认保存。</p>
+            <p class="section-note">修改完成后，回到记录卡确认保存。</p>
           </div>
           <button class="button ghost" type="button" data-close-chat-candidate-editor aria-label="关闭">
             ${icon("close")}
@@ -7057,7 +6636,7 @@ function renderChatCandidateEditorModal() {
           <div class="form-actions">
             <button class="button ghost" type="button" data-close-chat-candidate-editor>取消</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
-              ${icon("save")}${state.saving ? "保存中..." : "保存候选"}
+              ${icon("save")}${state.saving ? "保存中..." : "完成修改"}
             </button>
           </div>
         </form>
@@ -7192,6 +6771,9 @@ function renderChatCandidate(message) {
   if (!response || response.action_type === "none" || !response.candidate) {
     return "";
   }
+  if (message.handled) {
+    return `<p class="simple-handled">${message.handled === "confirmed" ? "这条记录已保存。" : "这条记录未保存。"}</p>`;
+  }
 
   const candidateId = getChatCandidateId(response);
   const actionType = response.action_type;
@@ -7199,18 +6781,18 @@ function renderChatCandidate(message) {
   const data = candidate.data ?? {};
   const confidence = Math.round(Number(candidate.confidence ?? response.confidence ?? 0) * 100);
   let rows = [];
-  let candidateTitle = "候选提醒";
+  let candidateTitle = "核对待办";
   if (actionType === "bill_candidate") {
-    candidateTitle = "候选账单";
+    candidateTitle = "核对这笔账";
     rows = [
         ["类型", labelTransaction(data.transaction_type)],
         ["金额", data.amount ? money(data.amount) : "待补充"],
-        ["商户", data.merchant || "待补充"],
+        ["商家或用途", data.merchant || "待补充"],
         ["分类", data.category || "其他"],
-        ["时间", data.paid_at ? formatDate(data.paid_at) : "待补充"],
+        ["时间", data.paid_at ? formatDate(data.paid_at) : "保存时的时间"],
       ];
   } else if (actionType === "diary_candidate") {
-    candidateTitle = "候选日记";
+    candidateTitle = "核对日记";
     rows = [
       ["标题", data.title || "待补充"],
       ["日期", data.entry_date ? formatDateOnly(data.entry_date) : "待补充"],
@@ -7232,14 +6814,14 @@ function renderChatCandidate(message) {
   const warningText = chatCandidateWarningText(actionType, data, warnings);
   const handledLabel = {
     confirmed: "已保存",
-    discarded: "已丢弃",
+    discarded: "未保存",
   }[message.handled];
 
   return `
     <div class="chat-candidate">
       <div class="chat-candidate-head">
         <strong>${candidateTitle}</strong>
-        <span>可信度 ${confidence}%</span>
+        <span>${handledLabel || "尚未保存"}</span>
       </div>
       <div class="chat-candidate-grid">
         ${rows
@@ -7263,21 +6845,21 @@ function renderChatCandidate(message) {
                 data-chat-edit
                 data-candidate-id="${escapeHtml(candidateId)}"
                 ${state.saving ? "disabled" : ""}>
-                ${icon("edit")}编辑
+                ${icon("edit")}修改信息
               </button>
               <button class="button primary" type="button"
                 data-chat-confirm
                 data-action-type="${escapeHtml(actionType)}"
                 data-candidate-id="${escapeHtml(candidateId)}"
                 ${state.saving || !canConfirm ? "disabled" : ""}>
-                ${icon("check-circle")}确认保存
+                ${icon("check-circle")}${actionType === "bill_candidate" ? "保存这笔账" : "保存记录"}
               </button>
               <button class="button ghost" type="button"
                 data-chat-discard
                 data-action-type="${escapeHtml(actionType)}"
                 data-candidate-id="${escapeHtml(candidateId)}"
                 ${state.saving ? "disabled" : ""}>
-                ${icon("trash")}丢弃
+                不保存
               </button>
             `
         }
@@ -7305,15 +6887,15 @@ function isChatCandidateConfirmable(actionType, data) {
 
 function chatCandidateWarningText(actionType, data, warnings) {
   if (actionType === "bill_candidate" && !isChatCandidateConfirmable(actionType, data)) {
-    return "缺少金额或商户，暂不能确认保存。可以第一行写商户，第二行写金额和支付方式。";
+    return "还缺金额或商家。点「修改信息」补齐后，就能保存。";
   }
   if (actionType === "task_candidate" && !isChatCandidateConfirmable(actionType, data)) {
-    return "缺少标题或提醒时间，暂不能确认保存。请重新输入更完整的一句。";
+    return "还缺事项名称或提醒时间。点「修改信息」补齐后，就能保存。";
   }
   if (actionType === "diary_candidate" && !isChatCandidateConfirmable(actionType, data)) {
-    return "缺少日期、标题或正文，暂不能确认保存。请补充今天想记录的具体内容。";
+    return "还缺日期、标题或正文。点「修改信息」补齐后，就能保存。";
   }
-  return warnings.length ? "有字段可能需要你再确认。" : "";
+  return warnings.length ? "请核对上面的信息，有出入可以修改。" : "";
 }
 
 function formatChatTaskTime(data) {
@@ -7504,7 +7086,7 @@ function renderPrivacySettingsModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="privacy-settings-title">隐私设置</h2>
-            <p class="section-note">这些开关会保存到后端本地 JSON，并影响 AI 解析和附件处理。</p>
+            <p class="section-note">由你决定，哪些内容可以交给外部 AI 处理。</p>
           </div>
           <button class="button ghost" type="button" data-close-privacy-settings aria-label="关闭">
             ${icon("close")}
@@ -7513,26 +7095,26 @@ function renderPrivacySettingsModal() {
         <div class="privacy-settings-list">
           ${privacySettingRow(
             "local_only_mode",
-            "本地体验模式",
-            "开启后明确标记当前数据以本地存储为主。",
+            "仅在本机处理",
+            "开启后，不会调用外部图片识别或 AI 服务。",
             Boolean(privacy.local_only_mode),
           )}
           ${privacySettingRow(
             "allow_ai_text_processing",
-            "允许 AI 文本处理",
-            "关闭后，聊天解析、图片识别后的 AI 解析会被后端拦截。",
+            "允许外部 AI 整理文字",
+            "关闭后不会把文字发给外部 AI；仅在本机处理开启时，此授权也不会生效。",
             Boolean(privacy.allow_ai_text_processing),
           )}
           ${privacySettingRow(
             "save_original_attachments_by_default",
-            "默认保存原始附件",
-            "开启后上传图片会保留原文件；关闭时只保存识别所需的本地数据。",
+            "保留上传的原图",
+            "开启后，可保留并查看上传的图片原件。",
             Boolean(privacy.save_original_attachments_by_default),
           )}
           ${privacySettingRow(
             "keep_ocr_text",
-            "保留 OCR 文本",
-            "关闭后识别完成不会长期保留 OCR 原文。",
+            "保留图片识别出的文字",
+            "关闭后，识别出的文字不会长期保留。",
             Boolean(privacy.keep_ocr_text),
           )}
         </div>
@@ -7649,7 +7231,7 @@ function renderTagSettingsModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="tag-settings-title">标签管理</h2>
-            <p class="section-note">标签会保存到后端本地 JSON，并可用于日记记录。</p>
+            <p class="section-note">设置写日记时可以选择的常用标签。</p>
           </div>
           <button class="button ghost" type="button" data-close-tag-settings aria-label="关闭">
             ${icon("close")}
@@ -7771,7 +7353,7 @@ function renderMockProviderGuide() {
   const items = [
     ["start", "启动本地 mock Provider", "在单独终端运行，提供 /recognize 和 /parse。"],
     ["env", "配置后端外部服务", "在启动 FastAPI 前运行，让后端走 mock 外部链路。"],
-    ["privacy", "隐私开关请求体", "关闭本地模式，并允许 AI 文本处理与原始附件保留。"],
+    ["privacy", "隐私开关请求体", "关闭本地模式，并允许外部 AI 整理文字与原始附件保留。"],
   ];
   return `
     <section class="diagnostics-section mock-provider-guide">
@@ -8100,7 +7682,7 @@ function diagnosticSeverityLabel(severity) {
 function diagnosticIssueTitle(issue) {
   return {
     ai_text_processing_disabled: "AI 文本处理已关闭",
-    original_attachment_retention_enabled: "默认保存原始附件",
+    original_attachment_retention_enabled: "保留上传的原图",
     attachment_missing_ocr_text: "附件缺少 OCR 文本",
     duplicate_attachment: "发现重复附件",
     pending_bill_candidates: "有待确认账单候选",
@@ -8157,7 +7739,7 @@ function renderAuditLogModal() {
         <div class="modal-header">
           <div>
             <h2 class="modal-title" id="audit-title">最近操作</h2>
-            <p class="section-note">展示后端最近 20 条审计记录，便于追踪关键数据变化。</p>
+            <p class="section-note">查看最近的新增、修改、删除和恢复操作。</p>
           </div>
           <div class="audit-modal-actions">
             <button class="button ghost" type="button" data-refresh-audit-log
@@ -8459,7 +8041,7 @@ function settingsRow(label, value, actions) {
 
 function snapshotText(snapshot) {
   if (!snapshot?.exists) {
-    return "尚未保存本地快照。";
+    return "还没有本机备份。";
   }
   const summary = snapshot.snapshot_data_summary;
   const parts = [];
@@ -8467,7 +8049,7 @@ function snapshotText(snapshot) {
     parts.push(`${summary.bill_count} 条账单`);
     parts.push(`${summary.task_count} 条待办`);
     if (deletedDataCount(summary)) {
-      parts.push("含软删除记录");
+      parts.push("含回收站中的记录");
     }
   }
   const updatedAt = snapshot.updated_at ? `更新于 ${formatDate(snapshot.updated_at)}` : "已保存";
@@ -8505,7 +8087,7 @@ function money(value) {
 }
 
 function signedMoney(bill) {
-  const prefix = bill.transaction_type === "expense" ? "-" : "+";
+  const prefix = bill.transaction_type === "expense" ? "−" : ["income", "refund"].includes(bill.transaction_type) ? "+" : "";
   return `${prefix}${money(bill.amount)}`;
 }
 

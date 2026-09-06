@@ -1,0 +1,12 @@
+{
+  "name": "lifesnap-frontend",
+  "private": true,
+  "scripts": {
+    "check": "node --check app.js",
+    "test": "node scripts/usability_smoke.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
+
