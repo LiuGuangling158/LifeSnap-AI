@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from app.schemas.agent import BillCandidateData, ParseBillRequest, ParseBillResponse
 from app.schemas.bill import TransactionType
+from app.services.bill_category_classifier import bill_category_classifier
 from app.services.external_ai_parser import external_ai_parser
 
 
@@ -20,24 +21,6 @@ class RuleBasedBillParser:
         "银行卡": "银行卡",
         "云闪付": "云闪付",
     }
-    _category_keywords = {
-        "咖啡": "餐饮",
-        "早餐": "餐饮",
-        "午餐": "餐饮",
-        "晚餐": "餐饮",
-        "外卖": "餐饮",
-        "餐": "餐饮",
-        "打车": "交通",
-        "地铁": "交通",
-        "公交": "交通",
-        "医院": "医疗",
-        "药": "医疗",
-        "会员": "订阅",
-        "话费": "通讯",
-        "房租": "居住",
-        "水电": "居住",
-    }
-
     def parse_bill(self, payload: ParseBillRequest) -> ParseBillResponse:
         text = payload.text.strip()
         lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -45,16 +28,24 @@ class RuleBasedBillParser:
         amount = self._extract_amount(text)
         merchant = self._extract_merchant(lines)
         payment_method = self._extract_payment_method(text)
-        category = self._extract_category(text)
+        transaction_type = self._extract_transaction_type(text)
+        category_match = self._extract_category(text, transaction_type)
+        category = category_match.category
         warnings = self._build_warnings(amount, merchant, payment_method, category)
-        field_confidence = self._field_confidence(amount, merchant, payment_method, category)
+        field_confidence = self._field_confidence(
+            amount,
+            merchant,
+            payment_method,
+            category,
+            category_match.confidence,
+        )
 
         data = BillCandidateData(
             amount=amount,
             merchant=merchant,
             category=category,
             payment_method=payment_method,
-            transaction_type=self._extract_transaction_type(text),
+            transaction_type=transaction_type,
             note="规则解析生成的候选账单",
             source=payload.source,
         )
@@ -110,11 +101,8 @@ class RuleBasedBillParser:
                 return payment_method
         return None
 
-    def _extract_category(self, text: str) -> str:
-        for keyword, category in self._category_keywords.items():
-            if keyword in text:
-                return category
-        return "其他"
+    def _extract_category(self, text: str, transaction_type: TransactionType | None = None):
+        return bill_category_classifier.classify(text, transaction_type)
 
     def _build_warnings(
         self,
@@ -134,11 +122,12 @@ class RuleBasedBillParser:
         merchant: str | None,
         payment_method: str | None,
         category: str,
+        category_confidence: float,
     ) -> dict[str, float]:
         return {
             "amount": 0.95 if amount is not None else 0.0,
             "merchant": 0.7 if merchant is not None else 0.0,
-            "category": 0.75 if category != "其他" else 0.45,
+            "category": category_confidence,
             "payment_method": 0.8 if payment_method is not None else 0.0,
             "paid_at": 0.0,
             "transaction_type": 0.9,

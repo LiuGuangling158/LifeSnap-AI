@@ -15,6 +15,11 @@ privacy controls, recovery and export are supporting workflows.
 - Rule parsing recognizes income, refunds, transfers and top-ups instead of
   recording every transaction as an expense. This is heuristic fallback;
   candidates still require review before saving.
+- Bill category inference now uses a shared classifier across rule parsing,
+  contextual chat updates and external-model post-processing. Explicit user
+  categories win first; otherwise common merchant, item and scenario keywords
+  infer categories such as 餐饮, 交通, 购物, 日用, 医疗, 娱乐, 学习 and 住房.
+  Near-synonyms such as 居住 are normalized to the configured category 住房.
 - Bills and bill candidates now require only amount and transaction type to save.
   Merchant, category, payment method, time and note can be left blank in the UI;
   blank merchant values are stored as null and displayed as 未填写.
@@ -43,8 +48,8 @@ The isolated smoke suite checks CRUD, statistics, candidate editing, confirmatio
 idempotency, privacy, attachments/OCR fallback, recovery, imports and exports.
 New regressions exercise null updates without record mutation, optional-field
 clearing, intent routing, transaction types, zero amounts, confirmation replay,
-minimal bill confirmation without merchant, contextual candidate updates, typed
-confirmation and typed discard.
+bill category inference, minimal bill confirmation without merchant, contextual
+candidate updates, typed confirmation and typed discard.
 Frontend JavaScript syntax is checked separately.
 
 Browser automation could not initialize because the Windows sandbox failed to

@@ -26,6 +26,7 @@ from app.schemas.chat import (
 from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskPriority, TaskSource, TaskType
 from app.services.bill_candidate_store import bill_candidate_store
+from app.services.bill_category_classifier import bill_category_classifier
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
 from app.services.diary_candidate_store import diary_candidate_store
 from app.services.external_ai_parser import ExternalChatRoute, external_ai_parser
@@ -574,7 +575,7 @@ class RuleBasedChatService:
         if transaction_type is not None:
             updates["transaction_type"] = transaction_type
 
-        category = self._bill_category_from_text(text)
+        category = self._bill_category_from_text(text, transaction_type or candidate.data.transaction_type)
         if category is not None:
             updates["category"] = category[:40]
 
@@ -595,15 +596,16 @@ class RuleBasedChatService:
             updates["note"] = note[:500]
         return updates
 
-    def _bill_category_from_text(self, text: str) -> str | None:
+    def _bill_category_from_text(
+        self,
+        text: str,
+        transaction_type: TransactionType | None = None,
+    ) -> str | None:
         category = self._extract_named_value(text, ("分类", "类别"))
         if category is not None:
-            return category
-        for item in settings_store.get_category_settings().bill_categories:
-            if item and item in text:
-                return item
-        parsed_category = self._rule_bill_parser._extract_category(text)
-        return parsed_category if parsed_category != "其他" else None
+            return bill_category_classifier.normalize_category(category)
+        category_match = bill_category_classifier.classify(text, transaction_type)
+        return category_match.category if category_match.category != "其他" else None
 
     def _explicit_transaction_type(self, text: str) -> TransactionType | None:
         for keywords, transaction_type in (

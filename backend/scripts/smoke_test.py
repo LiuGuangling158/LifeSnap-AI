@@ -225,19 +225,39 @@ def _check_workflow_regressions(client: ApiClient) -> None:
         _assert(status == 200 and updated[nullable_field] is None, "Optional fields must remain clearable")
         client.request("DELETE", item_path)
 
-    for message, intent, transaction_type in [
-        ("今天点了咖啡 28 元", "create_bill", "expense"),
-        ("工资收入 6800 元", "create_bill", "income"),
-        ("商店退款 28 元", "create_bill", "refund"),
-        ("提醒我明天 10 点支付 28 元", "create_task", None),
+    for message, intent, transaction_type, category in [
+        ("今天点了咖啡 28 元", "create_bill", "expense", "餐饮"),
+        ("今天打车去公司 36 元", "create_bill", "expense", "交通"),
+        ("工资收入 6800 元", "create_bill", "income", "工资"),
+        ("商店退款 28 元", "create_bill", "refund", None),
+        ("提醒我明天 10 点支付 28 元", "create_task", None, None),
     ]:
         status, result = client.request("POST", "/chat/messages", {"message": message})
         _assert(status == 200 and result["intent"] == intent, f"Incorrect routing for {message}")
         if transaction_type is not None:
             _assert(result["candidate"]["data"]["transaction_type"] == transaction_type, "Preserve transaction meaning")
+        if category is not None:
+            _assert(result["candidate"]["data"]["category"] == category, f"Infer bill category for {message}")
         client.request("POST", "/chat/discard-action", {
             "action_type": result["action_type"], "candidate_id": result["candidate_id"],
         })
+
+    for message, category in [
+        ("淘宝买衣服 199 元", "购物"),
+        ("超市买纸巾 18 元", "日用"),
+        ("药店买药 48 元", "医疗"),
+        ("电影票 80 元", "娱乐"),
+        ("Python 课程 99 元", "学习"),
+        ("房租 2800 元", "住房"),
+    ]:
+        status, candidate = client.request(
+            "POST",
+            "/agent/parse-bill",
+            {"text": message, "source": "ai_chat"},
+        )
+        _assert(status == 200, f"Category candidate should parse for {message}")
+        _assert(candidate["data"]["category"] == category, f"Infer {category} for {message}")
+        client.request("DELETE", f"/agent/bill-candidates/{candidate['candidate_id']}")
 
     status, candidate = client.request("POST", "/agent/parse-bill", {"text": "Cafe\n0 元"})
     _assert(status == 200 and candidate["data"]["amount"] is None, "Zero amounts should need clarification")
@@ -286,6 +306,7 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
     bill_data = updated_bill["candidate"]["data"]
     _assert(float(bill_data["amount"]) == 18, "Bill context update should fill amount")
     _assert(bill_data["merchant"] == "便利蜂", "Bill context update should fill merchant")
+    _assert(bill_data["category"] == "餐饮", "Bill context update should fill category")
     _assert(bill_data["payment_method"] == "支付宝", "Bill context update should fill payment method")
 
     status, confirmed_bill = client.request(

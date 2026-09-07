@@ -22,6 +22,7 @@ from app.schemas.agent import (
 )
 from app.schemas.chat import ChatIntent
 from app.schemas.task import TaskPriority, TaskType
+from app.services.bill_category_classifier import bill_category_classifier
 from app.services.settings_store import settings_store
 
 
@@ -38,15 +39,16 @@ class ExternalAiParserService:
         "餐饮",
         "交通",
         "购物",
+        "日用",
         "娱乐",
         "医疗",
         "学习",
-        "居住",
+        "住房",
         "通讯",
         "旅行",
         "人情",
         "订阅",
-        "工资收入",
+        "工资",
         "退款",
         "转账",
         "其他",
@@ -102,13 +104,22 @@ class ExternalAiParserService:
             raw_data = self._response_data(response_body)
             raw_data["source"] = payload.source.value
             data = BillCandidateData.model_validate(raw_data)
+            data, category_confidence = self._refine_bill_category(payload.text, data)
         except (TypeError, ValueError, ValidationError):
             return None, self._dedupe([*request_warnings, "external_ai_parser_invalid_response"])
 
+        fallback_field_confidence = self._bill_field_confidence(data)
+        if category_confidence is not None:
+            fallback_field_confidence["category"] = category_confidence
         field_confidence = self._field_confidence(
             response_body.get("field_confidence"),
-            self._bill_field_confidence(data),
+            fallback_field_confidence,
         )
+        if category_confidence is not None:
+            field_confidence["category"] = max(
+                field_confidence.get("category", 0.0),
+                category_confidence,
+            )
         warnings = self._dedupe(
             request_warnings + self._bill_warnings(data) + self._response_warnings(response_body)
         )
@@ -386,6 +397,8 @@ class ExternalAiParserService:
                 shared
                 + f"抽取账单候选。category 优先从 {list(self._bill_categories)} 中选择。"
                 + "transaction_type 根据语义选择：消费为 expense，工资/收款为 income，退款为 refund，转账为 transfer，充值为 top_up。"
+                + "分类参考：餐饮含咖啡、外卖、饭店、奶茶；交通含打车、地铁、公交、高铁、停车、加油；购物含淘宝、京东、衣服、数码；日用含超市、便利店、买菜、纸巾；医疗含医院、药店、买药；娱乐含电影、游戏、会员；学习含课程、书籍、考试；住房含房租、物业、水电、燃气、宽带。"
+                + "用户明确说分类、类别、归类、记到或算作时，以用户指定分类为准。居住归一为住房，工资收入归一为工资。"
                 + "如果文本没有支付时间，paid_at 返回 null；如果只有相对时间，可用 current_datetime 解析。"
                 + "只有金额是确认前必须具备的信息；商户、分类、支付方式、支付时间和备注都是选填。金额缺失时保留候选并在 warnings 中标记 amount_missing。"
             )
@@ -511,6 +524,27 @@ class ExternalAiParserService:
         if data.amount is None:
             warnings.append("amount_missing")
         return warnings
+
+    def _refine_bill_category(
+        self,
+        text: str,
+        data: BillCandidateData,
+    ) -> tuple[BillCandidateData, float | None]:
+        normalized_category = bill_category_classifier.normalize_category(data.category)
+        category_match = bill_category_classifier.classify(text, data.transaction_type)
+
+        category = normalized_category
+        confidence: float | None = None
+        if normalized_category == "其他" and category_match.category != "其他":
+            category = category_match.category
+            confidence = category_match.confidence
+        elif normalized_category != data.category:
+            category = normalized_category
+            confidence = 0.82 if normalized_category != "其他" else None
+
+        if category == data.category:
+            return data, confidence
+        return data.model_copy(update={"category": category}), confidence
 
     def _bill_field_confidence(self, data: BillCandidateData) -> dict[str, float]:
         return {

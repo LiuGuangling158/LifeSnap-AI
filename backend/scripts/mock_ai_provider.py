@@ -138,16 +138,12 @@ def looks_like_diary(text: str) -> bool:
 def parse_bill(text: str) -> dict[str, Any]:
     amount = extract_amount(text)
     merchant = extract_merchant(text)
-    transaction_type = "income" if looks_like_income(text) else "expense"
-    category = "收入" if transaction_type == "income" else extract_bill_category(text)
+    transaction_type = extract_transaction_type(text)
+    category = extract_bill_category(text, transaction_type)
     payment_method = extract_payment_method(text)
     warnings: list[str] = []
     if amount is None:
         warnings.append("amount_missing")
-    if merchant is None:
-        warnings.append("merchant_missing")
-    if payment_method is None and transaction_type == "expense":
-        warnings.append("payment_method_missing")
 
     return {
         "confidence": 0.9 if amount is not None else 0.55,
@@ -165,6 +161,7 @@ def parse_bill(text: str) -> dict[str, Any]:
             "merchant": 0.8 if merchant is not None else 0.0,
             "category": 0.82,
             "payment_method": 0.8 if payment_method is not None else 0.0,
+            "transaction_type": 0.9,
         },
         "warnings": warnings,
     }
@@ -197,7 +194,7 @@ def parse_task(text: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def looks_like_bill(text: str) -> bool:
-    bill_keywords = ["记账", "记一笔", "花了", "消费", "支出", "收入", "工资", "付款"]
+    bill_keywords = ["记账", "记一笔", "花了", "消费", "支出", "收入", "工资", "付款", "退款", "转账", "充值"]
     return extract_amount(text) is not None or any_word(text, bill_keywords)
 
 
@@ -212,6 +209,18 @@ def looks_like_reminder(text: str) -> bool:
 
 def looks_like_income(text: str) -> bool:
     return any_word(text, ["收入", "工资", "到账", "收款", "奖金"])
+
+
+def extract_transaction_type(text: str) -> str:
+    if any_word(text, ["退款", "退回"]):
+        return "refund"
+    if looks_like_income(text):
+        return "income"
+    if any_word(text, ["充值", "储值"]):
+        return "top_up"
+    if any_word(text, ["转账"]):
+        return "transfer"
+    return "expense"
 
 
 def any_word(text: str, words: list[str]) -> bool:
@@ -263,17 +272,22 @@ def extract_payment_method(text: str) -> str | None:
     return None
 
 
-def extract_bill_category(text: str) -> str:
+def extract_bill_category(text: str, transaction_type: str = "expense") -> str:
     categories = {
-        "餐饮": ["咖啡", "早餐", "午餐", "晚餐", "外卖", "餐"],
-        "交通": ["打车", "地铁", "公交", "高铁"],
-        "购物": ["超市", "购物", "买"],
-        "医疗": ["医院", "药", "复诊"],
-        "居住": ["房租", "水电", "物业"],
+        "医疗": ["买药", "药店", "医院", "药", "复诊", "体检", "门诊"],
+        "住房": ["房租", "租金", "水电", "物业", "燃气", "宽带"],
+        "交通": ["打车", "滴滴", "地铁", "公交", "高铁", "火车", "停车", "加油"],
+        "餐饮": ["咖啡", "早餐", "午餐", "晚餐", "外卖", "奶茶", "饭店", "面包", "餐"],
+        "日用": ["超市", "便利店", "买菜", "纸巾", "日用品", "水果", "快递", "话费"],
+        "购物": ["淘宝", "京东", "拼多多", "购物", "衣服", "鞋", "手机", "电脑", "买"],
+        "学习": ["课程", "网课", "培训", "学费", "考试", "教材", "图书"],
+        "娱乐": ["电影", "游戏", "会员", "演唱会", "ktv", "门票"],
     }
     for category, keywords in categories.items():
         if any_word(text, keywords):
             return category
+    if transaction_type == "income":
+        return "工资" if any_word(text, ["工资", "薪水", "薪资", "奖金"]) else "其他"
     return "其他"
 
 
