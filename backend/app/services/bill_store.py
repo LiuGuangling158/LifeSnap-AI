@@ -98,7 +98,7 @@ class LocalBillStore:
 
     def _matches_keyword(self, bill: BillRead, keyword: str) -> bool:
         fields = [
-            bill.merchant,
+            bill.merchant or "",
             bill.category,
             bill.payment_method or "",
             bill.note or "",
@@ -197,7 +197,7 @@ class LocalBillStore:
                 continue
             if bill.transaction_type != payload.transaction_type:
                 continue
-            if bill.merchant.casefold() != payload.merchant.casefold():
+            if self._merchant_key(bill.merchant) != self._merchant_key(payload.merchant):
                 continue
             if abs(self._as_utc(bill.paid_at) - target_paid_at) > time_window:
                 continue
@@ -205,7 +205,11 @@ class LocalBillStore:
             matches.append(
                 DuplicateBillMatch(
                     bill=bill,
-                    reason="same_merchant_amount_type_and_nearby_paid_at",
+                    reason=(
+                        "same_merchant_amount_type_and_nearby_paid_at"
+                        if self._merchant_key(bill.merchant)
+                        else "same_amount_type_and_nearby_paid_at"
+                    ),
                 )
             )
 
@@ -364,10 +368,11 @@ class LocalBillStore:
         for bill in bills:
             if bill.transaction_type != TransactionType.expense:
                 continue
-            merchant_amounts[bill.merchant] = (
-                merchant_amounts.get(bill.merchant, Decimal("0")) + bill.amount
+            merchant = self._merchant_label(bill.merchant)
+            merchant_amounts[merchant] = (
+                merchant_amounts.get(merchant, Decimal("0")) + bill.amount
             )
-            merchant_counts[bill.merchant] = merchant_counts.get(bill.merchant, 0) + 1
+            merchant_counts[merchant] = merchant_counts.get(merchant, 0) + 1
 
         total_expense = sum(merchant_amounts.values(), Decimal("0"))
         merchants = [
@@ -386,6 +391,12 @@ class LocalBillStore:
         if total == 0:
             return Decimal("0")
         return ((amount / total) * Decimal("100")).quantize(Decimal("0.01"))
+
+    def _merchant_key(self, merchant: str | None) -> str:
+        return (merchant or "").strip().casefold()
+
+    def _merchant_label(self, merchant: str | None) -> str:
+        return (merchant or "").strip() or "未填写"
 
     def _days_in_month(self, year: int, month: int) -> int:
         if month == 12:

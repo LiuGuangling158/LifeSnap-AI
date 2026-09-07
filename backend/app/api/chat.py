@@ -40,6 +40,13 @@ def send_message(payload: ChatMessageRequest, request: Request) -> ChatMessageRe
             "action_type": response.action_type,
             "candidate_id": response.candidate_id,
             "need_user_confirmation": response.need_user_confirmation,
+            "context_action_type": payload.context_action_type,
+            "context_candidate_id": payload.context_candidate_id,
+            "updated_existing_candidate": response.updated_existing_candidate,
+            "discarded": response.discarded,
+            "created_bill_id": response.created_bill.id if response.created_bill else None,
+            "created_task_id": response.created_task.id if response.created_task else None,
+            "created_diary_id": response.created_diary.id if response.created_diary else None,
             "warning_count": len(response.warnings),
             "agent_step_count": len(response.agent_steps),
             "agent_step_statuses": ",".join(step.status.value for step in response.agent_steps),
@@ -141,7 +148,7 @@ def _confirm_bill_candidate(candidate_id: UUID) -> ChatConfirmActionResponse:
     if not bill_candidate_store.is_confirmable(candidate):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bill candidate is missing required fields",
+            detail="Bill candidate is missing amount",
         )
 
     bill: BillRead | None = bill_candidate_store.confirm(candidate_id)

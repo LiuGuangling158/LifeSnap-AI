@@ -143,6 +143,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_candidate_edit_flow(client)
     _check_chat_clarifying_questions(client)
     _check_workflow_regressions(client)
+    _check_agent_context_workflow(client)
     _check_chat_task_candidate_confirmation(client)
     _check_chat_diary_reflection(client)
     _check_chat_diary_candidate_confirmation(client)
@@ -203,8 +204,8 @@ def _check_health(client: ApiClient) -> None:
 
 def _check_workflow_regressions(client: ApiClient) -> None:
     fixtures = [
-        ("/bills", {"amount": "28", "merchant": "Cafe", "note": "editable"},
-         ["amount", "currency", "merchant", "category", "transaction_type", "source", "paid_at"], "note"),
+        ("/bills", {"amount": "28", "transaction_type": "expense", "note": "editable"},
+         ["amount", "currency", "category", "transaction_type", "source", "paid_at"], "merchant"),
         ("/tasks", {"title": "Meeting", "description": "editable"},
          ["title", "category", "task_type", "status", "priority", "source"], "description"),
         ("/diaries", {"entry_date": "2002-03-04", "title": "Day", "content": "Notes", "weather": "Sunny"},
@@ -252,6 +253,106 @@ def _check_workflow_regressions(client: ApiClient) -> None:
     _assert(status == 200, "Corrected candidate should confirm")
     status, replay = client.request("POST", "/chat/confirm-action", action, headers)
     _assert(status == 200 and replay == first, "Retry must return the original confirmation")
+
+    status, minimal_candidate = client.request("POST", "/agent/parse-bill", {"text": "28 元", "source": "ai_chat"})
+    _assert(status == 200, "Minimal bill candidate should parse")
+    _assert(minimal_candidate["data"]["merchant"] is None, "Merchant should be optional for candidates")
+    status, minimal_bill = client.request("POST", "/chat/confirm-action", {
+        "action_type": "bill_candidate", "candidate_id": minimal_candidate["candidate_id"],
+    })
+    _assert(status == 200, "Bill candidate with amount and type only should confirm")
+    _assert(minimal_bill["created_bill"]["merchant"] is None, "Saved bill should allow empty merchant")
+    client.request("DELETE", f"/bills/{minimal_bill['created_bill']['id']}")
+
+
+def _check_agent_context_workflow(client: ApiClient) -> None:
+    status, bill_body = client.request("POST", "/chat/messages", {"message": "记一笔早餐"})
+    _assert(status == 200 and bill_body["intent"] == "create_bill", "Agent should start a bill candidate")
+    bill_candidate_id = bill_body["candidate_id"]
+    _assert(bill_body["candidate"]["data"]["amount"] is None, "Bill candidate should wait for amount")
+
+    status, updated_bill = client.request(
+        "POST",
+        "/chat/messages",
+        {
+            "message": "金额 18 元，商家是便利蜂，用支付宝，分类餐饮",
+            "context_action_type": "bill_candidate",
+            "context_candidate_id": bill_candidate_id,
+        },
+    )
+    _assert(status == 200, "Agent should update an existing bill candidate")
+    _assert(updated_bill["updated_existing_candidate"] is True, "Bill update should be marked as contextual")
+    _assert(updated_bill["candidate_id"] == bill_candidate_id, "Bill context update should keep candidate id")
+    bill_data = updated_bill["candidate"]["data"]
+    _assert(float(bill_data["amount"]) == 18, "Bill context update should fill amount")
+    _assert(bill_data["merchant"] == "便利蜂", "Bill context update should fill merchant")
+    _assert(bill_data["payment_method"] == "支付宝", "Bill context update should fill payment method")
+
+    status, confirmed_bill = client.request(
+        "POST",
+        "/chat/messages",
+        {
+            "message": "确认保存",
+            "context_action_type": "bill_candidate",
+            "context_candidate_id": bill_candidate_id,
+        },
+    )
+    _assert(status == 200, "Agent should confirm a bill candidate from chat context")
+    _assert(confirmed_bill["created_bill"]["merchant"] == "便利蜂", "Context-confirmed bill should be saved")
+    status, _ = client.request("GET", f"/agent/bill-candidates/{bill_candidate_id}")
+    _assert(status == 404, "Context-confirmed bill candidate should leave pending list")
+    client.request("DELETE", f"/bills/{confirmed_bill['created_bill']['id']}")
+
+    status, task_body = client.request("POST", "/chat/messages", {"message": "提醒我提交周报"})
+    _assert(status == 200 and task_body["intent"] == "create_task", "Agent should start a task candidate")
+    task_candidate_id = task_body["candidate_id"]
+    _assert(task_body["candidate"]["data"]["remind_at"] is None, "Reminder should wait for time")
+    status, updated_task = client.request(
+        "POST",
+        "/chat/messages",
+        {
+            "message": "提醒时间是明天上午 9 点",
+            "context_action_type": "task_candidate",
+            "context_candidate_id": task_candidate_id,
+        },
+    )
+    _assert(status == 200 and updated_task["updated_existing_candidate"] is True, "Agent should update reminder time")
+    _assert(updated_task["candidate"]["data"]["remind_at"], "Reminder context update should fill remind_at")
+    status, discarded_task = client.request(
+        "POST",
+        "/chat/messages",
+        {
+            "message": "不保存",
+            "context_action_type": "task_candidate",
+            "context_candidate_id": task_candidate_id,
+        },
+    )
+    _assert(status == 200 and discarded_task["discarded"] is True, "Agent should discard a task candidate from chat context")
+    status, _ = client.request("GET", f"/agent/task-candidates/{task_candidate_id}")
+    _assert(status == 404, "Context-discarded task candidate should leave pending list")
+
+    status, diary_body = client.request(
+        "POST",
+        "/chat/messages",
+        {"message": "写日记：今天完成项目复盘，心情很开心"},
+    )
+    _assert(status == 200 and diary_body["intent"] == "create_diary", "Agent should start a diary candidate")
+    diary_candidate_id = diary_body["candidate_id"]
+    status, updated_diary = client.request(
+        "POST",
+        "/chat/messages",
+        {
+            "message": "标题改成项目复盘完成，天气晴天，标签工作、成长",
+            "context_action_type": "diary_candidate",
+            "context_candidate_id": diary_candidate_id,
+        },
+    )
+    _assert(status == 200 and updated_diary["updated_existing_candidate"] is True, "Agent should update diary metadata")
+    diary_data = updated_diary["candidate"]["data"]
+    _assert(diary_data["title"] == "项目复盘完成", "Diary context update should change title")
+    _assert(diary_data["weather"] == "晴天", "Diary context update should change weather")
+    _assert(diary_data["tags"] == ["工作", "成长"], "Diary context update should change tags")
+    client.request("DELETE", f"/agent/diary-candidates/{diary_candidate_id}")
 
 
 

@@ -337,6 +337,7 @@ class ExternalAiParserService:
                     "category": "number from 0 to 1",
                     "payment_method": "number from 0 to 1",
                     "paid_at": "number from 0 to 1",
+                    "transaction_type": "number from 0 to 1",
                 },
                 "warnings": "array of stable warning strings",
                 "need_user_confirmation": True,
@@ -386,7 +387,7 @@ class ExternalAiParserService:
                 + f"抽取账单候选。category 优先从 {list(self._bill_categories)} 中选择。"
                 + "transaction_type 根据语义选择：消费为 expense，工资/收款为 income，退款为 refund，转账为 transfer，充值为 top_up。"
                 + "如果文本没有支付时间，paid_at 返回 null；如果只有相对时间，可用 current_datetime 解析。"
-                + "金额或商户缺失时保留候选并在 warnings 中标记 amount_missing 或 merchant_missing。"
+                + "只有金额是确认前必须具备的信息；商户、分类、支付方式、支付时间和备注都是选填。金额缺失时保留候选并在 warnings 中标记 amount_missing。"
             )
         return (
             shared
@@ -509,12 +510,6 @@ class ExternalAiParserService:
         warnings: list[str] = []
         if data.amount is None:
             warnings.append("amount_missing")
-        if data.merchant is None:
-            warnings.append("merchant_missing")
-        if data.payment_method is None:
-            warnings.append("payment_method_missing")
-        if data.category == "其他":
-            warnings.append("category_low_confidence")
         return warnings
 
     def _bill_field_confidence(self, data: BillCandidateData) -> dict[str, float]:
@@ -524,10 +519,11 @@ class ExternalAiParserService:
             "category": 0.8 if data.category != "其他" else 0.45,
             "payment_method": 0.8 if data.payment_method is not None else 0.0,
             "paid_at": 0.8 if data.paid_at is not None else 0.0,
+            "transaction_type": 0.9,
         }
 
     def _bill_overall_confidence(self, field_confidence: dict[str, float]) -> float:
-        important_fields = ["amount", "merchant", "category", "payment_method"]
+        important_fields = ["amount", "transaction_type"]
         score = sum(
             field_confidence.get(field, 0.0) for field in important_fields
         ) / len(important_fields)

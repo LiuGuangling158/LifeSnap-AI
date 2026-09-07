@@ -1113,7 +1113,7 @@ async function submitBill(formData) {
   const defaultBillCategory = "其他";
   const payload = {
     amount,
-    merchant: String(formData.get("merchant") || "").trim(),
+    merchant: String(formData.get("merchant") || "").trim() || null,
     category: String(formData.get("category") || defaultBillCategory).trim(),
     payment_method: String(formData.get("payment_method") || "").trim() || null,
     transaction_type: formData.get("transaction_type"),
@@ -2017,10 +2017,7 @@ async function submitChatMessage(formData) {
 
   try {
     const imageMessages = attachments.length ? await analyzeChatAttachments(attachments) : [];
-    const hasImageCandidate = imageMessages.some(
-      (item) => item.response?.action_type === "bill_candidate",
-    );
-    const shouldSendTextToChat = Boolean(message) && !hasImageCandidate;
+    const shouldSendTextToChat = Boolean(message);
 
     if (imageMessages.length) {
       state.chatMessages = [...state.chatMessages, ...imageMessages];
@@ -2028,15 +2025,17 @@ async function submitChatMessage(formData) {
     }
 
     if (shouldSendTextToChat) {
-      const backendMessage = buildChatBackendMessage(message, attachments);
+      const context = activeChatCandidateContext();
+      const backendMessage = context ? message : buildChatBackendMessage(message, attachments);
       const response = await api("/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: backendMessage }),
+        body: JSON.stringify(chatMessageRequestBody(backendMessage, context)),
       });
+      applyChatAgentResponseSideEffects(response);
       state.chatMessages = [
         ...state.chatMessages,
-        { role: "assistant", text: response.reply, response },
+        { role: "assistant", text: response.reply, response: chatTranscriptResponse(response) },
       ];
       state.activeAssistantToolId = response.assistant_tool_id || state.activeAssistantToolId;
       saveAssistantSession();
@@ -2144,7 +2143,7 @@ function attachmentAgentSteps(finalStatus) {
       title: isBlocked ? "停止执行" : "整理候选",
       detail: isBlocked
         ? "暂时没有足够信息生成可确认账单。"
-        : "已从识别结果中整理金额、商户、分类和时间。",
+        : "已从识别结果中整理金额、收支类型和可识别信息。",
       status: isBlocked ? "blocked" : "completed",
     },
     ...(isBlocked
@@ -2246,6 +2245,61 @@ function buildChatBackendMessage(message, attachments) {
     message || "请根据图片附件判断是否需要生成账单、提醒或日记操作。",
     ...attachmentLines,
   ].join("\n");
+}
+
+function chatMessageRequestBody(message, context = activeChatCandidateContext()) {
+  const body = { message };
+  if (context) {
+    body.context_action_type = context.context_action_type;
+    body.context_candidate_id = context.context_candidate_id;
+  }
+  return body;
+}
+
+function activeChatCandidateContext() {
+  for (let index = state.chatMessages.length - 1; index >= 0; index -= 1) {
+    const message = state.chatMessages[index];
+    if (message?.role !== "assistant" || message.handled) {
+      continue;
+    }
+    const response = message.response;
+    const actionType = response?.action_type;
+    const candidateId = getChatCandidateId(response);
+    if (["bill_candidate", "task_candidate", "diary_candidate"].includes(actionType) && candidateId) {
+      return {
+        context_action_type: actionType,
+        context_candidate_id: candidateId,
+      };
+    }
+  }
+  return null;
+}
+
+function applyChatAgentResponseSideEffects(response) {
+  if (!response) {
+    return;
+  }
+  const candidateId = getChatCandidateId(response);
+  if (response.updated_existing_candidate && response.candidate && candidateId) {
+    updateChatCandidateInMessages(candidateId, response.candidate);
+  }
+  if ((response.created_bill || response.created_task || response.created_diary) && candidateId) {
+    markChatCandidate(candidateId, "confirmed");
+  }
+  if (response.discarded && candidateId) {
+    markChatCandidate(candidateId, "discarded");
+  }
+}
+
+function chatTranscriptResponse(response) {
+  if (!response?.updated_existing_candidate) {
+    return response;
+  }
+  return {
+    ...response,
+    action_type: "none",
+    candidate: null,
+  };
 }
 
 function toggleVoiceInput() {
@@ -2542,9 +2596,10 @@ async function discardChatAction(actionType, candidateId) {
 }
 
 function markChatCandidate(candidateId, status) {
+  const targetId = String(candidateId || "");
   state.chatMessages = state.chatMessages.map((message) => {
     const responseCandidateId = getChatCandidateId(message.response);
-    return responseCandidateId === candidateId ? { ...message, handled: status } : message;
+    return responseCandidateId === targetId ? { ...message, handled: status } : message;
   });
   saveAssistantSession();
 }
@@ -3525,6 +3580,11 @@ function normalizeStoredChatResponse(response) {
     candidate: response.candidate ?? null,
     warnings: Array.isArray(response.warnings) ? response.warnings.map(String).slice(0, 20) : [],
     need_user_confirmation: Boolean(response.need_user_confirmation),
+    updated_existing_candidate: Boolean(response.updated_existing_candidate),
+    discarded: Boolean(response.discarded),
+    created_bill: response.created_bill ?? null,
+    created_task: response.created_task ?? null,
+    created_diary: response.created_diary ?? null,
     agent_steps: Array.isArray(response.agent_steps)
       ? response.agent_steps.map(normalizeStoredAgentStep).filter(Boolean).slice(0, 6)
       : [],
@@ -5798,7 +5858,7 @@ function renderBillList(bills) {
           (bill) => `
             <div class="list-item">
               <div>
-                <p class="item-title">${escapeHtml(bill.merchant)}</p>
+                <p class="item-title">${escapeHtml(billDisplayName(bill))}</p>
                 <p class="item-meta">${escapeHtml(bill.category)} · ${formatDate(bill.paid_at)}</p>
               </div>
               <span class="amount ${bill.transaction_type}">${money(bill.amount)}</span>
@@ -5855,7 +5915,7 @@ function renderBillRangeModal() {
             </div>
             <div class="field full">
               <label for="bill_range_q">关键词</label>
-              <input id="bill_range_q" name="q" maxlength="80" placeholder="商户、分类、支付方式或备注"
+              <input id="bill_range_q" name="q" maxlength="80" placeholder="商家/用途、分类、支付方式或备注"
                 value="${escapeHtml(filters.q)}" />
             </div>
           </div>
@@ -5905,7 +5965,7 @@ function renderBillFilters() {
       </div>
       <div class="field filter-keyword">
         <label for="filter_q">关键词</label>
-        <input id="filter_q" name="q" maxlength="80" placeholder="商户、分类、备注"
+        <input id="filter_q" name="q" maxlength="80" placeholder="商家/用途、分类、备注"
           value="${escapeHtml(filters.q)}" />
       </div>
       <div class="filter-actions">
@@ -5922,7 +5982,7 @@ function renderBillsTable(bills) {
       <table>
         <thead>
           <tr>
-            <th>商户</th>
+            <th>商家/用途</th>
             <th>分类</th>
             <th>类型</th>
             <th>时间</th>
@@ -5935,17 +5995,17 @@ function renderBillsTable(bills) {
             .map(
               (bill) => `
                 <tr>
-                  <td>${escapeHtml(bill.merchant)}</td>
+                  <td>${escapeHtml(billDisplayName(bill))}</td>
                   <td>${escapeHtml(bill.category)}</td>
                   <td>${labelTransaction(bill.transaction_type)}</td>
                   <td>${formatDate(bill.paid_at)}</td>
                   <td class="amount ${bill.transaction_type}">${money(bill.amount)}</td>
                   <td>
                     <div class="table-actions">
-                      <button class="icon-button" type="button" data-edit-bill="${bill.id}" aria-label="编辑 ${escapeHtml(bill.merchant)}" title="编辑">
+                      <button class="icon-button" type="button" data-edit-bill="${bill.id}" aria-label="编辑 ${escapeHtml(billDisplayName(bill))}" title="编辑">
                         ${icon("edit")}
                       </button>
-                      <button class="icon-button danger" type="button" data-delete-bill="${bill.id}" aria-label="删除 ${escapeHtml(bill.merchant)}" title="删除">
+                      <button class="icon-button danger" type="button" data-delete-bill="${bill.id}" aria-label="删除 ${escapeHtml(billDisplayName(bill))}" title="删除">
                         ${icon("trash")}
                       </button>
                     </div>
@@ -5961,8 +6021,8 @@ function renderBillsTable(bills) {
 }
 
 function renderBillFeed(bills) {
-  return `<div class="bill-feed simple-bill-feed">${bills.map(bill => `<button class="bill-feed-item simple-bill-row" type="button" data-edit-bill="${escapeHtml(bill.id)}" aria-label="查看账单：${escapeHtml(bill.merchant)}，${escapeHtml(labelTransaction(bill.transaction_type))} ${money(bill.amount)}">
-    <span class="bill-feed-icon">${icon(iconForBill(bill))}</span><span class="simple-bill-description"><strong>${escapeHtml(bill.merchant)}</strong><small>${escapeHtml(bill.category)} · ${formatDate(bill.paid_at)}${bill.payment_method ? ` · ${escapeHtml(bill.payment_method)}` : ""}</small></span>
+  return `<div class="bill-feed simple-bill-feed">${bills.map(bill => `<button class="bill-feed-item simple-bill-row" type="button" data-edit-bill="${escapeHtml(bill.id)}" aria-label="查看账单：${escapeHtml(billDisplayName(bill))}，${escapeHtml(labelTransaction(bill.transaction_type))} ${money(bill.amount)}">
+    <span class="bill-feed-icon">${icon(iconForBill(bill))}</span><span class="simple-bill-description"><strong>${escapeHtml(billDisplayName(bill))}</strong><small>${escapeHtml(bill.category)} · ${formatDate(bill.paid_at)}${bill.payment_method ? ` · ${escapeHtml(bill.payment_method)}` : ""}</small></span>
     <span class="simple-bill-amount ${escapeHtml(bill.transaction_type)}"><strong>${signedMoney(bill)}</strong><small>${escapeHtml(labelTransaction(bill.transaction_type))}</small></span>${icon("chevron-right")}
   </button>`).join("")}</div>`;
 }
@@ -6021,14 +6081,14 @@ function renderBillModal() {
   const title = isEditing ? "修改账单" : fromImage ? "核对这笔账单" : "记一笔";
   const categories = [...new Set(["其他", ...getCategorySettings().bill_categories, bill?.category].filter(Boolean))];
   return `<div class="modal-backdrop" role="presentation"><section class="modal simple-bill-modal" role="dialog" aria-modal="true" aria-labelledby="bill-modal-title">
-    <div class="modal-header"><div><h2 class="modal-title" id="bill-modal-title">${title}</h2><p class="section-note">${fromImage ? "请核对金额、商家和日期，确认后才会记入账单。" : "填好金额和商家或用途，就能保存。"}</p></div><button class="button ghost" type="button" data-close-modal aria-label="关闭" ${state.saving ? "disabled" : ""}>${icon("close")}</button></div>
-    ${bill?.needs_manual_entry ? '<p class="simple-notice">暂时没能读出图片内容。请在下面补上金额和商家。</p>' : ""}
+    <div class="modal-header"><div><h2 class="modal-title" id="bill-modal-title">${title}</h2><p class="section-note">${fromImage ? "请核对金额和收支类型，其他信息可以之后再补。" : "填好金额和收支类型，就能保存。"}</p></div><button class="button ghost" type="button" data-close-modal aria-label="关闭" ${state.saving ? "disabled" : ""}>${icon("close")}</button></div>
+    ${bill?.needs_manual_entry ? '<p class="simple-notice">暂时没能读出图片内容。只要补上金额，就可以先保存。</p>' : ""}
     <form class="form" data-bill-form>
       <div class="simple-amount-field"><div class="field"><label for="amount">金额（元）</label><input id="amount" name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required placeholder="0.00" value="${escapeHtml(bill?.amount ?? "")}" /></div><div class="field"><label for="transaction_type">收支类型</label><select id="transaction_type" name="transaction_type">${transactionOptions(bill?.transaction_type ?? "expense")}</select></div></div>
       <div class="form-grid">
-        <div class="field full"><label for="merchant">商家或用途 <small>必填</small></label><input id="merchant" name="merchant" required maxlength="120" placeholder="例如：午餐、超市购物、工资" value="${escapeHtml(bill?.merchant ?? "")}" /></div>
+        <div class="field full"><label for="merchant">商家或用途 <small>选填</small></label><input id="merchant" name="merchant" maxlength="120" placeholder="例如：午餐、超市购物、工资" value="${escapeHtml(bill?.merchant ?? "")}" /></div>
         <div class="field"><label for="category">分类</label><select id="category" name="category">${categories.map(value => `<option value="${escapeHtml(value)}" ${value === (bill?.category || "其他") ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}</select></div>
-        <div class="field"><label for="paid_at">记账时间</label><input id="paid_at" name="paid_at" type="datetime-local" required value="${escapeHtml(toDateTimeLocal(bill?.paid_at || new Date().toISOString()))}" /></div>
+        <div class="field"><label for="paid_at">记账时间 <small>选填</small></label><input id="paid_at" name="paid_at" type="datetime-local" value="${escapeHtml(toDateTimeLocal(bill?.paid_at || new Date().toISOString()))}" /></div>
       </div>
       <details class="simple-details simple-form-details" data-bill-details ${state.billDetailsOpen ? "open" : ""}><summary><span>支付方式和备注</span><small>选填 ${icon("chevron-right")}</small></summary><div class="simple-details-content form-grid">
         <div class="field full"><label for="payment_method">支付方式</label><input id="payment_method" name="payment_method" list="payment-method-options" maxlength="40" placeholder="例如：微信、支付宝、现金" value="${escapeHtml(bill?.payment_method ?? "")}" /><datalist id="payment-method-options"><option value="微信支付"></option><option value="支付宝"></option><option value="银行卡"></option><option value="现金"></option></datalist></div>
@@ -6054,7 +6114,7 @@ function renderDeleteBillModal() {
           </button>
         </div>
         <div class="confirm-body">
-          <p class="item-title">${escapeHtml(bill?.merchant ?? "账单")}</p>
+          <p class="item-title">${escapeHtml(billDisplayName(bill))}</p>
           <p class="item-meta">${escapeHtml(bill?.category ?? "")} · ${formatDate(bill?.paid_at)} · ${money(bill?.amount)}</p>
         </div>
         <div class="form-actions modal-actions">
@@ -6419,6 +6479,8 @@ function renderChatMessage(message, index) {
       <div>
         <p>${escapeHtml(role === "assistant" ? friendlyAssistantText(message.text ?? "") : message.text ?? "")}</p>
         ${renderChatMessageAttachments(message.attachments)}
+        ${role === "assistant" ? renderChatSelectedTool(message.response) : ""}
+        ${role === "assistant" ? renderChatAgentSteps(message.response?.agent_steps) : ""}
         ${renderChatCandidate(message)}
         ${renderChatResult(message)}
       </div>
@@ -6432,7 +6494,11 @@ function renderChatSelectedTool(response) {
   }
   const tool = assistantTools().find((item) => item.id === response.assistant_tool_id);
   const label = tool?.label || chatIntentDisplay(response.intent) || "助手能力";
-  const note = tool?.requires_confirmation ? "需确认后执行" : "直接对话";
+  const note = response.need_user_confirmation
+    ? "需确认后执行"
+    : response.discarded
+      ? "已取消"
+      : "已执行";
   return `
     <div class="chat-selected-tool">
       ${icon(iconForAssistantTool(response.assistant_tool_id))}
@@ -6519,8 +6585,8 @@ function renderChatResult(message) {
             <b>${money(bill.amount)}</b>
           </div>
           <div>
-            <small>商户</small>
-            <b>${escapeHtml(bill.merchant || "未命名")}</b>
+            <small>商家/用途</small>
+            <b>${escapeHtml(billDisplayName(bill))}</b>
           </div>
           <div>
             <small>分类</small>
@@ -6661,7 +6727,7 @@ function renderChatCandidateEditorFields(actionType, data) {
         </select>
       </div>
       <div class="field">
-        <label for="chat_candidate_merchant">商户</label>
+        <label for="chat_candidate_merchant">商家或用途 <small>选填</small></label>
         <input id="chat_candidate_merchant" name="merchant" maxlength="120"
           value="${escapeHtml(data.merchant || "")}" />
       </div>
@@ -6787,7 +6853,7 @@ function renderChatCandidate(message) {
     rows = [
         ["类型", labelTransaction(data.transaction_type)],
         ["金额", data.amount ? money(data.amount) : "待补充"],
-        ["商家或用途", data.merchant || "待补充"],
+        ["商家或用途", data.merchant || "未填写"],
         ["分类", data.category || "其他"],
         ["时间", data.paid_at ? formatDate(data.paid_at) : "保存时的时间"],
       ];
@@ -6874,7 +6940,7 @@ function getChatCandidateId(response) {
 
 function isChatCandidateConfirmable(actionType, data) {
   if (actionType === "bill_candidate") {
-    return Boolean(data?.amount && data?.merchant);
+    return Boolean(data?.amount);
   }
   if (actionType === "task_candidate") {
     return Boolean(data?.title && (data.task_type !== "reminder" || data.remind_at));
@@ -6887,7 +6953,7 @@ function isChatCandidateConfirmable(actionType, data) {
 
 function chatCandidateWarningText(actionType, data, warnings) {
   if (actionType === "bill_candidate" && !isChatCandidateConfirmable(actionType, data)) {
-    return "还缺金额或商家。点「修改信息」补齐后，就能保存。";
+    return "还缺金额。点「修改信息」补齐后，就能保存。";
   }
   if (actionType === "task_candidate" && !isChatCandidateConfirmable(actionType, data)) {
     return "还缺事项名称或提醒时间。点「修改信息」补齐后，就能保存。";
@@ -7708,10 +7774,10 @@ function diagnosticIssueMessage(issue) {
     pending_bill_candidates: "助手识别出的账单还没有确认保存。",
     pending_task_candidates: "助手识别出的待办还没有确认保存。",
     pending_diary_candidates: "助手整理出的日记还没有确认保存。",
-    bill_candidate_missing_required_fields: "缺少金额或商户，暂时不能确认保存。",
+    bill_candidate_missing_required_fields: "缺少金额，暂时不能确认保存。",
     task_candidate_missing_required_fields: "缺少标题或提醒时间，暂时不能确认保存。",
     diary_candidate_missing_required_fields: "缺少日期、标题或正文，暂时不能确认保存。",
-    possible_duplicate_bill: "两条账单商户、金额、类型和时间都很接近，建议核对。",
+    possible_duplicate_bill: "两条账单金额、类型、时间很接近，商家/用途也一致或都未填写，建议核对。",
     unscheduled_pending_task: "待办没有到期或提醒时间，可能难以及时触达。",
     overdue_task: "这条待办已经超过目标时间，需要处理或延后。",
     deleted_bills_in_recycle_bin: "可以在回收站查看并恢复误删账单。",
@@ -7723,7 +7789,7 @@ function diagnosticIssueMeta(issue) {
   const metadata = issue.metadata ?? {};
   if (metadata.filename) return `文件：${metadata.filename}`;
   if (metadata.title) return `标题：${metadata.title}`;
-  if (metadata.merchant) return `商户：${metadata.merchant}，金额：${metadata.amount ?? "未知"}`;
+  if (metadata.merchant) return `商家/用途：${metadata.merchant}，金额：${metadata.amount ?? "未知"}`;
   if (metadata.candidate_count) return `候选数量：${metadata.candidate_count}`;
   if (metadata.deleted_bill_count) return `已删除账单：${metadata.deleted_bill_count}`;
   if (metadata.deleted_task_count) return `已删除待办：${metadata.deleted_task_count}`;
@@ -8000,7 +8066,7 @@ function recycleItemDisplay(type, item) {
   if (type === "bill") {
     return {
       iconName: iconForBill(item),
-      title: `${item.merchant || "未命名账单"} · ${money(item.amount)}`,
+      title: `${billDisplayName(item)} · ${money(item.amount)}`,
       meta: `${labelTransaction(item.transaction_type)} · ${item.category || "未分类"} · 删除于 ${formatDate(item.deleted_at)}`,
     };
   }
@@ -8089,6 +8155,10 @@ function money(value) {
 function signedMoney(bill) {
   const prefix = bill.transaction_type === "expense" ? "−" : ["income", "refund"].includes(bill.transaction_type) ? "+" : "";
   return `${prefix}${money(bill.amount)}`;
+}
+
+function billDisplayName(bill) {
+  return String(bill?.merchant || bill?.category || labelTransaction(bill?.transaction_type) || "未填写");
 }
 
 function compactMoney(value) {

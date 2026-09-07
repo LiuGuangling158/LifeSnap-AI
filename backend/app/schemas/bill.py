@@ -27,7 +27,7 @@ class BillSource(str, Enum):
 class BillCreate(BaseModel):
     amount: Decimal = Field(gt=0)
     currency: str = Field(default="CNY", min_length=3, max_length=3)
-    merchant: str = Field(min_length=1, max_length=120)
+    merchant: str | None = Field(default=None, min_length=1, max_length=120)
     category: str = Field(default="其他", min_length=1, max_length=40)
     payment_method: str | None = Field(default=None, max_length=40)
     transaction_type: TransactionType = TransactionType.expense
@@ -37,7 +37,7 @@ class BillCreate(BaseModel):
 
 
 class BillUpdate(PatchModel):
-    non_nullable_fields = frozenset(["amount", "currency", "merchant", "category", "transaction_type", "source", "paid_at"])
+    non_nullable_fields = frozenset(["amount", "currency", "category", "transaction_type", "source", "paid_at"])
 
     amount: Decimal | None = Field(default=None, gt=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)

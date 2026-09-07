@@ -126,12 +126,6 @@ class RuleBasedBillParser:
         warnings: list[str] = []
         if amount is None:
             warnings.append("amount_missing")
-        if merchant is None:
-            warnings.append("merchant_missing")
-        if payment_method is None:
-            warnings.append("payment_method_missing")
-        if category == "其他":
-            warnings.append("category_low_confidence")
         return warnings
 
     def _field_confidence(
@@ -147,10 +141,11 @@ class RuleBasedBillParser:
             "category": 0.75 if category != "其他" else 0.45,
             "payment_method": 0.8 if payment_method is not None else 0.0,
             "paid_at": 0.0,
+            "transaction_type": 0.9,
         }
 
     def _overall_confidence(self, field_confidence: dict[str, float]) -> float:
-        important_fields = ["amount", "merchant", "category", "payment_method"]
+        important_fields = ["amount", "transaction_type"]
         score = sum(field_confidence[field] for field in important_fields) / len(important_fields)
         return round(score, 2)
 

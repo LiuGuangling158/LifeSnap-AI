@@ -721,7 +721,7 @@ class DiagnosticsService:
                 DiagnosticIssue(
                     code="bill_candidate_missing_required_fields",
                     severity=DiagnosticSeverity.action_required,
-                    message="Bill candidate is missing amount or merchant and cannot be confirmed yet.",
+                    message="Bill candidate is missing amount and cannot be confirmed yet.",
                     entity_type="bill_candidate",
                     entity_id=str(candidate.candidate_id),
                     metadata={"warnings": candidate.warnings},
@@ -770,7 +770,7 @@ class DiagnosticsService:
                     DiagnosticIssue(
                         code="possible_duplicate_bill",
                         severity=DiagnosticSeverity.warning,
-                        message="Two bills have the same merchant, amount, type, and nearby paid time.",
+                        message="Two bills have the same amount, type, nearby paid time, and matching optional merchant.",
                         entity_type="bill",
                         entity_id=str(bill.id),
                         related_entity_ids=[str(other.id)],
@@ -794,7 +794,7 @@ class DiagnosticsService:
             return False
         if bill.transaction_type != other.transaction_type:
             return False
-        if bill.merchant.casefold() != other.merchant.casefold():
+        if self._merchant_key(bill.merchant) != self._merchant_key(other.merchant):
             return False
         delta = abs(
             self._as_utc(bill.paid_at)
@@ -806,6 +806,9 @@ class DiagnosticsService:
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
+
+    def _merchant_key(self, merchant: str | None) -> str:
+        return (merchant or "").strip().casefold()
 
     def _task_issues(self, now: datetime) -> list[DiagnosticIssue]:
         issues: list[DiagnosticIssue] = []

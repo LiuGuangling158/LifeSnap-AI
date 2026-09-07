@@ -63,18 +63,17 @@ class LocalBillCandidateStore:
         return True
 
     def is_confirmable(self, candidate: ParseBillResponse) -> bool:
-        return candidate.data.amount is not None and candidate.data.merchant is not None
+        return candidate.data.amount is not None
 
     def to_bill_create(self, candidate: ParseBillResponse) -> BillCreate | None:
         amount = candidate.data.amount
-        merchant = candidate.data.merchant
-        if amount is None or merchant is None:
+        if amount is None:
             return None
 
         return BillCreate(
             amount=amount,
             currency=candidate.data.currency,
-            merchant=merchant,
+            merchant=candidate.data.merchant,
             category=candidate.data.category,
             payment_method=candidate.data.payment_method,
             transaction_type=candidate.data.transaction_type,
@@ -99,12 +98,6 @@ class LocalBillCandidateStore:
         warnings: list[str] = []
         if data.amount is None:
             warnings.append("amount_missing")
-        if data.merchant is None:
-            warnings.append("merchant_missing")
-        if data.payment_method is None:
-            warnings.append("payment_method_missing")
-        if data.category == "其他":
-            warnings.append("category_low_confidence")
         return warnings
 
     def _field_confidence(self, data: BillCandidateData) -> dict[str, float]:
@@ -114,10 +107,11 @@ class LocalBillCandidateStore:
             "category": 0.9 if data.category != "其他" else 0.5,
             "payment_method": 1.0 if data.payment_method is not None else 0.0,
             "paid_at": 1.0 if data.paid_at is not None else 0.0,
+            "transaction_type": 1.0,
         }
 
     def _overall_confidence(self, field_confidence: dict[str, float]) -> float:
-        important_fields = ["amount", "merchant", "category", "payment_method"]
+        important_fields = ["amount", "transaction_type"]
         score = sum(field_confidence[field] for field in important_fields) / len(important_fields)
         return round(score, 2)
 

@@ -168,7 +168,7 @@ def check_bill_candidate_duplicate(
     if payload is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bill candidate is missing required fields",
+            detail="Bill candidate is missing amount",
         )
     return bill_store.check_duplicate(
         payload,
@@ -192,7 +192,7 @@ def confirm_bill_candidate(
         if not bill_candidate_store.is_confirmable(candidate):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Bill candidate is missing required fields",
+                detail="Bill candidate is missing amount",
             )
 
         bill = bill_candidate_store.confirm(candidate_id)

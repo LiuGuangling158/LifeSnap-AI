@@ -716,7 +716,7 @@ class DataManagementService:
         demo_tasks = [
             TaskCreate(
                 title="Review AI bill candidate",
-                description="Check amount, merchant, and category before saving.",
+                description="Check amount, type, and suggested details before saving.",
                 category="Finance",
                 task_type=TaskType.todo,
                 due_at=now + timedelta(hours=3),

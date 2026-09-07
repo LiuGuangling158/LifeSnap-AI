@@ -38,6 +38,8 @@ class ChatAgentStep(BaseModel):
 
 class ChatMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
+    context_action_type: ChatActionType | None = None
+    context_candidate_id: UUID | None = None
 
 
 class ChatMessageResponse(BaseModel):
@@ -52,6 +54,11 @@ class ChatMessageResponse(BaseModel):
     warnings: list[str] = []
     agent_steps: list[ChatAgentStep] = Field(default_factory=list)
     need_user_confirmation: bool = True
+    updated_existing_candidate: bool = False
+    discarded: bool = False
+    created_bill: BillRead | None = None
+    created_task: TaskRead | None = None
+    created_diary: DiaryRead | None = None
 
 
 class ChatConfirmActionRequest(BaseModel):

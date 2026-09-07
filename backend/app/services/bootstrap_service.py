@@ -36,7 +36,7 @@ class BootstrapService:
                 AssistantToolCapability(
                     id="bill_candidate",
                     label="记账候选",
-                    description="从一句话整理金额、商户、分类和时间，确认后保存账单。",
+                    description="从一句话整理金额、收支类型和可识别信息，确认后保存账单。",
                     input_modes=["text", "voice"],
                     requires_confirmation=True,
                 ),
