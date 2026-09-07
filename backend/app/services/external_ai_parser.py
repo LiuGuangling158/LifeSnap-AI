@@ -22,6 +22,7 @@ from app.schemas.agent import (
 )
 from app.schemas.chat import ChatIntent
 from app.schemas.task import TaskPriority, TaskType
+from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.settings_store import settings_store
 
@@ -253,7 +254,7 @@ class ExternalAiParserService:
             return None, []
 
         request_body: dict[str, Any] = {
-            "model": settings.llm_agent_model,
+            "model": settings.llm_agent_runtime_model,
             "messages": [
                 {"role": "system", "content": self._llm_system_prompt(kind)},
                 {
@@ -307,12 +308,16 @@ class ExternalAiParserService:
 
     def _llm_user_payload(self, kind: str, text: str, source: str) -> dict[str, Any]:
         payload = self._provider_payload(kind, text, source)
+        payload["retrieved_knowledge"] = [
+            hit.model_dump(mode="json") for hit in agent_knowledge_base.search(text, limit=3)
+        ]
         payload["mvp_scope"] = {
             "allowed_intents": [
                 "create_bill",
                 "create_task",
                 "create_diary",
                 "diary_reflection",
+                "knowledge_answer",
                 "unsupported",
             ],
             "unsupported_examples": ["subscription_auto_create", "warranty_auto_create", "cross_record_search"],
@@ -324,7 +329,7 @@ class ExternalAiParserService:
     def _llm_output_contract(self, kind: str) -> dict[str, Any]:
         if kind == "chat_intent":
             return {
-                "intent": "create_bill | create_task | create_diary | diary_reflection | unsupported",
+                "intent": "create_bill | create_task | create_diary | diary_reflection | knowledge_answer | unsupported",
                 "confidence": "number from 0 to 1",
                 "reply": "short Chinese reply or clarification question",
                 "warnings": "array of stable warning strings",
@@ -388,7 +393,8 @@ class ExternalAiParserService:
         if kind == "chat_intent":
             return (
                 shared
-                + "判断用户意图，只允许 create_bill、create_task、create_diary、diary_reflection、unsupported。"
+                + "判断用户意图，只允许 create_bill、create_task、create_diary、diary_reflection、knowledge_answer、unsupported。"
+                + "当用户询问 Agent 自身、RAG 知识库、函数调用、工具链、模型策略或微调时，返回 knowledge_answer。"
                 + "订阅、保修、复杂统计查询和跨记录搜索属于非 MVP，除非能降级为普通账单或待办，否则返回 unsupported。"
                 + "如果缺少关键信息，reply 要用一句中文追问。"
             )

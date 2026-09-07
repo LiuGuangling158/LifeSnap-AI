@@ -422,11 +422,23 @@ The direct LLM Agent has priority when configured. It calls a
 result with the current Pydantic schemas, and still returns only a candidate.
 Formal bills and tasks are created only after user confirmation.
 
+The Agent runtime also exposes three explicit layers:
+
+- RAG knowledge retrieval from the built-in LifeSnap business knowledge base.
+- Function calling traces for internal tools such as `knowledge_search`,
+  `route_chat_intent`, `classify_bill_category`, `parse_bill_candidate`,
+  `parse_task_candidate`, `parse_diary_candidate`, `update_candidate`,
+  `confirm_candidate`, and `discard_candidate`.
+- Fine-tuning readiness through training-example export plus an optional
+  fine-tuned model ID that takes priority over the base model.
+
 Configure a direct LLM Agent:
 
 ```powershell
 $env:LIFESNAP_LLM_API_KEY = "your-api-key"
 $env:LIFESNAP_LLM_MODEL = "your-model-name"
+$env:LIFESNAP_LLM_FINE_TUNED_MODEL = "optional-fine-tuned-model-id"
+$env:LIFESNAP_LLM_FINE_TUNING_JOB_ID = "optional-training-job-id"
 $env:LIFESNAP_LLM_BASE_URL = "https://api.openai.com/v1"
 $env:LIFESNAP_LLM_PROVIDER = "openai_compatible"
 $env:LIFESNAP_LLM_TIMEOUT_SECONDS = "20"
@@ -438,6 +450,9 @@ base URL is omitted while `LIFESNAP_LLM_API_KEY` and `LIFESNAP_LLM_MODEL` are
 set, it defaults to `https://api.openai.com/v1`. For local compatible gateways,
 the API key can be omitted as long as `LIFESNAP_LLM_BASE_URL` and
 `LIFESNAP_LLM_MODEL` are set.
+If `LIFESNAP_LLM_FINE_TUNED_MODEL` is set, that model is sent to the compatible
+chat-completions API instead of `LIFESNAP_LLM_MODEL`; the base model is kept as
+profile metadata.
 
 Privacy still gates external processing. Because privacy defaults to local-only
 mode, external OCR/AI calls remain blocked until you update privacy settings:
@@ -507,7 +522,23 @@ the same contract embedded in the model prompt:
 Supported `kind` values are `bill`, `task`, and `chat_intent`. `bill` and
 `task` return structured candidate fields. `chat_intent` routes a chat message
 to `create_bill`, `create_task`, `create_diary`, `diary_reflection`, or
-`unsupported`; the backend then reuses the matching candidate flow.
+`knowledge_answer` or `unsupported`; the backend then reuses the matching
+candidate flow or answers from its knowledge base.
+
+Inspect the runtime profile, search the local knowledge base, or export
+fine-tuning examples:
+
+```text
+GET /agent/runtime
+GET /agent/knowledge/search?q=账单分类&limit=3
+GET /agent/fine-tuning/examples?limit=50
+```
+
+Direct LLM calls receive retrieved knowledge snippets in the user payload under
+`retrieved_knowledge`. Chat responses include `knowledge_hits`,
+`function_calls`, and `model_trace`, so the UI can show the RAG evidence,
+called tools, and whether the runtime is using a base model, a configured
+fine-tuned model, an external parser, or the local rule fallback.
 
 For bills, the provider/model should return either top-level candidate fields or
 a `data` object compatible with `BillCandidateData`:

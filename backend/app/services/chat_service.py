@@ -14,6 +14,7 @@ from app.schemas.agent import (
     ParseTaskResponse,
     TaskCandidateUpdate,
 )
+from app.schemas.agent_runtime import AgentFunctionCallTrace, AgentKnowledgeHit
 from app.schemas.bill import BillSource, TransactionType
 from app.schemas.chat import (
     ChatActionType,
@@ -25,6 +26,9 @@ from app.schemas.chat import (
 )
 from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskPriority, TaskSource, TaskType
+from app.services.agent_knowledge_base import agent_knowledge_base
+from app.services.agent_runtime_service import agent_runtime_service
+from app.services.agent_tool_registry import agent_tool_registry
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
@@ -131,6 +135,21 @@ class RuleBasedChatService:
         "月",
         "号",
     )
+    _agent_capability_keywords = (
+        "知识库",
+        "rag",
+        "检索增强",
+        "function calling",
+        "函数调用",
+        "工具调用",
+        "微调",
+        "fine-tuning",
+        "fine tuning",
+        "大模型",
+        "模型",
+        "agent",
+        "智能体",
+    )
 
     def __init__(self) -> None:
         self._rule_bill_parser = RuleBasedBillParser()
@@ -139,7 +158,8 @@ class RuleBasedChatService:
     def handle_message(self, payload: ChatMessageRequest) -> ChatMessageResponse:
         text = payload.message.strip()
         if not settings_store.get_privacy_settings().allow_ai_text_processing:
-            return ChatMessageResponse(
+            return self._with_runtime_trace(
+                ChatMessageResponse(
                 message_id=uuid4(),
                 reply="AI text processing is disabled in privacy settings.",
                 intent=ChatIntent.unsupported,
@@ -156,50 +176,262 @@ class RuleBasedChatService:
                     )
                 ],
                 need_user_confirmation=False,
+                ),
+                text,
+                [],
+            )
+
+        knowledge_hits = agent_knowledge_base.search(text)
+
+        if self._looks_like_agent_capability_question(text):
+            return self._with_runtime_trace(
+                self._agent_capability_response(text, knowledge_hits),
+                text,
+                knowledge_hits,
             )
 
         context_response = self._response_from_candidate_context(text, payload)
         if context_response is not None:
-            return context_response
+            return self._with_runtime_trace(context_response, text, knowledge_hits)
 
         external_route, fallback_warnings = external_ai_parser.route_chat(text)
         if external_route is not None:
-            return self._response_from_external_route(text, external_route)
+            return self._with_runtime_trace(
+                self._response_from_external_route(text, external_route),
+                text,
+                knowledge_hits,
+            )
 
         unsupported_reply = self._unsupported_reply(text)
         if unsupported_reply is not None and not self._looks_like_simple_bill(text):
-            return self._unsupported_response(
-                reply=unsupported_reply,
-                confidence=0.75,
-                warnings=["unsupported_mvp_intent"] + fallback_warnings,
+            return self._with_runtime_trace(
+                self._unsupported_response(
+                    reply=unsupported_reply,
+                    confidence=0.75,
+                    warnings=["unsupported_mvp_intent"] + fallback_warnings,
+                ),
+                text,
+                knowledge_hits,
             )
 
         if self._looks_like_diary_entry(text):
-            return self._diary_candidate_response(text, fallback_warnings=fallback_warnings)
+            return self._with_runtime_trace(
+                self._diary_candidate_response(text, fallback_warnings=fallback_warnings),
+                text,
+                knowledge_hits,
+            )
 
         if self._looks_like_diary(text):
-            return self._diary_reflection_response(text, fallback_warnings=fallback_warnings)
+            return self._with_runtime_trace(
+                self._diary_reflection_response(text, fallback_warnings=fallback_warnings),
+                text,
+                knowledge_hits,
+            )
 
         force_rule_based = self._should_force_rule_based_parser(fallback_warnings)
         if self._looks_like_task(text):
-            return self._task_candidate_response(
+            return self._with_runtime_trace(
+                self._task_candidate_response(
+                    text,
+                    fallback_warnings=fallback_warnings,
+                    force_rule_based=force_rule_based,
+                ),
                 text,
-                fallback_warnings=fallback_warnings,
-                force_rule_based=force_rule_based,
+                knowledge_hits,
             )
 
         if self._looks_like_bill(text):
-            return self._bill_candidate_response(
+            return self._with_runtime_trace(
+                self._bill_candidate_response(
+                    text,
+                    fallback_warnings=fallback_warnings,
+                    force_rule_based=force_rule_based,
+                ),
                 text,
-                fallback_warnings=fallback_warnings,
-                force_rule_based=force_rule_based,
+                knowledge_hits,
             )
 
-        return self._unsupported_response(
-            reply="这条消息还没有足够信息生成账单或提醒。你可以补充金额、事项或提醒时间。",
-            confidence=0.45,
-            warnings=["intent_low_confidence"] + fallback_warnings,
+        return self._with_runtime_trace(
+            self._unsupported_response(
+                reply="这条消息还没有足够信息生成账单或提醒。你可以补充金额、事项或提醒时间。",
+                confidence=0.45,
+                warnings=["intent_low_confidence"] + fallback_warnings,
+            ),
+            text,
+            knowledge_hits,
         )
+
+    def _with_runtime_trace(
+        self,
+        response: ChatMessageResponse,
+        text: str,
+        knowledge_hits: list[AgentKnowledgeHit],
+    ) -> ChatMessageResponse:
+        response.knowledge_hits = knowledge_hits
+        response.function_calls = self._function_calls_for_response(response, text, knowledge_hits)
+        response.model_trace = agent_runtime_service.model_trace()
+        return response
+
+    def _function_calls_for_response(
+        self,
+        response: ChatMessageResponse,
+        text: str,
+        knowledge_hits: list[AgentKnowledgeHit],
+    ) -> list[AgentFunctionCallTrace]:
+        preview = self._preview_text(text)
+        calls = [
+            agent_tool_registry.trace(
+                "knowledge_search",
+                {"query": preview, "limit": 3},
+                f"命中 {len(knowledge_hits)} 条知识",
+            )
+        ]
+
+        if response.intent != ChatIntent.knowledge_answer:
+            calls.append(
+                agent_tool_registry.trace(
+                    "route_chat_intent",
+                    {"message": preview},
+                    f"intent={response.intent.value}, confidence={response.confidence}",
+                )
+            )
+
+        if response.updated_existing_candidate:
+            calls.append(
+                agent_tool_registry.trace(
+                    "update_candidate",
+                    {
+                        "candidate_id": str(response.candidate_id),
+                        "action_type": response.action_type.value,
+                    },
+                    "候选记录已更新",
+                )
+            )
+        elif response.discarded:
+            calls.append(
+                agent_tool_registry.trace(
+                    "discard_candidate",
+                    {
+                        "candidate_id": str(response.candidate_id),
+                        "action_type": response.action_type.value,
+                    },
+                    "候选记录已丢弃",
+                )
+            )
+        elif response.created_bill or response.created_task or response.created_diary:
+            calls.append(
+                agent_tool_registry.trace(
+                    "confirm_candidate",
+                    {
+                        "candidate_id": str(response.candidate_id),
+                        "action_type": response.action_type.value,
+                    },
+                    "候选记录已保存为正式记录",
+                )
+            )
+        elif response.action_type == ChatActionType.bill_candidate and response.candidate is not None:
+            data = response.candidate.data
+            calls.append(
+                agent_tool_registry.trace(
+                    "classify_bill_category",
+                    {"text": preview, "transaction_type": data.transaction_type.value},
+                    f"category={data.category}",
+                )
+            )
+            calls.append(
+                agent_tool_registry.trace(
+                    "parse_bill_candidate",
+                    {"source": data.source.value},
+                    f"candidate_id={response.candidate_id}",
+                )
+            )
+        elif response.action_type == ChatActionType.task_candidate and response.candidate is not None:
+            calls.append(
+                agent_tool_registry.trace(
+                    "parse_task_candidate",
+                    {"source": response.candidate.data.source.value},
+                    f"candidate_id={response.candidate_id}",
+                )
+            )
+        elif response.action_type == ChatActionType.diary_candidate and response.candidate is not None:
+            calls.append(
+                agent_tool_registry.trace(
+                    "parse_diary_candidate",
+                    {"source": response.candidate.data.source.value},
+                    f"candidate_id={response.candidate_id}",
+                )
+            )
+        elif response.assistant_tool_id == "diary_reflection":
+            calls.append(
+                agent_tool_registry.trace(
+                    "generate_diary_reflection",
+                    {"text": preview},
+                    "已生成追问",
+                )
+            )
+        return calls
+
+    def _looks_like_agent_capability_question(self, text: str) -> bool:
+        normalized = text.casefold()
+        specific_keywords = (
+            "知识库",
+            "rag",
+            "检索增强",
+            "function calling",
+            "函数调用",
+            "工具调用",
+            "微调",
+            "fine-tuning",
+            "fine tuning",
+            "大模型",
+        )
+        if any(keyword in normalized for keyword in specific_keywords):
+            return True
+        return any(subject in normalized for subject in ("agent", "助手", "智能体", "你")) and any(
+            keyword in normalized for keyword in ("模型", "工具", "能力", "链路", "怎么工作")
+        )
+
+    def _agent_capability_response(
+        self,
+        text: str,
+        knowledge_hits: list[AgentKnowledgeHit],
+    ) -> ChatMessageResponse:
+        runtime = agent_runtime_service.profile()
+        model = runtime.model_profile
+        model_text = model.runtime_model or "本地规则解析"
+        fine_tune_text = (
+            f"已配置微调模型 {model.fine_tuned_model}"
+            if model.fine_tuned_model
+            else "已准备微调样本导出，配置微调模型后会优先使用"
+        )
+        reply = (
+            "我现在按 RAG 知识库、函数调用和模型策略三段工作："
+            f"先检索 {sum(source.document_count for source in runtime.knowledge_sources)} 条本地业务知识，"
+            f"再从 {len(runtime.function_tools)} 个内部函数工具里选择要调用的能力，"
+            f"最后使用 {model_text} 生成候选或回答。{fine_tune_text}。"
+        )
+        return ChatMessageResponse(
+            message_id=uuid4(),
+            reply=reply,
+            intent=ChatIntent.knowledge_answer,
+            confidence=0.93,
+            assistant_tool_id="knowledge_search",
+            action_type=ChatActionType.none,
+            candidate=None,
+            warnings=[],
+            agent_steps=[
+                self._agent_step("检索知识库", f"命中 {len(knowledge_hits)} 条 LifeSnap 业务知识。"),
+                self._agent_step("选择函数", f"当前注册 {len(runtime.function_tools)} 个可调用工具。"),
+                self._agent_step("读取模型策略", f"当前策略：{model.strategy}。"),
+            ],
+            need_user_confirmation=False,
+        )
+
+    def _preview_text(self, text: str, max_length: int = 80) -> str:
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        if len(cleaned) <= max_length:
+            return cleaned
+        return f"{cleaned[: max_length - 1]}…"
 
     def _response_from_external_route(
         self,
@@ -253,6 +485,8 @@ class RuleBasedChatService:
                 route_confidence=min(route.confidence, 0.7),
                 fallback_warnings=route.warnings,
             )
+        if route.intent == ChatIntent.knowledge_answer:
+            return self._agent_capability_response(text, agent_knowledge_base.search(text))
 
         return self._unsupported_response(
             reply=route.reply or "这条消息暂时不能直接转换成账单或提醒。",

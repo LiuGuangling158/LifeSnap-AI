@@ -5241,7 +5241,7 @@ td {
 
 .assistant-chat-page {
   display: grid;
-  grid-template-rows: auto auto auto minmax(260px, 1fr) auto;
+  grid-template-rows: auto auto minmax(260px, 1fr) auto;
   min-height: calc(100vh - 296px);
   overflow: hidden;
   border: 1px solid #d9e6df;
@@ -5301,6 +5301,69 @@ td {
   border-color: #86bec9;
   background: #edf8fb;
   color: #236577;
+}
+
+.assistant-runtime-panel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px 15px 0;
+}
+
+.assistant-runtime-chip {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid #d9e4df;
+  border-radius: var(--radius);
+  background: #fbfcfb;
+  padding: 8px;
+}
+
+.assistant-runtime-chip > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  background: #eef4fb;
+  color: #2e6694;
+}
+
+.assistant-runtime-chip.is-on:nth-child(2) > span {
+  background: #fff4e3;
+  color: #9b5b10;
+}
+
+.assistant-runtime-chip.is-on:nth-child(4) > span {
+  background: #f5eefb;
+  color: #6e4aa0;
+}
+
+.assistant-runtime-chip .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.assistant-runtime-chip strong,
+.assistant-runtime-chip small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-runtime-chip strong {
+  color: #25332c;
+  font-size: 12px;
+}
+
+.assistant-runtime-chip small {
+  margin-top: 2px;
+  color: #6c7872;
+  font-size: 10px;
 }
 
 .assistant-capabilities {
@@ -5654,6 +5717,122 @@ td {
 
 .chat-result-card .button {
   justify-self: start;
+}
+
+.chat-runtime-trace {
+  margin-top: 8px;
+  border: 1px solid #d9e5df;
+  border-radius: var(--radius);
+  background: #fbfcfb;
+}
+
+.chat-runtime-trace summary {
+  display: grid;
+  grid-template-columns: 18px auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 9px;
+  color: #26342d;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.chat-runtime-trace summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-runtime-trace summary .icon {
+  width: 15px;
+  height: 15px;
+  color: #2e6694;
+}
+
+.chat-runtime-trace summary small {
+  overflow: hidden;
+  color: #728078;
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-runtime-body {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #e2ebe5;
+  padding: 9px;
+}
+
+.chat-runtime-model,
+.chat-knowledge-hit,
+.chat-function-call {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid #e3eae6;
+  border-radius: 7px;
+  background: #fff;
+  padding: 7px;
+}
+
+.chat-runtime-model > span,
+.chat-function-call > span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef6fb;
+  color: #2e6694;
+}
+
+.chat-knowledge-hit > span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f7f1e8;
+  color: #99621f;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.chat-runtime-model .icon,
+.chat-function-call .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.chat-runtime-section {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-runtime-section > strong,
+.chat-runtime-model strong,
+.chat-knowledge-hit strong,
+.chat-function-call strong {
+  display: block;
+  color: #24332b;
+  font-size: 12px;
+}
+
+.chat-runtime-model small,
+.chat-knowledge-hit small,
+.chat-function-call small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: #6d7973;
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-backdrop {
@@ -7987,8 +8166,17 @@ button:focus-visible {
     min-height: calc(100vh - 280px);
   }
 
+  .assistant-runtime-panel,
   .assistant-capabilities {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chat-runtime-trace summary {
+    grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr);
+  }
+
+  .chat-runtime-trace summary small {
+    text-align: left;
   }
 
   .assistant-thread.chat-thread {

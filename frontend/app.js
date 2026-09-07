@@ -67,6 +67,7 @@ const defaultTagSettings = {
 const profileStorageKey = "lifesnap_profile_settings";
 const assistantSessionStorageKey = "lifesnap_assistant_session";
 const knownAssistantToolIds = [
+  "knowledge_search",
   "bill_candidate",
   "task_candidate",
   "diary_candidate",
@@ -3022,6 +3023,8 @@ function integrationGuideText(commandKey) {
       "$env:LIFESNAP_OCR_TIMEOUT_SECONDS = \"15\"",
       "$env:LIFESNAP_LLM_API_KEY = \"your-api-key\"",
       "$env:LIFESNAP_LLM_MODEL = \"your-model-name\"",
+      "$env:LIFESNAP_LLM_FINE_TUNED_MODEL = \"optional-fine-tuned-model-id\"",
+      "$env:LIFESNAP_LLM_FINE_TUNING_JOB_ID = \"optional-training-job-id\"",
       "$env:LIFESNAP_LLM_BASE_URL = \"https://api.openai.com/v1\"",
       "$env:LIFESNAP_LLM_PROVIDER = \"openai_compatible\"",
       "$env:LIFESNAP_LLM_TIMEOUT_SECONDS = \"20\"",
@@ -3061,7 +3064,7 @@ function integrationGuideText(commandKey) {
       "",
       "chat_intent response:",
       "{",
-      "  \"intent\": \"create_bill | create_task | create_diary | diary_reflection | unsupported\",",
+      "  \"intent\": \"create_bill | create_task | create_diary | diary_reflection | knowledge_answer | unsupported\",",
       "  \"confidence\": 0.88,",
       "  \"reply\": \"我先整理成一个待确认事项。\",",
       "  \"warnings\": []",
@@ -3585,9 +3588,53 @@ function normalizeStoredChatResponse(response) {
     created_bill: response.created_bill ?? null,
     created_task: response.created_task ?? null,
     created_diary: response.created_diary ?? null,
+    knowledge_hits: Array.isArray(response.knowledge_hits)
+      ? response.knowledge_hits.map(normalizeKnowledgeHit).filter(Boolean).slice(0, 5)
+      : [],
+    function_calls: Array.isArray(response.function_calls)
+      ? response.function_calls.map(normalizeFunctionCallTrace).filter(Boolean).slice(0, 8)
+      : [],
+    model_trace: normalizeModelTrace(response.model_trace),
     agent_steps: Array.isArray(response.agent_steps)
       ? response.agent_steps.map(normalizeStoredAgentStep).filter(Boolean).slice(0, 6)
       : [],
+  };
+}
+
+function normalizeKnowledgeHit(hit) {
+  if (!hit || typeof hit !== "object") return null;
+  return {
+    source_id: String(hit.source_id ?? "knowledge").slice(0, 80),
+    title: String(hit.title ?? "知识命中").slice(0, 80),
+    snippet: String(hit.snippet ?? "").slice(0, 240),
+    score: Number.isFinite(Number(hit.score)) ? Number(hit.score) : 0,
+    tags: Array.isArray(hit.tags) ? hit.tags.map(String).slice(0, 6) : [],
+  };
+}
+
+function normalizeFunctionCallTrace(call) {
+  if (!call || typeof call !== "object") return null;
+  return {
+    name: String(call.name ?? "tool").slice(0, 80),
+    label: String(call.label ?? call.name ?? "函数调用").slice(0, 80),
+    arguments: call.arguments && typeof call.arguments === "object" ? call.arguments : {},
+    result: String(call.result ?? "completed").slice(0, 180),
+    status: String(call.status ?? "completed").slice(0, 40),
+  };
+}
+
+function normalizeModelTrace(trace) {
+  if (!trace || typeof trace !== "object") return null;
+  return {
+    provider: String(trace.provider ?? "rule_based").slice(0, 80),
+    strategy: String(trace.strategy ?? "rule_based_local_fallback").slice(0, 80),
+    runtime_model: trace.runtime_model ? String(trace.runtime_model).slice(0, 160) : null,
+    base_model: trace.base_model ? String(trace.base_model).slice(0, 160) : null,
+    fine_tuned_model: trace.fine_tuned_model ? String(trace.fine_tuned_model).slice(0, 160) : null,
+    fine_tuning_status: String(trace.fine_tuning_status ?? "training_dataset_ready").slice(0, 80),
+    response_format: trace.response_format ? String(trace.response_format).slice(0, 80) : null,
+    rag_enabled: Boolean(trace.rag_enabled),
+    function_calling_enabled: Boolean(trace.function_calling_enabled),
   };
 }
 
@@ -6363,6 +6410,8 @@ function renderAssistantPage() {
   return `<div class="assistant-page simple-assistant">
     <header class="simple-page-header"><div><p class="simple-kicker">${icon("spark")}省一点输入的时间</p><h1>AI 帮记</h1><p>说清楚要记什么，核对后再保存。</p></div>${hasConversation ? '<button class="button ghost" type="button" data-chat-clear>清空对话</button>' : ""}</header>
     <section class="assistant-chat-page" aria-label="和助手记账">
+      ${renderAssistantRuntimePanel()}
+      ${renderAssistantCapabilities()}
       <div class="assistant-thread chat-thread" aria-live="polite">
         ${hasConversation ? messages.map((message, index) => renderChatMessage(message, index)).join("") : `<div class="simple-assistant-welcome"><span class="entry-icon">${icon("spark")}</span><h2>这次想记点什么？</h2><p>输入一句话，或上传支付截图。<br />我会整理成一张记录卡，等你核对。</p>${renderAssistantQuickPrompts()}<small>也可以记录待办和日记。</small></div>`}
         ${state.saving ? `<div class="chat-message assistant" role="status"><span>${icon("spark")}</span><p>正在整理，请稍等…</p></div>` : ""}
@@ -6377,6 +6426,40 @@ function renderAssistantPage() {
       </form>
     </section>
   </div>`;
+}
+
+function renderAssistantRuntimePanel() {
+  const runtime = state.bootstrap?.capabilities?.agent_runtime ?? {
+    rag_enabled: true,
+    function_calling_enabled: true,
+    fine_tuning_ready: true,
+    knowledge_sources: [],
+    function_tools: [],
+    model_profile: { strategy: "rule_based_local_fallback", fine_tuning_status: "training_dataset_ready" },
+  };
+  const model = runtime.model_profile ?? {};
+  const knowledgeCount = (runtime.knowledge_sources ?? []).reduce((total, source) => total + Number(source.document_count ?? 0), 0);
+  const toolCount = (runtime.function_tools ?? []).length;
+  return `
+    <div class="assistant-runtime-panel" aria-label="Agent 架构状态">
+      ${runtimeChip("search", "RAG 知识库", `${knowledgeCount} 条知识`, runtime.rag_enabled)}
+      ${runtimeChip("settings", "Function Calling", `${toolCount} 个函数`, runtime.function_calling_enabled)}
+      ${runtimeChip("spark", "模型策略", modelStrategyLabel(model.strategy), true)}
+      ${runtimeChip("file-text", "微调", fineTuningStatusLabel(model.fine_tuning_status), runtime.fine_tuning_ready)}
+    </div>
+  `;
+}
+
+function runtimeChip(iconName, label, value, enabled) {
+  return `
+    <div class="assistant-runtime-chip ${enabled ? "is-on" : "is-off"}">
+      <span>${icon(iconName)}</span>
+      <div>
+        <strong>${escapeHtml(label)}</strong>
+        <small>${escapeHtml(value)}</small>
+      </div>
+    </div>
+  `;
 }
 
 function renderAssistantCapabilities() {
@@ -6422,6 +6505,7 @@ function assistantTools() {
     return tools;
   }
   return [
+    { id: "knowledge_search", label: "知识库检索", requires_confirmation: false },
     { id: "bill_candidate", label: "记账候选", requires_confirmation: true },
     { id: "task_candidate", label: "提醒候选", requires_confirmation: true },
     { id: "diary_candidate", label: "日记候选", requires_confirmation: true },
@@ -6432,6 +6516,7 @@ function assistantTools() {
 
 function iconForAssistantTool(toolId) {
   return {
+    knowledge_search: "search",
     bill_candidate: "wallet",
     task_candidate: "bell",
     diary_candidate: "book",
@@ -6444,6 +6529,7 @@ function renderAssistantQuickPrompts() {
   return `<div class="assistant-prompts" aria-label="试试这些例子">
     <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">${icon("utensils")}记一笔午餐</button>
     <button type="button" data-chat-example="工资收入 6800 元">${icon("income")}记一笔收入</button>
+    <button type="button" data-chat-example="你有 RAG 知识库和函数调用吗？">${icon("search")}问问 Agent 链路</button>
     <button type="button" data-chat-example="提醒我明天 10 点开会">${icon("bell")}记一个待办</button>
   </div>`;
 }
@@ -6481,6 +6567,7 @@ function renderChatMessage(message, index) {
         ${renderChatMessageAttachments(message.attachments)}
         ${role === "assistant" ? renderChatSelectedTool(message.response) : ""}
         ${role === "assistant" ? renderChatAgentSteps(message.response?.agent_steps) : ""}
+        ${role === "assistant" ? renderChatRuntimeTrace(message.response) : ""}
         ${renderChatCandidate(message)}
         ${renderChatResult(message)}
       </div>
@@ -6541,6 +6628,95 @@ function chatAgentStepIcon(status) {
     return "alert-circle";
   }
   return "check-circle";
+}
+
+function renderChatRuntimeTrace(response) {
+  if (!response) {
+    return "";
+  }
+  const hits = response.knowledge_hits ?? [];
+  const calls = response.function_calls ?? [];
+  const model = response.model_trace;
+  if (!hits.length && !calls.length && !model) {
+    return "";
+  }
+  return `
+    <details class="chat-runtime-trace">
+      <summary>${icon("list-filter")}<span>Agent 工作链路</span><small>${escapeHtml(runtimeTraceSummary(hits, calls, model))}</small></summary>
+      <div class="chat-runtime-body">
+        ${model ? renderModelTrace(model) : ""}
+        ${hits.length ? `<div class="chat-runtime-section"><strong>RAG 知识命中</strong>${hits.map(renderKnowledgeHit).join("")}</div>` : ""}
+        ${calls.length ? `<div class="chat-runtime-section"><strong>Function Calling</strong>${calls.map(renderFunctionCall).join("")}</div>` : ""}
+      </div>
+    </details>
+  `;
+}
+
+function runtimeTraceSummary(hits, calls, model) {
+  const parts = [];
+  if (hits.length) parts.push(`${hits.length} 条知识`);
+  if (calls.length) parts.push(`${calls.length} 次函数调用`);
+  if (model) parts.push(modelStrategyLabel(model.strategy));
+  return parts.join(" · ") || "已记录";
+}
+
+function renderModelTrace(model) {
+  return `
+    <div class="chat-runtime-model">
+      <span>${icon("spark")}</span>
+      <div>
+        <strong>${escapeHtml(model.runtime_model || "本地规则解析")}</strong>
+        <small>${escapeHtml([model.provider, modelStrategyLabel(model.strategy), fineTuningStatusLabel(model.fine_tuning_status)].filter(Boolean).join(" · "))}</small>
+      </div>
+    </div>
+  `;
+}
+
+function renderKnowledgeHit(hit) {
+  return `
+    <article class="chat-knowledge-hit">
+      <span>${escapeHtml(Math.round(Number(hit.score ?? 0) * 100))}%</span>
+      <div>
+        <strong>${escapeHtml(hit.title)}</strong>
+        <small>${escapeHtml(hit.snippet)}</small>
+      </div>
+    </article>
+  `;
+}
+
+function renderFunctionCall(call) {
+  return `
+    <article class="chat-function-call ${escapeHtml(call.status || "completed")}">
+      <span>${icon(call.status === "blocked" ? "alert-circle" : "check-circle")}</span>
+      <div>
+        <strong>${escapeHtml(call.label || call.name)}</strong>
+        <small>${escapeHtml([call.name, functionCallArgumentsText(call.arguments), call.result].filter(Boolean).join(" · "))}</small>
+      </div>
+    </article>
+  `;
+}
+
+function functionCallArgumentsText(args = {}) {
+  return Object.entries(args)
+    .slice(0, 3)
+    .map(([key, value]) => `${key}: ${String(value ?? "null").slice(0, 36)}`)
+    .join("，");
+}
+
+function modelStrategyLabel(strategy) {
+  return {
+    fine_tuned_llm_with_local_fallback: "微调模型优先",
+    base_llm_with_rag_and_function_calling: "基础模型增强",
+    external_parser_with_local_fallback: "外部解析服务",
+    rule_based_local_fallback: "本地规则兜底",
+  }[strategy] ?? (strategy || "本地规则兜底");
+}
+
+function fineTuningStatusLabel(status) {
+  return {
+    serving_fine_tuned_model: "微调模型已接入",
+    training_dataset_ready: "样本可导出",
+  }[status] ?? (status || "样本可导出");
 }
 
 function renderChatMessageAttachments(attachments = []) {
@@ -7936,7 +8112,9 @@ function chatIntentDisplay(intent) {
   return {
     create_bill: "记账",
     create_task: "提醒",
+    create_diary: "日记",
     diary_reflection: "日记追问",
+    knowledge_answer: "知识问答",
     unsupported: "未支持",
   }[intent] ?? "";
 }

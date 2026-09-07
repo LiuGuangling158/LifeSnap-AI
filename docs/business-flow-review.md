@@ -20,6 +20,11 @@ privacy controls, recovery and export are supporting workflows.
   categories win first; otherwise common merchant, item and scenario keywords
   infer categories such as 餐饮, 交通, 购物, 日用, 医疗, 娱乐, 学习 and 住房.
   Near-synonyms such as 居住 are normalized to the configured category 住房.
+- Agent responses now expose runtime trace fields for RAG knowledge hits,
+  internal function calls and model strategy. The runtime profile is available
+  through `/agent/runtime`, the local knowledge base through
+  `/agent/knowledge/search`, and supervised fine-tuning examples through
+  `/agent/fine-tuning/examples`.
 - Bills and bill candidates now require only amount and transaction type to save.
   Merchant, category, payment method, time and note can be left blank in the UI;
   blank merchant values are stored as null and displayed as 未填写.
@@ -49,7 +54,8 @@ idempotency, privacy, attachments/OCR fallback, recovery, imports and exports.
 New regressions exercise null updates without record mutation, optional-field
 clearing, intent routing, transaction types, zero amounts, confirmation replay,
 bill category inference, minimal bill confirmation without merchant, contextual
-candidate updates, typed confirmation and typed discard.
+candidate updates, typed confirmation, typed discard, RAG search, function-call
+trace output and fine-tuning dataset export.
 Frontend JavaScript syntax is checked separately.
 
 Browser automation could not initialize because the Windows sandbox failed to

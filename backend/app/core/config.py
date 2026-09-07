@@ -29,7 +29,10 @@ def _default_llm_base_url() -> str | None:
     configured_base_url = _env_optional_str("LIFESNAP_LLM_BASE_URL")
     if configured_base_url:
         return configured_base_url
-    if _env_optional_str("LIFESNAP_LLM_API_KEY") and _env_optional_str("LIFESNAP_LLM_MODEL"):
+    configured_model = _env_optional_str("LIFESNAP_LLM_MODEL") or _env_optional_str(
+        "LIFESNAP_LLM_FINE_TUNED_MODEL"
+    )
+    if _env_optional_str("LIFESNAP_LLM_API_KEY") and configured_model:
         return "https://api.openai.com/v1"
     return None
 
@@ -78,6 +81,12 @@ class Settings:
     llm_agent_model: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_LLM_MODEL")
     )
+    llm_agent_fine_tuned_model: str | None = field(
+        default_factory=lambda: _env_optional_str("LIFESNAP_LLM_FINE_TUNED_MODEL")
+    )
+    llm_agent_fine_tuning_job_id: str | None = field(
+        default_factory=lambda: _env_optional_str("LIFESNAP_LLM_FINE_TUNING_JOB_ID")
+    )
     llm_agent_provider: str = field(
         default_factory=lambda: os.getenv("LIFESNAP_LLM_PROVIDER", "openai_compatible")
     )
@@ -113,7 +122,15 @@ class Settings:
 
     @property
     def real_llm_agent_enabled(self) -> bool:
-        return bool(self.llm_agent_base_url and self.llm_agent_model)
+        return bool(self.llm_agent_base_url and self.llm_agent_runtime_model)
+
+    @property
+    def llm_agent_runtime_model(self) -> str | None:
+        return self.llm_agent_fine_tuned_model or self.llm_agent_model
+
+    @property
+    def fine_tuned_llm_agent_enabled(self) -> bool:
+        return bool(self.llm_agent_fine_tuned_model)
 
 
 settings = Settings()

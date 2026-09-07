@@ -98,6 +98,13 @@ def recognize_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def route_chat(text: str) -> dict[str, Any]:
+    if looks_like_agent_capability_question(text):
+        return {
+            "intent": "knowledge_answer",
+            "confidence": 0.9,
+            "reply": "我会先检索知识库，再通过函数调用选择工具，并可接入微调后的大模型。",
+            "warnings": [],
+        }
     if looks_like_diary(text):
         return {
             "intent": "diary_reflection",
@@ -132,6 +139,23 @@ def looks_like_diary(text: str) -> bool:
     return any(
         keyword in lowered
         for keyword in ("日记", "心情", "开心", "感谢", "学到", "记录今天", "今天发生")
+    )
+
+
+def looks_like_agent_capability_question(text: str) -> bool:
+    lowered = text.casefold()
+    return any(
+        keyword in lowered
+        for keyword in (
+            "知识库",
+            "rag",
+            "function calling",
+            "函数调用",
+            "工具调用",
+            "微调",
+            "fine-tuning",
+            "大模型",
+        )
     )
 
 

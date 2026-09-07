@@ -136,6 +136,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_standard_error_responses(client)
     _check_demo_data_seed(client)
     _check_app_bootstrap(client)
+    _check_agent_runtime_profile(client)
     _check_integration_diagnostics(client)
     _check_bill_statistics_overview(client)
     _check_task_statistics_overview(client)
@@ -541,6 +542,48 @@ def _check_app_bootstrap(client: ApiClient) -> None:
         len(bootstrap["capabilities"]["assistant_tools"]) >= 4,
         "App bootstrap should include assistant tools",
     )
+
+
+def _check_agent_runtime_profile(client: ApiClient) -> None:
+    status, runtime = client.request("GET", "/agent/runtime")
+    _assert(status == 200, "Agent runtime profile should return 200")
+    _assert(runtime["rag_enabled"], "Agent runtime should expose RAG support")
+    _assert(runtime["function_calling_enabled"], "Agent runtime should expose function calling support")
+    _assert(runtime["fine_tuning_ready"], "Agent runtime should expose fine-tuning readiness")
+    function_names = {tool["name"] for tool in runtime["function_tools"]}
+    _assert(
+        {"knowledge_search", "parse_bill_candidate", "classify_bill_category", "confirm_candidate"}
+        <= function_names,
+        "Agent runtime should expose core callable tools",
+    )
+    _assert(
+        runtime["model_profile"]["rag_enabled"] and runtime["model_profile"]["function_calling_enabled"],
+        "Agent model profile should include RAG and function calling flags",
+    )
+
+    status, hits = client.request("GET", "/agent/knowledge/search?q=RAG%20%E7%9F%A5%E8%AF%86%E5%BA%93%20%E5%BE%AE%E8%B0%83%20%E5%87%BD%E6%95%B0%E8%B0%83%E7%94%A8&limit=5")
+    _assert(status == 200 and len(hits) >= 3, "Agent knowledge search should retrieve RAG documents")
+    _assert(
+        any(hit["source_id"] == "fine_tuning_policy" for hit in hits),
+        "Agent knowledge search should include fine-tuning policy",
+    )
+
+    status, dataset = client.request("GET", "/agent/fine-tuning/examples?limit=5")
+    _assert(status == 200, "Agent fine-tuning examples should return 200")
+    _assert(dataset["total"] >= 1, "Agent fine-tuning dataset should use local records")
+    _assert(dataset["examples"][0]["messages"], "Agent fine-tuning examples should include messages")
+
+    status, answer = client.request(
+        "POST",
+        "/chat/messages",
+        {"message": "你有 RAG 知识库、函数调用和大模型微调吗？"},
+    )
+    _assert(status == 200, "Agent capability chat should return 200")
+    _assert(answer["intent"] == "knowledge_answer", "Agent should answer capability questions from knowledge")
+    _assert(answer["knowledge_hits"], "Agent capability answer should expose knowledge hits")
+    call_names = {call["name"] for call in answer["function_calls"]}
+    _assert("knowledge_search" in call_names, "Agent chat should expose knowledge search function call")
+    _assert(answer["model_trace"]["fine_tuning_status"], "Agent chat should expose model/fine-tuning trace")
 
 
 def _check_integration_diagnostics(client: ApiClient) -> None:

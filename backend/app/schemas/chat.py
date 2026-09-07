@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.schemas.agent import ParseBillResponse, ParseDiaryResponse, ParseTaskResponse
+from app.schemas.agent_runtime import AgentFunctionCallTrace, AgentKnowledgeHit, AgentModelTrace
 from app.schemas.bill import BillRead
 from app.schemas.diary import DiaryRead
 from app.schemas.task import TaskRead
@@ -14,6 +15,7 @@ class ChatIntent(str, Enum):
     create_task = "create_task"
     create_diary = "create_diary"
     diary_reflection = "diary_reflection"
+    knowledge_answer = "knowledge_answer"
     unsupported = "unsupported"
 
 
@@ -53,6 +55,9 @@ class ChatMessageResponse(BaseModel):
     candidate: ParseBillResponse | ParseTaskResponse | ParseDiaryResponse | None = None
     warnings: list[str] = []
     agent_steps: list[ChatAgentStep] = Field(default_factory=list)
+    knowledge_hits: list[AgentKnowledgeHit] = Field(default_factory=list)
+    function_calls: list[AgentFunctionCallTrace] = Field(default_factory=list)
+    model_trace: AgentModelTrace | None = None
     need_user_confirmation: bool = True
     updated_existing_candidate: bool = False
     discarded: bool = False

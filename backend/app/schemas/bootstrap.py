@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.agent_runtime import AgentRuntimeProfile
 from app.schemas.dashboard import DashboardSummary
 from app.schemas.settings import (
     BudgetSettings,
@@ -36,6 +37,7 @@ class AppCapabilities(BaseModel):
     supported_diary_moods: list[str]
     supported_transaction_types: list[str]
     assistant_tools: list[AssistantToolCapability]
+    agent_runtime: AgentRuntimeProfile
     idempotency_supported_endpoints: list[str]
     feature_flags: dict[str, bool]
     known_limitations: list[str]

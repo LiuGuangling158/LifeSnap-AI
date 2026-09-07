@@ -3,6 +3,11 @@ from uuid import UUID
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 
 from app.schemas.bill import BillRead, DuplicateBillCheckResponse
+from app.schemas.agent_runtime import (
+    AgentFineTuningDatasetResponse,
+    AgentKnowledgeHit,
+    AgentRuntimeProfile,
+)
 from app.schemas.agent import (
     BillCandidateUpdate,
     BillCandidateListResponse,
@@ -19,6 +24,8 @@ from app.schemas.agent import (
 )
 from app.schemas.task import TaskRead
 from app.services.audit_log_store import audit_log_store
+from app.services.agent_knowledge_base import agent_knowledge_base
+from app.services.agent_runtime_service import agent_runtime_service
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
 from app.services.bill_store import bill_store
@@ -30,6 +37,26 @@ from app.services.task_candidate_store import task_candidate_store
 from app.services.task_parser import task_parser
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+@router.get("/runtime", response_model=AgentRuntimeProfile)
+def get_agent_runtime() -> AgentRuntimeProfile:
+    return agent_runtime_service.profile()
+
+
+@router.get("/knowledge/search", response_model=list[AgentKnowledgeHit])
+def search_agent_knowledge(
+    q: str = Query(min_length=1, max_length=500),
+    limit: int = Query(default=3, ge=1, le=10),
+) -> list[AgentKnowledgeHit]:
+    return agent_knowledge_base.search(q, limit=limit)
+
+
+@router.get("/fine-tuning/examples", response_model=AgentFineTuningDatasetResponse)
+def get_agent_fine_tuning_examples(
+    limit: int = Query(default=50, ge=1, le=200),
+) -> AgentFineTuningDatasetResponse:
+    return agent_runtime_service.fine_tuning_dataset(limit=limit)
 
 
 @router.post("/parse-bill", response_model=ParseBillResponse)

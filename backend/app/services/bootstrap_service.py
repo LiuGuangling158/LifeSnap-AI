@@ -6,6 +6,7 @@ from app.schemas.bootstrap import AppBootstrapResponse, AppCapabilities, Assista
 from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskSource
 from app.services.attachment_store import attachment_store
+from app.services.agent_runtime_service import agent_runtime_service
 from app.services.dashboard_service import dashboard_service
 from app.services.data_management_service import data_management_service
 from app.services.settings_store import settings_store
@@ -69,6 +70,7 @@ class BootstrapService:
                     requires_confirmation=True,
                 ),
             ],
+            agent_runtime=agent_runtime_service.profile(),
             idempotency_supported_endpoints=[
                 "POST /bills",
                 "POST /tasks",
@@ -108,6 +110,10 @@ class BootstrapService:
                 "idempotency_json_persistence": True,
                 "real_ocr_engine": settings.real_ocr_enabled,
                 "real_llm_parser": settings.real_ai_parser_enabled,
+                "agent_rag_knowledge_base": True,
+                "agent_function_calling": True,
+                "agent_fine_tuning_dataset": True,
+                "fine_tuned_llm_parser": settings.fine_tuned_llm_agent_enabled,
                 "persistent_database": False,
                 "user_accounts": False,
             },
