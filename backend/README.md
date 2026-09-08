@@ -425,10 +425,10 @@ Formal bills and tasks are created only after user confirmation.
 The Agent runtime also exposes three explicit layers:
 
 - RAG knowledge retrieval from the built-in LifeSnap business knowledge base.
-- Function calling traces for internal tools such as `knowledge_search`,
-  `route_chat_intent`, `classify_bill_category`, `parse_bill_candidate`,
-  `parse_task_candidate`, `parse_diary_candidate`, `update_candidate`,
-  `confirm_candidate`, and `discard_candidate`.
+- Function calling sessions for internal tools such as `privacy_guard`,
+  `knowledge_search`, `route_chat_intent`, `classify_bill_category`,
+  `parse_bill_candidate`, `parse_task_candidate`, `parse_diary_candidate`,
+  `update_candidate`, `confirm_candidate`, and `discard_candidate`.
 - Fine-tuning readiness through training-example export plus an optional
   fine-tuned model ID that takes priority over the base model.
 
@@ -535,10 +535,13 @@ GET /agent/fine-tuning/examples?limit=50
 ```
 
 Direct LLM calls receive retrieved knowledge snippets in the user payload under
-`retrieved_knowledge`. Chat responses include `knowledge_hits`,
-`function_calls`, and `model_trace`, so the UI can show the RAG evidence,
-called tools, and whether the runtime is using a base model, a configured
-fine-tuned model, an external parser, or the local rule fallback.
+`retrieved_knowledge`. Compatible chat-completions requests also include safe
+read-only tool schemas for knowledge search and bill category classification;
+if the provider returns `tool_calls`, the backend executes those local tools and
+asks the model for the final strict JSON. Chat responses include
+`knowledge_hits`, `function_calls`, and `model_trace`, so the UI can show the
+RAG evidence, called tools, and whether the runtime is using a base model, a
+configured fine-tuned model, an external parser, or the local rule fallback.
 
 For bills, the provider/model should return either top-level candidate fields or
 a `data` object compatible with `BillCandidateData`:

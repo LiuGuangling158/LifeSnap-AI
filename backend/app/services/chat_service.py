@@ -14,7 +14,7 @@ from app.schemas.agent import (
     ParseTaskResponse,
     TaskCandidateUpdate,
 )
-from app.schemas.agent_runtime import AgentFunctionCallTrace, AgentKnowledgeHit
+from app.schemas.agent_runtime import AgentKnowledgeHit
 from app.schemas.bill import BillSource, TransactionType
 from app.schemas.chat import (
     ChatActionType,
@@ -28,7 +28,7 @@ from app.schemas.diary import DiaryMood, DiarySource
 from app.schemas.task import TaskPriority, TaskSource, TaskType
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_runtime_service import agent_runtime_service
-from app.services.agent_tool_registry import agent_tool_registry
+from app.services.agent_tool_registry import AgentFunctionCallSession, agent_tool_registry
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
@@ -157,49 +157,62 @@ class RuleBasedChatService:
 
     def handle_message(self, payload: ChatMessageRequest) -> ChatMessageResponse:
         text = payload.message.strip()
-        if not settings_store.get_privacy_settings().allow_ai_text_processing:
+        function_session = agent_tool_registry.session()
+        preview = self._preview_text(text)
+        privacy_settings = function_session.call(
+            "privacy_guard",
+            {"scope": "chat_message"},
+            settings_store.get_privacy_settings,
+            lambda settings: "允许文本解析" if settings.allow_ai_text_processing else "阻止文本解析",
+        )
+        if not privacy_settings.allow_ai_text_processing:
             return self._with_runtime_trace(
                 ChatMessageResponse(
-                message_id=uuid4(),
-                reply="AI text processing is disabled in privacy settings.",
-                intent=ChatIntent.unsupported,
-                confidence=1.0,
-                assistant_tool_id=None,
-                action_type=ChatActionType.none,
-                candidate=None,
-                warnings=["ai_text_processing_disabled"],
-                agent_steps=[
-                    self._agent_step(
-                        "隐私检查",
-                        "当前设置不允许 AI 文本处理，已停止解析。",
-                        ChatAgentStepStatus.blocked,
-                    )
-                ],
-                need_user_confirmation=False,
+                    message_id=uuid4(),
+                    reply="AI text processing is disabled in privacy settings.",
+                    intent=ChatIntent.unsupported,
+                    confidence=1.0,
+                    assistant_tool_id=None,
+                    action_type=ChatActionType.none,
+                    candidate=None,
+                    warnings=["ai_text_processing_disabled"],
+                    agent_steps=[
+                        self._agent_step(
+                            "隐私检查",
+                            "当前设置不允许 AI 文本处理，已停止解析。",
+                            ChatAgentStepStatus.blocked,
+                        )
+                    ],
+                    need_user_confirmation=False,
                 ),
-                text,
                 [],
+                function_session,
             )
 
-        knowledge_hits = agent_knowledge_base.search(text)
+        knowledge_hits = function_session.call(
+            "knowledge_search",
+            {"query": preview, "limit": 3},
+            lambda: agent_knowledge_base.search(text),
+            lambda hits: f"命中 {len(hits)} 条知识",
+        )
 
         if self._looks_like_agent_capability_question(text):
             return self._with_runtime_trace(
                 self._agent_capability_response(text, knowledge_hits),
-                text,
                 knowledge_hits,
+                function_session,
             )
 
-        context_response = self._response_from_candidate_context(text, payload)
+        context_response = self._response_from_candidate_context(text, payload, function_session)
         if context_response is not None:
-            return self._with_runtime_trace(context_response, text, knowledge_hits)
+            return self._with_runtime_trace(context_response, knowledge_hits, function_session)
 
         external_route, fallback_warnings = external_ai_parser.route_chat(text)
         if external_route is not None:
             return self._with_runtime_trace(
-                self._response_from_external_route(text, external_route),
-                text,
+                self._response_from_external_route(text, external_route, knowledge_hits, function_session),
                 knowledge_hits,
+                function_session,
             )
 
         unsupported_reply = self._unsupported_reply(text)
@@ -210,22 +223,30 @@ class RuleBasedChatService:
                     confidence=0.75,
                     warnings=["unsupported_mvp_intent"] + fallback_warnings,
                 ),
-                text,
                 knowledge_hits,
+                function_session,
             )
 
         if self._looks_like_diary_entry(text):
             return self._with_runtime_trace(
-                self._diary_candidate_response(text, fallback_warnings=fallback_warnings),
-                text,
+                self._diary_candidate_response(
+                    text,
+                    fallback_warnings=fallback_warnings,
+                    function_session=function_session,
+                ),
                 knowledge_hits,
+                function_session,
             )
 
         if self._looks_like_diary(text):
             return self._with_runtime_trace(
-                self._diary_reflection_response(text, fallback_warnings=fallback_warnings),
-                text,
+                self._diary_reflection_response(
+                    text,
+                    fallback_warnings=fallback_warnings,
+                    function_session=function_session,
+                ),
                 knowledge_hits,
+                function_session,
             )
 
         force_rule_based = self._should_force_rule_based_parser(fallback_warnings)
@@ -235,9 +256,10 @@ class RuleBasedChatService:
                     text,
                     fallback_warnings=fallback_warnings,
                     force_rule_based=force_rule_based,
+                    function_session=function_session,
                 ),
-                text,
                 knowledge_hits,
+                function_session,
             )
 
         if self._looks_like_bill(text):
@@ -246,9 +268,10 @@ class RuleBasedChatService:
                     text,
                     fallback_warnings=fallback_warnings,
                     force_rule_based=force_rule_based,
+                    function_session=function_session,
                 ),
-                text,
                 knowledge_hits,
+                function_session,
             )
 
         return self._with_runtime_trace(
@@ -257,119 +280,39 @@ class RuleBasedChatService:
                 confidence=0.45,
                 warnings=["intent_low_confidence"] + fallback_warnings,
             ),
-            text,
             knowledge_hits,
+            function_session,
         )
 
     def _with_runtime_trace(
         self,
         response: ChatMessageResponse,
-        text: str,
         knowledge_hits: list[AgentKnowledgeHit],
+        function_session: AgentFunctionCallSession,
     ) -> ChatMessageResponse:
         response.knowledge_hits = knowledge_hits
-        response.function_calls = self._function_calls_for_response(response, text, knowledge_hits)
+        if response.intent != ChatIntent.knowledge_answer and "ai_text_processing_disabled" not in response.warnings:
+            if not any(call.name == "route_chat_intent" for call in function_session.traces):
+                function_session.record(
+                    "route_chat_intent",
+                    {"message": self._route_trace_message(function_session, response)},
+                    f"intent={response.intent.value}, confidence={response.confidence}",
+                )
+        response.function_calls = function_session.traces
         response.model_trace = agent_runtime_service.model_trace()
         return response
 
-    def _function_calls_for_response(
+    def _route_trace_message(
         self,
+        function_session: AgentFunctionCallSession,
         response: ChatMessageResponse,
-        text: str,
-        knowledge_hits: list[AgentKnowledgeHit],
-    ) -> list[AgentFunctionCallTrace]:
-        preview = self._preview_text(text)
-        calls = [
-            agent_tool_registry.trace(
-                "knowledge_search",
-                {"query": preview, "limit": 3},
-                f"命中 {len(knowledge_hits)} 条知识",
-            )
-        ]
-
-        if response.intent != ChatIntent.knowledge_answer:
-            calls.append(
-                agent_tool_registry.trace(
-                    "route_chat_intent",
-                    {"message": preview},
-                    f"intent={response.intent.value}, confidence={response.confidence}",
-                )
-            )
-
-        if response.updated_existing_candidate:
-            calls.append(
-                agent_tool_registry.trace(
-                    "update_candidate",
-                    {
-                        "candidate_id": str(response.candidate_id),
-                        "action_type": response.action_type.value,
-                    },
-                    "候选记录已更新",
-                )
-            )
-        elif response.discarded:
-            calls.append(
-                agent_tool_registry.trace(
-                    "discard_candidate",
-                    {
-                        "candidate_id": str(response.candidate_id),
-                        "action_type": response.action_type.value,
-                    },
-                    "候选记录已丢弃",
-                )
-            )
-        elif response.created_bill or response.created_task or response.created_diary:
-            calls.append(
-                agent_tool_registry.trace(
-                    "confirm_candidate",
-                    {
-                        "candidate_id": str(response.candidate_id),
-                        "action_type": response.action_type.value,
-                    },
-                    "候选记录已保存为正式记录",
-                )
-            )
-        elif response.action_type == ChatActionType.bill_candidate and response.candidate is not None:
-            data = response.candidate.data
-            calls.append(
-                agent_tool_registry.trace(
-                    "classify_bill_category",
-                    {"text": preview, "transaction_type": data.transaction_type.value},
-                    f"category={data.category}",
-                )
-            )
-            calls.append(
-                agent_tool_registry.trace(
-                    "parse_bill_candidate",
-                    {"source": data.source.value},
-                    f"candidate_id={response.candidate_id}",
-                )
-            )
-        elif response.action_type == ChatActionType.task_candidate and response.candidate is not None:
-            calls.append(
-                agent_tool_registry.trace(
-                    "parse_task_candidate",
-                    {"source": response.candidate.data.source.value},
-                    f"candidate_id={response.candidate_id}",
-                )
-            )
-        elif response.action_type == ChatActionType.diary_candidate and response.candidate is not None:
-            calls.append(
-                agent_tool_registry.trace(
-                    "parse_diary_candidate",
-                    {"source": response.candidate.data.source.value},
-                    f"candidate_id={response.candidate_id}",
-                )
-            )
-        elif response.assistant_tool_id == "diary_reflection":
-            calls.append(
-                agent_tool_registry.trace(
-                    "generate_diary_reflection",
-                    {"text": preview},
-                    "已生成追问",
-                )
-            )
-        return calls
+    ) -> str:
+        for call in function_session.traces:
+            if call.name == "knowledge_search":
+                query = call.arguments.get("query")
+                if isinstance(query, str) and query.strip():
+                    return query
+        return self._preview_text(response.reply)
 
     def _looks_like_agent_capability_question(self, text: str) -> bool:
         normalized = text.casefold()
@@ -437,6 +380,8 @@ class RuleBasedChatService:
         self,
         text: str,
         route: ExternalChatRoute,
+        knowledge_hits: list[AgentKnowledgeHit],
+        function_session: AgentFunctionCallSession,
     ) -> ChatMessageResponse:
         if route.intent == ChatIntent.create_diary:
             return self._diary_candidate_response(
@@ -444,6 +389,7 @@ class RuleBasedChatService:
                 reply=route.reply,
                 route_confidence=route.confidence,
                 fallback_warnings=route.warnings,
+                function_session=function_session,
             )
         if route.intent == ChatIntent.create_task:
             return self._task_candidate_response(
@@ -451,6 +397,7 @@ class RuleBasedChatService:
                 reply=route.reply,
                 route_confidence=route.confidence,
                 fallback_warnings=route.warnings,
+                function_session=function_session,
             )
         if route.intent == ChatIntent.create_bill:
             return self._bill_candidate_response(
@@ -458,6 +405,7 @@ class RuleBasedChatService:
                 reply=route.reply,
                 route_confidence=route.confidence,
                 fallback_warnings=route.warnings,
+                function_session=function_session,
             )
         if route.intent == ChatIntent.diary_reflection:
             if self._looks_like_diary_entry(text):
@@ -466,12 +414,14 @@ class RuleBasedChatService:
                     reply=route.reply,
                     route_confidence=min(route.confidence, 0.78),
                     fallback_warnings=route.warnings,
+                    function_session=function_session,
                 )
             return self._diary_reflection_response(
                 text,
                 reply=route.reply,
                 route_confidence=route.confidence,
                 fallback_warnings=route.warnings,
+                function_session=function_session,
             )
         if route.intent == ChatIntent.unsupported and self._looks_like_diary(text):
             if self._looks_like_diary_entry(text):
@@ -479,14 +429,16 @@ class RuleBasedChatService:
                     text,
                     route_confidence=min(route.confidence, 0.7),
                     fallback_warnings=route.warnings,
+                    function_session=function_session,
                 )
             return self._diary_reflection_response(
                 text,
                 route_confidence=min(route.confidence, 0.7),
                 fallback_warnings=route.warnings,
+                function_session=function_session,
             )
         if route.intent == ChatIntent.knowledge_answer:
-            return self._agent_capability_response(text, agent_knowledge_base.search(text))
+            return self._agent_capability_response(text, knowledge_hits)
 
         return self._unsupported_response(
             reply=route.reply or "这条消息暂时不能直接转换成账单或提醒。",
@@ -498,6 +450,7 @@ class RuleBasedChatService:
         self,
         text: str,
         payload: ChatMessageRequest,
+        function_session: AgentFunctionCallSession,
     ) -> ChatMessageResponse | None:
         action_type = payload.context_action_type
         candidate_id = payload.context_candidate_id
@@ -517,9 +470,19 @@ class RuleBasedChatService:
             return None
 
         if self._is_discard_message(text):
-            return self._discard_context_candidate(action_type, candidate_id)
+            return function_session.call(
+                "discard_candidate",
+                {"candidate_id": str(candidate_id), "action_type": action_type.value},
+                lambda: self._discard_context_candidate(action_type, candidate_id),
+                self._context_action_result,
+            )
         if self._is_confirm_message(text):
-            return self._confirm_context_candidate(action_type, candidate_id, candidate)
+            return function_session.call(
+                "confirm_candidate",
+                {"candidate_id": str(candidate_id), "action_type": action_type.value},
+                lambda: self._confirm_context_candidate(action_type, candidate_id, candidate),
+                self._context_action_result,
+            )
 
         if action_type == ChatActionType.bill_candidate:
             updates = self._bill_updates_from_text(text, candidate)
@@ -528,7 +491,16 @@ class RuleBasedChatService:
                 updates,
                 bill_candidate_store.is_confirmable(candidate),
             ):
-                return self._update_bill_context_candidate(candidate_id, updates)
+                return function_session.call(
+                    "update_candidate",
+                    {
+                        "candidate_id": str(candidate_id),
+                        "action_type": action_type.value,
+                        "fields": ",".join(sorted(updates)),
+                    },
+                    lambda: self._update_bill_context_candidate(candidate_id, updates),
+                    self._context_action_result,
+                )
         if action_type == ChatActionType.task_candidate:
             updates = self._task_updates_from_text(text, candidate)
             if self._should_apply_context_update(
@@ -536,7 +508,16 @@ class RuleBasedChatService:
                 updates,
                 task_candidate_store.is_confirmable(candidate),
             ):
-                return self._update_task_context_candidate(candidate_id, updates)
+                return function_session.call(
+                    "update_candidate",
+                    {
+                        "candidate_id": str(candidate_id),
+                        "action_type": action_type.value,
+                        "fields": ",".join(sorted(updates)),
+                    },
+                    lambda: self._update_task_context_candidate(candidate_id, updates),
+                    self._context_action_result,
+                )
         if action_type == ChatActionType.diary_candidate:
             updates = self._diary_updates_from_text(text, candidate)
             if self._should_apply_context_update(
@@ -544,7 +525,16 @@ class RuleBasedChatService:
                 updates,
                 diary_candidate_store.is_confirmable(candidate),
             ):
-                return self._update_diary_context_candidate(candidate_id, updates)
+                return function_session.call(
+                    "update_candidate",
+                    {
+                        "candidate_id": str(candidate_id),
+                        "action_type": action_type.value,
+                        "fields": ",".join(sorted(updates)),
+                    },
+                    lambda: self._update_diary_context_candidate(candidate_id, updates),
+                    self._context_action_result,
+                )
 
         if self._contains_context_update_keyword(text):
             return self._unsupported_response(
@@ -1183,10 +1173,21 @@ class RuleBasedChatService:
         route_confidence: float | None = None,
         fallback_warnings: list[str] | None = None,
         force_rule_based: bool = False,
+        function_session: AgentFunctionCallSession | None = None,
     ) -> ChatMessageResponse:
+        session = function_session or agent_tool_registry.session()
         parser = self._rule_task_parser if force_rule_based else task_parser
-        candidate = task_candidate_store.save(
-            parser.parse_task(ParseTaskRequest(text=text, source=TaskSource.ai_chat))
+        candidate = session.call(
+            "parse_task_candidate",
+            {
+                "text": self._preview_text(text),
+                "source": TaskSource.ai_chat.value,
+                "parser": "rule_based" if force_rule_based else "configured",
+            },
+            lambda: task_candidate_store.save(
+                parser.parse_task(ParseTaskRequest(text=text, source=TaskSource.ai_chat))
+            ),
+            lambda item: f"candidate_id={item.candidate_id}, task_type={item.data.task_type.value}",
         )
         confirmable = task_candidate_store.is_confirmable(candidate)
         waiting_status = (
@@ -1222,10 +1223,30 @@ class RuleBasedChatService:
         route_confidence: float | None = None,
         fallback_warnings: list[str] | None = None,
         force_rule_based: bool = False,
+        function_session: AgentFunctionCallSession | None = None,
     ) -> ChatMessageResponse:
+        session = function_session or agent_tool_registry.session()
         parser = self._rule_bill_parser if force_rule_based else bill_parser
-        candidate = bill_candidate_store.save(
-            parser.parse_bill(ParseBillRequest(text=text, source=BillSource.ai_chat))
+        candidate = session.call(
+            "parse_bill_candidate",
+            {
+                "text": self._preview_text(text),
+                "source": BillSource.ai_chat.value,
+                "parser": "rule_based" if force_rule_based else "configured",
+            },
+            lambda: bill_candidate_store.save(
+                parser.parse_bill(ParseBillRequest(text=text, source=BillSource.ai_chat))
+            ),
+            lambda item: f"candidate_id={item.candidate_id}, amount={item.data.amount}, category={item.data.category}",
+        )
+        session.call(
+            "classify_bill_category",
+            {
+                "text": self._preview_text(text),
+                "transaction_type": candidate.data.transaction_type.value,
+            },
+            lambda: bill_category_classifier.classify(text, candidate.data.transaction_type),
+            lambda match: f"category={match.category}, confidence={match.confidence}, source={match.source}",
         )
         confirmable = bill_candidate_store.is_confirmable(candidate)
         waiting_status = (
@@ -1260,10 +1281,18 @@ class RuleBasedChatService:
         reply: str | None = None,
         route_confidence: float | None = None,
         fallback_warnings: list[str] | None = None,
+        function_session: AgentFunctionCallSession | None = None,
     ) -> ChatMessageResponse:
+        session = function_session or agent_tool_registry.session()
+        resolved_reply = session.call(
+            "generate_diary_reflection",
+            {"text": self._preview_text(text)},
+            lambda: reply or self._diary_reflection_reply(text),
+            lambda _: "已生成追问",
+        )
         return ChatMessageResponse(
             message_id=uuid4(),
-            reply=reply or self._diary_reflection_reply(text),
+            reply=resolved_reply,
             intent=ChatIntent.diary_reflection,
             confidence=route_confidence or 0.72,
             assistant_tool_id="diary_reflection",
@@ -1283,8 +1312,15 @@ class RuleBasedChatService:
         reply: str | None = None,
         route_confidence: float | None = None,
         fallback_warnings: list[str] | None = None,
+        function_session: AgentFunctionCallSession | None = None,
     ) -> ChatMessageResponse:
-        candidate = diary_candidate_store.save(self._parse_diary_candidate(text))
+        session = function_session or agent_tool_registry.session()
+        candidate = session.call(
+            "parse_diary_candidate",
+            {"text": self._preview_text(text)},
+            lambda: diary_candidate_store.save(self._parse_diary_candidate(text)),
+            lambda item: f"candidate_id={item.candidate_id}, mood={item.data.mood.value}",
+        )
         return ChatMessageResponse(
             message_id=uuid4(),
             reply=reply or "我先整理成一篇待确认日记，你确认后再保存到日记本。",
@@ -1385,6 +1421,17 @@ class RuleBasedChatService:
         if route_confidence is None:
             return candidate_confidence
         return round(min(candidate_confidence, route_confidence), 2)
+
+    def _context_action_result(self, response: ChatMessageResponse) -> str:
+        if response.created_bill or response.created_task or response.created_diary:
+            return "候选记录已保存为正式记录"
+        if response.discarded:
+            return "候选记录已丢弃"
+        if response.updated_existing_candidate:
+            return "候选记录已更新"
+        if response.need_user_confirmation:
+            return "候选记录等待确认或补充"
+        return "已完成上下文操作"
 
     def _should_force_rule_based_parser(self, warnings: list[str]) -> bool:
         return any(

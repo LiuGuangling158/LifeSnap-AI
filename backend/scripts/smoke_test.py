@@ -289,6 +289,11 @@ def _check_workflow_regressions(client: ApiClient) -> None:
 def _check_agent_context_workflow(client: ApiClient) -> None:
     status, bill_body = client.request("POST", "/chat/messages", {"message": "记一笔早餐"})
     _assert(status == 200 and bill_body["intent"] == "create_bill", "Agent should start a bill candidate")
+    _assert_agent_function_calls(
+        bill_body,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "parse_bill_candidate", "classify_bill_category"},
+        "Agent bill context setup",
+    )
     bill_candidate_id = bill_body["candidate_id"]
     _assert(bill_body["candidate"]["data"]["amount"] is None, "Bill candidate should wait for amount")
 
@@ -303,6 +308,11 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
     )
     _assert(status == 200, "Agent should update an existing bill candidate")
     _assert(updated_bill["updated_existing_candidate"] is True, "Bill update should be marked as contextual")
+    _assert_agent_function_calls(
+        updated_bill,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "update_candidate"},
+        "Agent bill context update",
+    )
     _assert(updated_bill["candidate_id"] == bill_candidate_id, "Bill context update should keep candidate id")
     bill_data = updated_bill["candidate"]["data"]
     _assert(float(bill_data["amount"]) == 18, "Bill context update should fill amount")
@@ -320,6 +330,11 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
         },
     )
     _assert(status == 200, "Agent should confirm a bill candidate from chat context")
+    _assert_agent_function_calls(
+        confirmed_bill,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "confirm_candidate"},
+        "Agent bill context confirmation",
+    )
     _assert(confirmed_bill["created_bill"]["merchant"] == "便利蜂", "Context-confirmed bill should be saved")
     status, _ = client.request("GET", f"/agent/bill-candidates/{bill_candidate_id}")
     _assert(status == 404, "Context-confirmed bill candidate should leave pending list")
@@ -327,6 +342,11 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
 
     status, task_body = client.request("POST", "/chat/messages", {"message": "提醒我提交周报"})
     _assert(status == 200 and task_body["intent"] == "create_task", "Agent should start a task candidate")
+    _assert_agent_function_calls(
+        task_body,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "parse_task_candidate"},
+        "Agent task context setup",
+    )
     task_candidate_id = task_body["candidate_id"]
     _assert(task_body["candidate"]["data"]["remind_at"] is None, "Reminder should wait for time")
     status, updated_task = client.request(
@@ -339,6 +359,11 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
         },
     )
     _assert(status == 200 and updated_task["updated_existing_candidate"] is True, "Agent should update reminder time")
+    _assert_agent_function_calls(
+        updated_task,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "update_candidate"},
+        "Agent task context update",
+    )
     _assert(updated_task["candidate"]["data"]["remind_at"], "Reminder context update should fill remind_at")
     status, discarded_task = client.request(
         "POST",
@@ -350,6 +375,11 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
         },
     )
     _assert(status == 200 and discarded_task["discarded"] is True, "Agent should discard a task candidate from chat context")
+    _assert_agent_function_calls(
+        discarded_task,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "discard_candidate"},
+        "Agent task context discard",
+    )
     status, _ = client.request("GET", f"/agent/task-candidates/{task_candidate_id}")
     _assert(status == 404, "Context-discarded task candidate should leave pending list")
 
@@ -359,6 +389,11 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
         {"message": "写日记：今天完成项目复盘，心情很开心"},
     )
     _assert(status == 200 and diary_body["intent"] == "create_diary", "Agent should start a diary candidate")
+    _assert_agent_function_calls(
+        diary_body,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "parse_diary_candidate"},
+        "Agent diary context setup",
+    )
     diary_candidate_id = diary_body["candidate_id"]
     status, updated_diary = client.request(
         "POST",
@@ -370,6 +405,11 @@ def _check_agent_context_workflow(client: ApiClient) -> None:
         },
     )
     _assert(status == 200 and updated_diary["updated_existing_candidate"] is True, "Agent should update diary metadata")
+    _assert_agent_function_calls(
+        updated_diary,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "update_candidate"},
+        "Agent diary context update",
+    )
     diary_data = updated_diary["candidate"]["data"]
     _assert(diary_data["title"] == "项目复盘完成", "Diary context update should change title")
     _assert(diary_data["weather"] == "晴天", "Diary context update should change weather")
@@ -552,7 +592,7 @@ def _check_agent_runtime_profile(client: ApiClient) -> None:
     _assert(runtime["fine_tuning_ready"], "Agent runtime should expose fine-tuning readiness")
     function_names = {tool["name"] for tool in runtime["function_tools"]}
     _assert(
-        {"knowledge_search", "parse_bill_candidate", "classify_bill_category", "confirm_candidate"}
+        {"privacy_guard", "knowledge_search", "parse_bill_candidate", "classify_bill_category", "confirm_candidate"}
         <= function_names,
         "Agent runtime should expose core callable tools",
     )
@@ -572,6 +612,8 @@ def _check_agent_runtime_profile(client: ApiClient) -> None:
     _assert(status == 200, "Agent fine-tuning examples should return 200")
     _assert(dataset["total"] >= 1, "Agent fine-tuning dataset should use local records")
     _assert(dataset["examples"][0]["messages"], "Agent fine-tuning examples should include messages")
+    target_content = dataset["examples"][0]["messages"][-1]["content"]
+    _assert("created_at" not in target_content and "updated_at" not in target_content, "Fine-tuning examples should export candidate targets, not storage metadata")
 
     status, answer = client.request(
         "POST",
@@ -581,9 +623,22 @@ def _check_agent_runtime_profile(client: ApiClient) -> None:
     _assert(status == 200, "Agent capability chat should return 200")
     _assert(answer["intent"] == "knowledge_answer", "Agent should answer capability questions from knowledge")
     _assert(answer["knowledge_hits"], "Agent capability answer should expose knowledge hits")
-    call_names = {call["name"] for call in answer["function_calls"]}
-    _assert("knowledge_search" in call_names, "Agent chat should expose knowledge search function call")
+    _assert_agent_function_calls(answer, {"privacy_guard", "knowledge_search"}, "Agent capability chat")
     _assert(answer["model_trace"]["fine_tuning_status"], "Agent chat should expose model/fine-tuning trace")
+
+    status, bill_answer = client.request(
+        "POST",
+        "/chat/messages",
+        {"message": "星巴克咖啡花了 38 元"},
+    )
+    _assert(status == 200 and bill_answer["intent"] == "create_bill", "Agent bill chat should return a candidate")
+    _assert(bill_answer["candidate"]["data"]["category"] == "餐饮", "Agent bill chat should infer category")
+    _assert_agent_function_calls(
+        bill_answer,
+        {"privacy_guard", "knowledge_search", "route_chat_intent", "parse_bill_candidate", "classify_bill_category"},
+        "Agent bill chat",
+    )
+    client.request("DELETE", f"/agent/bill-candidates/{bill_answer['candidate_id']}")
 
 
 def _check_integration_diagnostics(client: ApiClient) -> None:
@@ -2199,6 +2254,18 @@ def _free_port() -> int:
 def _assert(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def _assert_agent_function_calls(
+    response: dict[str, Any],
+    expected_names: set[str],
+    context: str,
+) -> None:
+    calls = response.get("function_calls") or []
+    _assert(calls, f"{context} should include function call traces")
+    call_names = {call.get("name") for call in calls if isinstance(call, dict)}
+    missing = expected_names - call_names
+    _assert(not missing, f"{context} missing function calls: {sorted(missing)}")
 
 
 if __name__ == "__main__":

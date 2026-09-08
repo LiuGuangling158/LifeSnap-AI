@@ -23,6 +23,7 @@ from app.schemas.agent import (
 from app.schemas.chat import ChatIntent
 from app.schemas.task import TaskPriority, TaskType
 from app.services.agent_knowledge_base import agent_knowledge_base
+from app.services.agent_tool_registry import agent_tool_registry
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.settings_store import settings_store
 
@@ -250,26 +251,69 @@ class ExternalAiParserService:
         source: str,
     ) -> tuple[dict[str, Any] | None, list[str]]:
         endpoint = self._llm_chat_completions_url(settings.llm_agent_base_url)
-        if endpoint is None or settings.llm_agent_model is None:
+        if endpoint is None or settings.llm_agent_runtime_model is None:
             return None, []
 
+        messages = [
+            {"role": "system", "content": self._llm_system_prompt(kind)},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    self._llm_user_payload(kind, text, source),
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        request_body = self._llm_request_body(kind, messages, include_tools=True)
+        response_body, request_warnings = self._post_llm_agent_json(endpoint, request_body)
+        if response_body is None and request_body.get("tools"):
+            fallback_body = self._llm_request_body(kind, messages, include_tools=False)
+            response_body, fallback_warnings = self._post_llm_agent_json(endpoint, fallback_body)
+            if response_body is None:
+                return None, request_warnings or fallback_warnings
+            request_warnings = ["llm_agent_function_calling_unavailable"]
+        if response_body is None:
+            return None, request_warnings
+
+        try:
+            response_body = self._complete_llm_tool_calls(
+                endpoint,
+                kind,
+                text,
+                messages,
+                response_body,
+            )
+            content = self._llm_response_content(response_body)
+            return self._json_object_from_text(content), request_warnings
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return None, ["llm_agent_invalid_response", "external_ai_parser_invalid_response"]
+
+    def _llm_request_body(
+        self,
+        kind: str,
+        messages: list[dict[str, Any]],
+        *,
+        include_tools: bool,
+    ) -> dict[str, Any]:
         request_body: dict[str, Any] = {
             "model": settings.llm_agent_runtime_model,
-            "messages": [
-                {"role": "system", "content": self._llm_system_prompt(kind)},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        self._llm_user_payload(kind, text, source),
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
+            "messages": messages,
             "temperature": settings.llm_agent_temperature,
         }
         if settings.llm_agent_response_format.casefold() == "json_object":
             request_body["response_format"] = {"type": "json_object"}
+        if include_tools:
+            tools = agent_tool_registry.llm_tool_definitions(kind)
+            if tools:
+                request_body["tools"] = tools
+                request_body["tool_choice"] = "auto"
+        return request_body
 
+    def _post_llm_agent_json(
+        self,
+        endpoint: str,
+        request_body: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, list[str]]:
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -286,15 +330,145 @@ class ExternalAiParserService:
         try:
             with urlopen(request, timeout=settings.llm_agent_timeout_seconds) as response:
                 response_text = response.read().decode("utf-8")
-        except (HTTPError, URLError, TimeoutError, OSError):
+            response_body = json.loads(response_text)
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
             return None, ["llm_agent_failed", "external_ai_parser_failed"]
 
-        try:
-            response_body = json.loads(response_text)
-            content = self._llm_response_content(response_body)
-            return self._json_object_from_text(content), []
-        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+        if not isinstance(response_body, dict):
             return None, ["llm_agent_invalid_response", "external_ai_parser_invalid_response"]
+        return response_body, []
+
+    def _complete_llm_tool_calls(
+        self,
+        endpoint: str,
+        kind: str,
+        original_text: str,
+        messages: list[dict[str, Any]],
+        response_body: dict[str, Any],
+    ) -> dict[str, Any]:
+        assistant_message = self._llm_response_message(response_body)
+        tool_calls = self._llm_tool_calls(assistant_message)
+        if not tool_calls:
+            return response_body
+
+        tool_messages = self._llm_tool_messages(tool_calls, original_text)
+        if not tool_messages:
+            return response_body
+
+        follow_up_messages = [
+            *messages,
+            self._assistant_tool_call_message(assistant_message, tool_calls),
+            *tool_messages,
+        ]
+        follow_up_body = self._llm_request_body(kind, follow_up_messages, include_tools=True)
+        follow_up_response, _ = self._post_llm_agent_json(endpoint, follow_up_body)
+        if follow_up_response is None:
+            raise ValueError("LLM tool-call follow-up failed.")
+        return follow_up_response
+
+    def _assistant_tool_call_message(
+        self,
+        message: dict[str, Any],
+        tool_calls: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        content = message.get("content")
+        return {
+            "role": "assistant",
+            "content": content if isinstance(content, str) else None,
+            "tool_calls": tool_calls,
+        }
+
+    def _llm_tool_calls(self, message: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_tool_calls = message.get("tool_calls")
+        if not isinstance(raw_tool_calls, list):
+            return []
+
+        tool_calls: list[dict[str, Any]] = []
+        for raw_call in raw_tool_calls[:4]:
+            if not isinstance(raw_call, dict):
+                continue
+            function = raw_call.get("function")
+            if not isinstance(function, dict):
+                continue
+            call_id = raw_call.get("id")
+            name = function.get("name")
+            if not isinstance(call_id, str) or not isinstance(name, str):
+                continue
+            arguments = function.get("arguments")
+            tool_calls.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": arguments if isinstance(arguments, str) else "{}",
+                    },
+                }
+            )
+        return tool_calls
+
+    def _llm_tool_messages(
+        self,
+        tool_calls: list[dict[str, Any]],
+        original_text: str,
+    ) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = []
+        for tool_call in tool_calls:
+            function = tool_call["function"]
+            name = function["name"]
+            arguments = self._tool_call_arguments(function.get("arguments"))
+            result = self._execute_llm_read_tool(name, arguments, original_text)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call["id"],
+                    "content": json.dumps(result, ensure_ascii=False),
+                }
+            )
+        return messages
+
+    def _tool_call_arguments(self, raw_arguments: Any) -> dict[str, Any]:
+        if not isinstance(raw_arguments, str) or not raw_arguments.strip():
+            return {}
+        try:
+            parsed = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return parsed
+
+    def _execute_llm_read_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        original_text: str,
+    ) -> dict[str, Any]:
+        if name == "knowledge_search":
+            query = self._optional_text(arguments.get("query")) or original_text
+            limit = self._tool_limit(arguments.get("limit"), default=3, maximum=5)
+            hits = agent_knowledge_base.search(query, limit=limit)
+            return {"hits": [hit.model_dump(mode="json") for hit in hits]}
+
+        if name == "classify_bill_category":
+            text = self._optional_text(arguments.get("text")) or original_text
+            transaction_type = self._optional_text(arguments.get("transaction_type"))
+            match = bill_category_classifier.classify(text, transaction_type)
+            return {
+                "category": match.category,
+                "confidence": match.confidence,
+                "source": match.source,
+                "matched_keywords": list(match.matched_keywords),
+            }
+
+        return {"error": "unsupported_agent_tool", "name": name}
+
+    def _tool_limit(self, raw_value: Any, *, default: int, maximum: int) -> int:
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            return default
+        return max(1, min(maximum, value))
 
     def _provider_payload(self, kind: str, text: str, source: str) -> dict[str, Any]:
         return {
@@ -389,6 +563,7 @@ class ExternalAiParserService:
             "未知字段用 null，不要编造金额、商户或时间。"
             "所有 confidence 和 field_confidence 必须在 0 到 1 之间。"
             "source 以用户 payload 为准，不要改写。"
+            "如果接口提供了 tools，优先通过 tool_calls 检索知识或判断分类，再输出最终 JSON。"
         )
         if kind == "chat_intent":
             return (

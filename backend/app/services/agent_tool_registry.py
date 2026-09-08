@@ -1,12 +1,26 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from app.schemas.agent_runtime import AgentFunctionCallTrace, AgentFunctionToolCapability
+
+T = TypeVar("T")
+
+
+class AgentToolNotFoundError(ValueError):
+    pass
 
 
 class AgentToolRegistry:
     _tools = (
+        AgentFunctionToolCapability(
+            name="privacy_guard",
+            label="检查隐私授权",
+            description="检查当前隐私设置是否允许 Agent 对文本做解析。",
+            input_schema={"scope": "string"},
+            side_effect="read",
+        ),
         AgentFunctionToolCapability(
             name="knowledge_search",
             label="检索知识库",
@@ -93,6 +107,15 @@ class AgentToolRegistry:
                 return tool
         return None
 
+    def require(self, name: str) -> AgentFunctionToolCapability:
+        tool = self.get(name)
+        if tool is None:
+            raise AgentToolNotFoundError(f"Unknown Agent tool: {name}")
+        return tool
+
+    def session(self) -> AgentFunctionCallSession:
+        return AgentFunctionCallSession(self)
+
     def trace(
         self,
         name: str,
@@ -100,14 +123,104 @@ class AgentToolRegistry:
         result: str = "completed",
         status: str = "completed",
     ) -> AgentFunctionCallTrace:
-        tool = self.get(name)
+        tool = self.require(name)
         return AgentFunctionCallTrace(
             name=name,
-            label=tool.label if tool is not None else name,
+            label=tool.label,
             arguments=arguments or {},
-            result=result,
+            result=self._clip_result(result),
             status=status,
         )
+
+    def llm_tool_definitions(self, kind: str) -> list[dict[str, Any]]:
+        names_by_kind = {
+            "chat_intent": ("knowledge_search",),
+            "bill": ("knowledge_search", "classify_bill_category"),
+            "task": ("knowledge_search",),
+        }
+        return [
+            self._llm_tool_definition(self.require(name))
+            for name in names_by_kind.get(kind, ("knowledge_search",))
+        ]
+
+    def _llm_tool_definition(self, tool: AgentFunctionToolCapability) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": self._json_schema(tool.input_schema),
+            },
+        }
+
+    def _json_schema(self, input_schema: dict[str, Any]) -> dict[str, Any]:
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for name, raw_type in input_schema.items():
+            json_type = self._json_schema_type(str(raw_type))
+            properties[name] = {"type": json_type}
+            if name in {"query", "text", "message"}:
+                required.append(name)
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    def _json_schema_type(self, raw_type: str) -> str:
+        if raw_type in {"integer"}:
+            return "integer"
+        if raw_type in {"number", "float"}:
+            return "number"
+        if raw_type in {"boolean", "bool"}:
+            return "boolean"
+        if raw_type in {"object"}:
+            return "object"
+        return "string"
+
+    def _clip_result(self, result: str, max_length: int = 180) -> str:
+        cleaned = " ".join(str(result or "completed").split())
+        if len(cleaned) <= max_length:
+            return cleaned
+        return f"{cleaned[: max_length - 1]}…"
+
+
+class AgentFunctionCallSession:
+    def __init__(self, registry: AgentToolRegistry) -> None:
+        self._registry = registry
+        self._calls: list[AgentFunctionCallTrace] = []
+
+    @property
+    def traces(self) -> list[AgentFunctionCallTrace]:
+        return list(self._calls)
+
+    def call(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None,
+        handler: Callable[[], T],
+        result_formatter: Callable[[T], str] | None = None,
+    ) -> T:
+        try:
+            value = handler()
+        except Exception as exc:
+            self.record(name, arguments, f"调用失败：{exc.__class__.__name__}", status="failed")
+            raise
+        result = result_formatter(value) if result_formatter is not None else "completed"
+        self.record(name, arguments, result)
+        return value
+
+    def record(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        result: str = "completed",
+        status: str = "completed",
+    ) -> AgentFunctionCallTrace:
+        trace = self._registry.trace(name, arguments, result, status)
+        self._calls.append(trace)
+        return trace
 
 
 agent_tool_registry = AgentToolRegistry()
