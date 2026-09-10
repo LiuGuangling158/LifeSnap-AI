@@ -500,6 +500,23 @@ class ExternalAiParserService:
                 "category_percentage": str(analysis.category_percentage)
                 if analysis.category_percentage is not None
                 else None,
+                "previous_period_label": analysis.previous_period_label,
+                "previous_total_expense": str(analysis.previous_total_expense),
+                "expense_delta": str(analysis.expense_delta),
+                "expense_delta_percentage": str(analysis.expense_delta_percentage)
+                if analysis.expense_delta_percentage is not None
+                else None,
+                "previous_category_amount": str(analysis.previous_category_amount)
+                if analysis.previous_category_amount is not None
+                else None,
+                "category_delta": str(analysis.category_delta) if analysis.category_delta is not None else None,
+                "category_delta_percentage": str(analysis.category_delta_percentage)
+                if analysis.category_delta_percentage is not None
+                else None,
+                "budget_amount": str(analysis.budget_amount),
+                "budget_usage_percentage": str(analysis.budget_usage_percentage),
+                "budget_remaining": str(analysis.budget_remaining),
+                "budget_warning_threshold_percent": analysis.budget_warning_threshold_percent,
                 "top_category": analysis.top_category,
                 "top_category_amount": str(analysis.top_category_amount)
                 if analysis.top_category_amount is not None
@@ -508,6 +525,8 @@ class ExternalAiParserService:
                 "top_merchant_amount": str(analysis.top_merchant_amount)
                 if analysis.top_merchant_amount is not None
                 else None,
+                "top_day": analysis.top_day.isoformat() if analysis.top_day else None,
+                "top_day_expense": str(analysis.top_day_expense) if analysis.top_day_expense is not None else None,
                 "reply": bill_analysis_service.reply(analysis),
             }
 
@@ -620,7 +639,7 @@ class ExternalAiParserService:
             return (
                 shared
                 + "判断用户意图，只允许 create_bill、create_task、create_diary、diary_reflection、analyze_bills、knowledge_answer、unsupported。"
-                + "当用户询问本月或某月账单、支出、收入、分类占比、商户排行或消费分析时，返回 analyze_bills，不要编造统计数字。"
+                + "当用户询问本月或某月账单、支出、收入、分类占比、商户排行、趋势、环比、预算或消费分析时，返回 analyze_bills，不要编造统计数字。"
                 + "当用户询问 Agent 自身、RAG 知识库、函数调用、工具链、模型策略或微调时，返回 knowledge_answer。"
                 + "订阅、保修和非账单类跨记录搜索属于非 MVP，除非能降级为普通账单或待办，否则返回 unsupported。"
                 + "如果缺少关键信息，reply 要用一句中文追问。"

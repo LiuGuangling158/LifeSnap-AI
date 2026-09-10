@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -45,6 +47,36 @@ class ChatMessageRequest(BaseModel):
     context_candidate_id: UUID | None = None
 
 
+class ChatBillAnalysis(BaseModel):
+    period_label: str
+    category: str | None = None
+    bill_count: int
+    total_expense: Decimal
+    total_income: Decimal
+    total_refund: Decimal
+    net_amount: Decimal
+    category_amount: Decimal | None = None
+    category_count: int | None = None
+    category_percentage: Decimal | None = None
+    previous_period_label: str
+    previous_total_expense: Decimal
+    expense_delta: Decimal
+    expense_delta_percentage: Decimal | None = None
+    previous_category_amount: Decimal | None = None
+    category_delta: Decimal | None = None
+    category_delta_percentage: Decimal | None = None
+    budget_amount: Decimal
+    budget_usage_percentage: Decimal
+    budget_remaining: Decimal
+    budget_warning_threshold_percent: int
+    top_category: str | None = None
+    top_category_amount: Decimal | None = None
+    top_merchant: str | None = None
+    top_merchant_amount: Decimal | None = None
+    top_day: date | None = None
+    top_day_expense: Decimal | None = None
+
+
 class ChatMessageResponse(BaseModel):
     message_id: UUID
     reply: str
@@ -54,6 +86,7 @@ class ChatMessageResponse(BaseModel):
     action_type: ChatActionType = ChatActionType.none
     candidate_id: UUID | None = None
     candidate: ParseBillResponse | ParseTaskResponse | ParseDiaryResponse | None = None
+    analysis: ChatBillAnalysis | None = None
     warnings: list[str] = []
     agent_steps: list[ChatAgentStep] = Field(default_factory=list)
     knowledge_hits: list[AgentKnowledgeHit] = Field(default_factory=list)

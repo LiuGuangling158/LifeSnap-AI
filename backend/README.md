@@ -536,8 +536,8 @@ Supported `kind` values are `bill`, `task`, and `chat_intent`. `bill` and
 `task` return structured candidate fields. `chat_intent` routes a chat message
 to `create_bill`, `create_task`, `create_diary`, `diary_reflection`,
 `analyze_bills`, `knowledge_answer`, or `unsupported`; the backend then reuses
-the matching candidate flow, reads verified bill statistics, or answers from its
-knowledge base.
+the matching candidate flow, reads verified bill statistics, calculates trend
+and budget context, or answers from its knowledge base.
 
 Inspect the runtime profile, search the local knowledge base, or export
 fine-tuning examples:
@@ -643,6 +643,10 @@ The endpoint returns one of five outcomes:
 - a diary reflection prompt
 - a read-only bill analysis answer
 - an MVP fallback message for unsupported intents
+
+Bill analysis responses include a structured `analysis` object with period,
+category amount, monthly totals, previous-month deltas, budget usage and top
+spending highlights. The object is read-only and does not create candidates.
 
 When `LIFESNAP_AI_PARSE_ENDPOINT` is configured and privacy settings allow
 external processing, chat intent routing first calls the external provider with

@@ -20,6 +20,7 @@ from app.schemas.chat import (
     ChatActionType,
     ChatAgentStep,
     ChatAgentStepStatus,
+    ChatBillAnalysis,
     ChatIntent,
     ChatMessageRequest,
     ChatMessageResponse,
@@ -1327,7 +1328,7 @@ class RuleBasedChatService:
         function_session: AgentFunctionCallSession | None = None,
     ) -> ChatMessageResponse:
         session = function_session or agent_tool_registry.session()
-        analysis = session.call(
+        analysis_result = session.call(
             "analyze_bills",
             {"text": self._preview_text(text)},
             lambda: bill_analysis_service.analyze(text),
@@ -1335,19 +1336,51 @@ class RuleBasedChatService:
         )
         return ChatMessageResponse(
             message_id=uuid4(),
-            reply=bill_analysis_service.reply(analysis),
+            reply=bill_analysis_service.reply(analysis_result),
             intent=ChatIntent.analyze_bills,
             confidence=route_confidence or 0.86,
             assistant_tool_id="bill_analysis",
             action_type=ChatActionType.none,
             candidate=None,
+            analysis=self._chat_bill_analysis(analysis_result),
             warnings=self._dedupe(fallback_warnings or []),
             agent_steps=[
                 self._agent_step("理解意图", "识别为账单分析查询。"),
-                self._agent_step("读取统计", f"已读取 {analysis.period_label} 的本地账单统计。"),
+                self._agent_step("读取统计", f"已读取 {analysis_result.period_label} 的本地账单统计。"),
                 self._agent_step("生成结论", "基于确定性金额生成分析，没有修改任何记录。"),
             ],
             need_user_confirmation=False,
+        )
+
+    def _chat_bill_analysis(self, analysis) -> ChatBillAnalysis:
+        return ChatBillAnalysis(
+            period_label=analysis.period_label,
+            category=analysis.category,
+            bill_count=analysis.bill_count,
+            total_expense=analysis.total_expense,
+            total_income=analysis.total_income,
+            total_refund=analysis.total_refund,
+            net_amount=analysis.net_amount,
+            category_amount=analysis.category_amount,
+            category_count=analysis.category_count,
+            category_percentage=analysis.category_percentage,
+            previous_period_label=analysis.previous_period_label,
+            previous_total_expense=analysis.previous_total_expense,
+            expense_delta=analysis.expense_delta,
+            expense_delta_percentage=analysis.expense_delta_percentage,
+            previous_category_amount=analysis.previous_category_amount,
+            category_delta=analysis.category_delta,
+            category_delta_percentage=analysis.category_delta_percentage,
+            budget_amount=analysis.budget_amount,
+            budget_usage_percentage=analysis.budget_usage_percentage,
+            budget_remaining=analysis.budget_remaining,
+            budget_warning_threshold_percent=analysis.budget_warning_threshold_percent,
+            top_category=analysis.top_category,
+            top_category_amount=analysis.top_category_amount,
+            top_merchant=analysis.top_merchant,
+            top_merchant_amount=analysis.top_merchant_amount,
+            top_day=analysis.top_day,
+            top_day_expense=analysis.top_day_expense,
         )
 
     def _diary_reflection_response(

@@ -3584,6 +3584,7 @@ function normalizeStoredChatResponse(response) {
     action_type: String(response.action_type ?? "none"),
     candidate_id: response.candidate_id ? String(response.candidate_id) : null,
     candidate: response.candidate ?? null,
+    analysis: normalizeChatAnalysis(response.analysis),
     warnings: Array.isArray(response.warnings) ? response.warnings.map(String).slice(0, 20) : [],
     need_user_confirmation: Boolean(response.need_user_confirmation),
     updated_existing_candidate: Boolean(response.updated_existing_candidate),
@@ -3601,6 +3602,41 @@ function normalizeStoredChatResponse(response) {
     agent_steps: Array.isArray(response.agent_steps)
       ? response.agent_steps.map(normalizeStoredAgentStep).filter(Boolean).slice(0, 6)
       : [],
+  };
+}
+
+function normalizeChatAnalysis(analysis) {
+  if (!analysis || typeof analysis !== "object") {
+    return null;
+  }
+  return {
+    period_label: String(analysis.period_label ?? "本期").slice(0, 40),
+    category: analysis.category ? String(analysis.category).slice(0, 40) : null,
+    bill_count: Number.isFinite(Number(analysis.bill_count)) ? Number(analysis.bill_count) : 0,
+    total_expense: analysis.total_expense ?? 0,
+    total_income: analysis.total_income ?? 0,
+    total_refund: analysis.total_refund ?? 0,
+    net_amount: analysis.net_amount ?? 0,
+    category_amount: analysis.category_amount ?? null,
+    category_count: analysis.category_count ?? null,
+    category_percentage: analysis.category_percentage ?? null,
+    previous_period_label: String(analysis.previous_period_label ?? "上期").slice(0, 40),
+    previous_total_expense: analysis.previous_total_expense ?? 0,
+    expense_delta: analysis.expense_delta ?? 0,
+    expense_delta_percentage: analysis.expense_delta_percentage ?? null,
+    previous_category_amount: analysis.previous_category_amount ?? null,
+    category_delta: analysis.category_delta ?? null,
+    category_delta_percentage: analysis.category_delta_percentage ?? null,
+    budget_amount: analysis.budget_amount ?? 0,
+    budget_usage_percentage: analysis.budget_usage_percentage ?? 0,
+    budget_remaining: analysis.budget_remaining ?? 0,
+    budget_warning_threshold_percent: Number(analysis.budget_warning_threshold_percent ?? 80),
+    top_category: analysis.top_category ? String(analysis.top_category).slice(0, 40) : null,
+    top_category_amount: analysis.top_category_amount ?? null,
+    top_merchant: analysis.top_merchant ? String(analysis.top_merchant).slice(0, 80) : null,
+    top_merchant_amount: analysis.top_merchant_amount ?? null,
+    top_day: analysis.top_day ? String(analysis.top_day) : null,
+    top_day_expense: analysis.top_day_expense ?? null,
   };
 }
 
@@ -6529,7 +6565,7 @@ function renderAssistantCapabilities() {
           <span>${icon(iconForAssistantTool(tool.id))}</span>
           <div>
             <strong>${escapeHtml(tool.label)}</strong>
-            <small>${escapeHtml(tool.requires_confirmation ? "需要确认" : "直接引导")}</small>
+            <small>${escapeHtml(tool.requires_confirmation ? "需要确认" : "只读执行")}</small>
           </div>
         </button>
       `).join("")}
@@ -6580,6 +6616,7 @@ function renderAssistantQuickPrompts() {
   return `<div class="assistant-prompts" aria-label="试试这些例子">
     <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">${icon("utensils")}记一笔午餐</button>
     <button type="button" data-chat-example="这个月餐饮花了多少？">${icon("pie-chart")}查消费</button>
+    <button type="button" data-chat-example="这个月消费趋势和预算情况怎么样？">${icon("pie-chart")}看预算</button>
     <button type="button" data-chat-example="工资收入 6800 元">${icon("income")}记一笔收入</button>
     <button type="button" data-chat-example="你有 RAG 知识库和函数调用吗？">${icon("search")}问问 Agent 链路</button>
     <button type="button" data-chat-example="提醒我明天 10 点开会">${icon("bell")}记一个待办</button>
@@ -6619,6 +6656,7 @@ function renderChatMessage(message, index) {
         ${renderChatMessageAttachments(message.attachments)}
         ${role === "assistant" ? renderChatSelectedTool(message.response) : ""}
         ${role === "assistant" ? renderChatAgentSteps(message.response?.agent_steps) : ""}
+        ${role === "assistant" ? renderChatAnalysis(message.response) : ""}
         ${role === "assistant" ? renderChatRuntimeTrace(message.response) : ""}
         ${renderChatCandidate(message)}
         ${renderChatResult(message)}
@@ -6935,6 +6973,80 @@ function renderChatResult(message) {
   }
 
   return "";
+}
+
+function renderChatAnalysis(response) {
+  const analysis = response?.analysis;
+  if (!analysis) {
+    return "";
+  }
+  const spendValue = analysis.category ? analysis.category_amount : analysis.total_expense;
+  const spendLabel = analysis.category ? `${analysis.category}支出` : "本期支出";
+  const changeLabel = chatAnalysisChangeLabel(analysis);
+  const budgetLabel = chatAnalysisBudgetLabel(analysis);
+  const rows = [
+    ["周期", analysis.category ? `${analysis.period_label} · ${analysis.category}` : analysis.period_label],
+    [spendLabel, money(spendValue)],
+    ["收入", money(analysis.total_income)],
+    ["账单", `${Number(analysis.bill_count ?? 0)} 笔`],
+  ];
+  if (analysis.category) {
+    rows.push(["分类占比", `${analysis.category_percentage ?? 0}%`]);
+  } else if (analysis.top_category) {
+    rows.push(["最高分类", `${analysis.top_category} · ${money(analysis.top_category_amount)}`]);
+  }
+  if (budgetLabel) {
+    rows.push(["预算", budgetLabel]);
+  }
+  if (changeLabel) {
+    rows.push(["环比", changeLabel]);
+  }
+  if (analysis.top_day && analysis.top_day_expense !== null) {
+    rows.push(["单日最高", `${formatMonthDay(analysis.top_day)} · ${money(analysis.top_day_expense)}`]);
+  }
+
+  return `
+    <div class="chat-result-card chat-analysis-card">
+      <div class="chat-result-head">
+        <span>${icon("pie-chart")}</span>
+        <strong>账单分析摘要</strong>
+      </div>
+      <div class="chat-result-grid">
+        ${rows.map(([label, value]) => `
+          <div>
+            <small>${escapeHtml(label)}</small>
+            <b>${escapeHtml(String(value ?? ""))}</b>
+          </div>
+        `).join("")}
+      </div>
+      <button class="button ghost" type="button" data-route="bills">
+        ${icon("wallet")}查看记账
+      </button>
+    </div>
+  `;
+}
+
+function chatAnalysisChangeLabel(analysis) {
+  const delta = Number(analysis.category ? analysis.category_delta : analysis.expense_delta);
+  if (!Number.isFinite(delta)) {
+    return null;
+  }
+  if (delta === 0) {
+    return `较${analysis.previous_period_label}持平`;
+  }
+  return `较${analysis.previous_period_label}${delta > 0 ? "多" : "少"} ${money(Math.abs(delta))}`;
+}
+
+function chatAnalysisBudgetLabel(analysis) {
+  const budget = Number(analysis.budget_amount ?? 0);
+  if (!Number.isFinite(budget) || budget <= 0) {
+    return null;
+  }
+  const remaining = Number(analysis.budget_remaining ?? 0);
+  if (!Number.isFinite(remaining)) {
+    return null;
+  }
+  return remaining >= 0 ? `剩余 ${money(remaining)}` : `超出 ${money(Math.abs(remaining))}`;
 }
 
 function renderChatCandidateEditorModal() {

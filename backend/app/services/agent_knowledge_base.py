@@ -66,9 +66,10 @@ class AgentKnowledgeBase:
             content=(
                 "当用户询问本月或某月花了多少、收入多少、分类占比、商户排行或消费分析时，"
                 "Agent 应先读取本地账单统计，再基于确定性金额生成解释，不能让模型编造数字。"
+                "趋势、环比、预算、超支和单日最高支出也必须由本地统计计算后再解释。"
             ),
             tags=("bill", "analysis", "function_calling"),
-            keywords=("账单分析", "消费分析", "统计", "花了多少", "支出多少", "收入多少", "占比", "排行", "最多"),
+            keywords=("账单分析", "消费分析", "统计", "花了多少", "支出多少", "收入多少", "占比", "排行", "最多", "趋势", "环比", "预算"),
         ),
         KnowledgeDocument(
             source_id="candidate_confirmation_policy",
@@ -85,7 +86,7 @@ class AgentKnowledgeBase:
             title="函数调用工具链",
             content=(
                 "Agent 会根据意图选择内部函数工具：知识库检索、账单解析、花销分类、待办解析、"
-                "日记整理、候选更新、候选确认和候选丢弃。写操作继续受确认和幂等保护。"
+                "账单分析、日记整理、候选更新、候选确认和候选丢弃。写操作继续受确认和幂等保护。"
             ),
             tags=("agent", "function_calling"),
             keywords=("function calling", "函数调用", "工具调用", "工具", "解析", "确认", "幂等"),

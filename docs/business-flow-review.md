@@ -38,7 +38,8 @@ privacy controls, recovery and export are supporting workflows.
   config as an active model.
 - Bill analysis queries such as "这个月餐饮花了多少" now route to a read-only
   `analyze_bills` function call. The Agent retrieves local statistics and
-  computes category totals, monthly totals and merchant highlights
+  computes category totals, monthly totals, previous-month deltas, budget usage,
+  top spending day and merchant highlights
   deterministically instead of asking the model to invent numbers.
 - Bills and bill candidates now require only amount and transaction type to save.
   Merchant, category, payment method, time and note can be left blank in the UI;

@@ -5737,6 +5737,16 @@ td {
   height: 16px;
 }
 
+.chat-analysis-card {
+  border-color: #d5e1ea;
+  background: #f7fbff;
+}
+
+.chat-analysis-card .chat-result-head > span {
+  background: #e7f0f8;
+  color: #2c5c88;
+}
+
 .chat-result-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

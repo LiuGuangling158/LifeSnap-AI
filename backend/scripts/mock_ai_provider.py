@@ -169,7 +169,7 @@ def looks_like_agent_capability_question(text: str) -> bool:
 def looks_like_bill_analysis(text: str) -> bool:
     lowered = text.casefold()
     return any(keyword in lowered for keyword in ("账单", "消费", "支出", "收入", "花销", "餐饮")) and any(
-        keyword in lowered for keyword in ("多少", "统计", "分析", "占比", "排行", "最多", "合计")
+        keyword in lowered for keyword in ("多少", "统计", "分析", "占比", "排行", "最多", "合计", "趋势", "预算", "超支")
     )
 
 

@@ -862,11 +862,29 @@ def _check_chat_bill_analysis(client: ApiClient) -> None:
         _assert(body["candidate"] is None and body["candidate_id"] is None, "Bill analysis should not create candidates")
         _assert(body["need_user_confirmation"] is False, "Bill analysis should be read-only")
         _assert("餐饮支出 120.00 元" in body["reply"], "Bill analysis should answer with verified category amount")
+        _assert(body["analysis"]["category"] == "餐饮", "Bill analysis should return structured category")
+        _assert(body["analysis"]["category_amount"] == "120.00", "Bill analysis should expose category amount")
         _assert_agent_function_calls(
             body,
             {"privacy_guard", "knowledge_search", "analyze_bills"},
             "Agent bill analysis",
         )
+
+        status, detailed = client.request(
+            "POST",
+            "/chat/messages",
+            {"message": "这个月消费趋势和预算情况怎么样？"},
+        )
+        _assert(status == 200, "POST /chat/messages should support detailed bill analysis")
+        _assert(detailed["intent"] == "analyze_bills", "Detailed spending question should route to analysis")
+        _assert("月预算 5000.00 元" in detailed["reply"], "Detailed analysis should include budget usage")
+        _assert("单日支出最高" in detailed["reply"], "Detailed analysis should include top spending day")
+        total_expense = float(detailed["analysis"]["total_expense"])
+        budget_remaining = float(detailed["analysis"]["budget_remaining"])
+        top_day_expense = float(detailed["analysis"]["top_day_expense"])
+        _assert(total_expense >= 200, "Detailed analysis should include setup bill expenses")
+        _assert(abs(budget_remaining - (5000 - total_expense)) < 0.01, "Detailed analysis should expose remaining budget")
+        _assert(top_day_expense > 0, "Detailed analysis should expose top day")
     finally:
         for bill_id in created_bill_ids:
             client.request("DELETE", f"/bills/{bill_id}")
