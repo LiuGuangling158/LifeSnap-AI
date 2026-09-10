@@ -27,6 +27,10 @@ privacy controls, recovery and export are supporting workflows.
   calls before returning strict JSON. The runtime profile is available through
   `/agent/runtime`, the local knowledge base through `/agent/knowledge/search`,
   and supervised fine-tuning examples through `/agent/fine-tuning/examples`.
+- DeepSeek can now be selected as the built-in LLM provider with
+  `DEEPSEEK_API_KEY`. The backend defaults to `https://api.deepseek.com` and
+  `deepseek-v4-flash`, then keeps the same RAG, function-calling and
+  confirmation-before-save workflow.
 - Bills and bill candidates now require only amount and transaction type to save.
   Merchant, category, payment method, time and note can be left blank in the UI;
   blank merchant values are stored as null and displayed as 未填写.

@@ -413,7 +413,8 @@ DELETE /agent/task-candidates/{candidate_id}
 
 Bill and task parsing can use one of three paths:
 
-- direct OpenAI-compatible LLM Agent via `LIFESNAP_LLM_*`
+- direct DeepSeek/OpenAI-compatible LLM Agent via `DEEPSEEK_API_KEY` or
+  `LIFESNAP_LLM_*`
 - custom external HTTP parser via `LIFESNAP_AI_PARSE_ENDPOINT`
 - built-in rule-based fallback when no external parser is available or the call fails
 
@@ -432,24 +433,32 @@ The Agent runtime also exposes three explicit layers:
 - Fine-tuning readiness through training-example export plus an optional
   fine-tuned model ID that takes priority over the base model.
 
-Configure a direct LLM Agent:
+Configure the direct DeepSeek LLM Agent:
 
 ```powershell
-$env:LIFESNAP_LLM_API_KEY = "your-api-key"
-$env:LIFESNAP_LLM_MODEL = "your-model-name"
+$env:DEEPSEEK_API_KEY = "your-deepseek-api-key"
+$env:LIFESNAP_LLM_PROVIDER = "deepseek"
+$env:LIFESNAP_LLM_MODEL = "deepseek-v4-flash"
+$env:LIFESNAP_LLM_BASE_URL = "https://api.deepseek.com"
+$env:LIFESNAP_LLM_REASONING_EFFORT = "none"
 $env:LIFESNAP_LLM_FINE_TUNED_MODEL = "optional-fine-tuned-model-id"
 $env:LIFESNAP_LLM_FINE_TUNING_JOB_ID = "optional-training-job-id"
-$env:LIFESNAP_LLM_BASE_URL = "https://api.openai.com/v1"
-$env:LIFESNAP_LLM_PROVIDER = "openai_compatible"
 $env:LIFESNAP_LLM_TIMEOUT_SECONDS = "20"
 $env:LIFESNAP_LLM_RESPONSE_FORMAT = "json_object"
 ```
+
+For DeepSeek, setting only `DEEPSEEK_API_KEY` is enough to choose provider
+`deepseek`, base URL `https://api.deepseek.com`, and default model
+`deepseek-v4-flash`. Set `LIFESNAP_DEEPSEEK_MODEL` or `LIFESNAP_LLM_MODEL` to
+switch to another DeepSeek model such as `deepseek-v4-pro`.
 
 `LIFESNAP_LLM_BASE_URL` may point to OpenAI or any compatible provider. If the
 base URL is omitted while `LIFESNAP_LLM_API_KEY` and `LIFESNAP_LLM_MODEL` are
 set, it defaults to `https://api.openai.com/v1`. For local compatible gateways,
 the API key can be omitted as long as `LIFESNAP_LLM_BASE_URL` and
 `LIFESNAP_LLM_MODEL` are set.
+When provider is `deepseek`, an API key is required and can be supplied through
+`DEEPSEEK_API_KEY`, `LIFESNAP_DEEPSEEK_API_KEY`, or `LIFESNAP_LLM_API_KEY`.
 If `LIFESNAP_LLM_FINE_TUNED_MODEL` is set, that model is sent to the compatible
 chat-completions API instead of `LIFESNAP_LLM_MODEL`; the base model is kept as
 profile metadata.

@@ -81,8 +81,41 @@ class ApiClient:
 
 
 def main() -> int:
+    _check_deepseek_config_defaults()
     with TemporaryDirectory(prefix="lifesnap-smoke-") as data_dir:
         return _run_isolated_smoke(data_dir)
+
+
+def _check_deepseek_config_defaults() -> None:
+    test_env = os.environ.copy()
+    for name in (
+        "LIFESNAP_LLM_BASE_URL",
+        "LIFESNAP_LLM_API_KEY",
+        "LIFESNAP_LLM_MODEL",
+        "LIFESNAP_LLM_PROVIDER",
+        "LIFESNAP_DEEPSEEK_API_KEY",
+        "LIFESNAP_DEEPSEEK_MODEL",
+        "LIFESNAP_DEEPSEEK_BASE_URL",
+    ):
+        test_env[name] = ""
+    test_env["DEEPSEEK_API_KEY"] = "sk-lifesnap-smoke"
+    script = """
+from app.core.config import settings
+assert settings.llm_agent_provider == 'deepseek'
+assert settings.llm_agent_base_url == 'https://api.deepseek.com'
+assert settings.llm_agent_model == 'deepseek-v4-flash'
+assert settings.llm_agent_api_key == 'sk-lifesnap-smoke'
+assert settings.real_llm_agent_enabled
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=BACKEND_DIR,
+        env=test_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    _assert(result.returncode == 0, f"DeepSeek config defaults failed: {result.stderr}")
 
 
 def _run_isolated_smoke(data_dir: str) -> int:
@@ -93,6 +126,11 @@ def _run_isolated_smoke(data_dir: str) -> int:
     test_env["LIFESNAP_LLM_BASE_URL"] = ""
     test_env["LIFESNAP_LLM_API_KEY"] = ""
     test_env["LIFESNAP_LLM_MODEL"] = ""
+    test_env["LIFESNAP_LLM_PROVIDER"] = ""
+    test_env["DEEPSEEK_API_KEY"] = ""
+    test_env["LIFESNAP_DEEPSEEK_API_KEY"] = ""
+    test_env["LIFESNAP_DEEPSEEK_MODEL"] = ""
+    test_env["LIFESNAP_DEEPSEEK_BASE_URL"] = ""
     port = _free_port()
     process = subprocess.Popen(
         [

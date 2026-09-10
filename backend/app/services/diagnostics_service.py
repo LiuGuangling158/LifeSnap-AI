@@ -147,24 +147,28 @@ class DiagnosticsService:
         )
 
     def _ai_parser_integration_check(self) -> IntegrationCheck:
-        configured = settings.real_ai_parser_enabled
-        blockers = self._external_ai_privacy_blockers()
+        configured = settings.real_ai_parser_enabled or settings.llm_agent_configured
+        blockers = self._external_ai_privacy_blockers() + self._llm_credential_blockers()
         warnings: list[str] = []
         next_action: str | None = None
 
         if not configured:
             warnings.append("rule_based_parser_fallback")
-            next_action = "Set LIFESNAP_LLM_MODEL and LIFESNAP_LLM_API_KEY for the LLM agent, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
+            next_action = "Set DEEPSEEK_API_KEY to enable the built-in DeepSeek LLM agent, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
+        elif "deepseek_api_key_missing" in blockers:
+            next_action = "Set DEEPSEEK_API_KEY or LIFESNAP_LLM_API_KEY before using DeepSeek."
         elif blockers:
             next_action = "Disable local-only mode and allow AI text processing before using external AI parsing."
 
         capabilities = ["bill_candidate_parsing", "task_candidate_parsing"]
-        if settings.real_llm_agent_enabled:
-            capabilities.append("llm_agent_reasoning")
+        if settings.llm_agent_configured:
+            capabilities.extend(["llm_agent_reasoning", "llm_json_output", "llm_function_calling"])
+        if settings.deepseek_llm_agent_enabled:
+            capabilities.append("deepseek_chat_completions")
 
         return IntegrationCheck(
             name="ai_parser",
-            provider=settings.ai_parser_provider_name,
+            provider=self._configured_ai_provider_name(),
             status=self._integration_check_status(configured, blockers),
             configured=configured,
             ready=configured and not blockers,
@@ -182,24 +186,28 @@ class DiagnosticsService:
         )
 
     def _chat_intent_integration_check(self) -> IntegrationCheck:
-        configured = settings.real_ai_parser_enabled
-        blockers = self._external_ai_privacy_blockers()
+        configured = settings.real_ai_parser_enabled or settings.llm_agent_configured
+        blockers = self._external_ai_privacy_blockers() + self._llm_credential_blockers()
         warnings: list[str] = []
         next_action: str | None = None
 
         if not configured:
             warnings.append("keyword_router_fallback")
-            next_action = "Set LIFESNAP_LLM_MODEL and LIFESNAP_LLM_API_KEY for LLM chat routing, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
+            next_action = "Set DEEPSEEK_API_KEY to enable DeepSeek chat routing, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
+        elif "deepseek_api_key_missing" in blockers:
+            next_action = "Set DEEPSEEK_API_KEY or LIFESNAP_LLM_API_KEY before using DeepSeek."
         elif blockers:
             next_action = "Disable local-only mode and allow AI text processing before using external chat intent routing."
 
         capabilities = ["chat_intent_routing", "chat_candidate_flow"]
-        if settings.real_llm_agent_enabled:
-            capabilities.append("llm_agent_reasoning")
+        if settings.llm_agent_configured:
+            capabilities.extend(["llm_agent_reasoning", "llm_json_output", "llm_function_calling"])
+        if settings.deepseek_llm_agent_enabled:
+            capabilities.append("deepseek_chat_completions")
 
         return IntegrationCheck(
             name="chat_intent",
-            provider=settings.ai_parser_provider_name,
+            provider=self._configured_ai_provider_name(),
             status=self._integration_check_status(configured, blockers),
             configured=configured,
             ready=configured and not blockers,
@@ -294,19 +302,19 @@ class DiagnosticsService:
         )
 
     def _probe_ai_bill_parser(self) -> IntegrationProbeResult:
-        configured = settings.real_ai_parser_enabled
-        blockers = self._external_ai_privacy_blockers()
+        configured = settings.real_ai_parser_enabled or settings.llm_agent_configured
+        blockers = self._external_ai_privacy_blockers() + self._llm_credential_blockers()
         if not configured:
             return self._skipped_probe(
                 name="ai_bill_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 configured=False,
                 warnings=["rule_based_parser_fallback"],
             )
         if blockers:
             return self._skipped_probe(
                 name="ai_bill_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 configured=True,
                 warnings=["external_processing_blocked", *blockers],
                 privacy_blockers=blockers,
@@ -324,7 +332,7 @@ class DiagnosticsService:
         except Exception as error:
             return self._failed_probe(
                 name="ai_bill_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 latency_ms=self._elapsed_ms(started),
                 warnings=["external_ai_parser_failed"],
                 error=type(error).__name__,
@@ -333,7 +341,7 @@ class DiagnosticsService:
         if candidate is None:
             return self._failed_probe(
                 name="ai_bill_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 latency_ms=latency_ms,
                 warnings=warnings or ["external_ai_parser_failed"],
                 error="NoCandidate",
@@ -341,7 +349,7 @@ class DiagnosticsService:
 
         return self._successful_probe(
             name="ai_bill_parser",
-            provider=settings.ai_parser_provider_name,
+            provider=self._configured_ai_provider_name(),
             latency_ms=latency_ms,
             warnings=candidate.warnings,
             response_preview={
@@ -354,19 +362,19 @@ class DiagnosticsService:
         )
 
     def _probe_ai_task_parser(self) -> IntegrationProbeResult:
-        configured = settings.real_ai_parser_enabled
-        blockers = self._external_ai_privacy_blockers()
+        configured = settings.real_ai_parser_enabled or settings.llm_agent_configured
+        blockers = self._external_ai_privacy_blockers() + self._llm_credential_blockers()
         if not configured:
             return self._skipped_probe(
                 name="ai_task_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 configured=False,
                 warnings=["rule_based_parser_fallback"],
             )
         if blockers:
             return self._skipped_probe(
                 name="ai_task_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 configured=True,
                 warnings=["external_processing_blocked", *blockers],
                 privacy_blockers=blockers,
@@ -384,7 +392,7 @@ class DiagnosticsService:
         except Exception as error:
             return self._failed_probe(
                 name="ai_task_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 latency_ms=self._elapsed_ms(started),
                 warnings=["external_ai_parser_failed"],
                 error=type(error).__name__,
@@ -393,7 +401,7 @@ class DiagnosticsService:
         if candidate is None:
             return self._failed_probe(
                 name="ai_task_parser",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 latency_ms=latency_ms,
                 warnings=warnings or ["external_ai_parser_failed"],
                 error="NoCandidate",
@@ -401,7 +409,7 @@ class DiagnosticsService:
 
         return self._successful_probe(
             name="ai_task_parser",
-            provider=settings.ai_parser_provider_name,
+            provider=self._configured_ai_provider_name(),
             latency_ms=latency_ms,
             warnings=candidate.warnings,
             response_preview={
@@ -414,19 +422,19 @@ class DiagnosticsService:
         )
 
     def _probe_chat_intent(self) -> IntegrationProbeResult:
-        configured = settings.real_ai_parser_enabled
-        blockers = self._external_ai_privacy_blockers()
+        configured = settings.real_ai_parser_enabled or settings.llm_agent_configured
+        blockers = self._external_ai_privacy_blockers() + self._llm_credential_blockers()
         if not configured:
             return self._skipped_probe(
                 name="chat_intent",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 configured=False,
                 warnings=["keyword_router_fallback"],
             )
         if blockers:
             return self._skipped_probe(
                 name="chat_intent",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 configured=True,
                 warnings=["external_processing_blocked", *blockers],
                 privacy_blockers=blockers,
@@ -441,7 +449,7 @@ class DiagnosticsService:
         except Exception as error:
             return self._failed_probe(
                 name="chat_intent",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 latency_ms=self._elapsed_ms(started),
                 warnings=["external_ai_parser_failed"],
                 error=type(error).__name__,
@@ -450,7 +458,7 @@ class DiagnosticsService:
         if route is None:
             return self._failed_probe(
                 name="chat_intent",
-                provider=settings.ai_parser_provider_name,
+                provider=self._configured_ai_provider_name(),
                 latency_ms=latency_ms,
                 warnings=warnings or ["external_chat_intent_invalid_response"],
                 error="NoRoute",
@@ -458,7 +466,7 @@ class DiagnosticsService:
 
         return self._successful_probe(
             name="chat_intent",
-            provider=settings.ai_parser_provider_name,
+            provider=self._configured_ai_provider_name(),
             latency_ms=latency_ms,
             warnings=route.warnings,
             response_preview={
@@ -476,6 +484,16 @@ class DiagnosticsService:
         if not privacy_settings.allow_ai_text_processing:
             blockers.append("ai_text_processing_disabled")
         return blockers
+
+    def _llm_credential_blockers(self) -> list[str]:
+        if settings.llm_agent_configured and settings.deepseek_llm_agent_enabled and not settings.llm_agent_api_key:
+            return ["deepseek_api_key_missing"]
+        return []
+
+    def _configured_ai_provider_name(self) -> str:
+        if settings.llm_agent_configured:
+            return settings.llm_agent_provider
+        return settings.ai_parser_provider_name
 
     def _integration_check_status(self, configured: bool, blockers: list[str]) -> str:
         if not configured:

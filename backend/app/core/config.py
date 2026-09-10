@@ -25,16 +25,63 @@ def _env_optional_str(name: str) -> str | None:
     return value or None
 
 
+def _env_first_optional_str(*names: str) -> str | None:
+    for name in names:
+        value = _env_optional_str(name)
+        if value is not None:
+            return value
+    return None
+
+
+def _deepseek_requested() -> bool:
+    provider = _env_optional_str("LIFESNAP_LLM_PROVIDER")
+    if provider and provider.casefold() == "deepseek":
+        return True
+    if _env_first_optional_str("DEEPSEEK_API_KEY", "LIFESNAP_DEEPSEEK_API_KEY"):
+        return True
+    model = _env_first_optional_str("LIFESNAP_DEEPSEEK_MODEL", "LIFESNAP_LLM_MODEL")
+    return bool(model and model.casefold().startswith("deepseek"))
+
+
 def _default_llm_base_url() -> str | None:
-    configured_base_url = _env_optional_str("LIFESNAP_LLM_BASE_URL")
+    configured_base_url = _env_first_optional_str(
+        "LIFESNAP_LLM_BASE_URL",
+        "LIFESNAP_DEEPSEEK_BASE_URL",
+    )
     if configured_base_url:
         return configured_base_url
-    configured_model = _env_optional_str("LIFESNAP_LLM_MODEL") or _env_optional_str(
-        "LIFESNAP_LLM_FINE_TUNED_MODEL"
-    )
-    if _env_optional_str("LIFESNAP_LLM_API_KEY") and configured_model:
+    if _deepseek_requested():
+        return "https://api.deepseek.com"
+    configured_model = _default_llm_model() or _env_optional_str("LIFESNAP_LLM_FINE_TUNED_MODEL")
+    if _default_llm_api_key() and configured_model:
         return "https://api.openai.com/v1"
     return None
+
+
+def _default_llm_api_key() -> str | None:
+    return _env_first_optional_str(
+        "LIFESNAP_LLM_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "LIFESNAP_DEEPSEEK_API_KEY",
+    )
+
+
+def _default_llm_model() -> str | None:
+    configured = _env_first_optional_str("LIFESNAP_LLM_MODEL", "LIFESNAP_DEEPSEEK_MODEL")
+    if configured:
+        return configured
+    if _deepseek_requested():
+        return "deepseek-v4-flash"
+    return None
+
+
+def _default_llm_provider() -> str:
+    provider = _env_optional_str("LIFESNAP_LLM_PROVIDER")
+    if provider:
+        return provider
+    if _deepseek_requested():
+        return "deepseek"
+    return "openai_compatible"
 
 
 @dataclass(frozen=True)
@@ -75,21 +122,15 @@ class Settings:
         default_factory=lambda: _env_float("LIFESNAP_AI_PARSE_TIMEOUT_SECONDS", 20.0)
     )
     llm_agent_base_url: str | None = field(default_factory=_default_llm_base_url)
-    llm_agent_api_key: str | None = field(
-        default_factory=lambda: _env_optional_str("LIFESNAP_LLM_API_KEY")
-    )
-    llm_agent_model: str | None = field(
-        default_factory=lambda: _env_optional_str("LIFESNAP_LLM_MODEL")
-    )
+    llm_agent_api_key: str | None = field(default_factory=_default_llm_api_key)
+    llm_agent_model: str | None = field(default_factory=_default_llm_model)
     llm_agent_fine_tuned_model: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_LLM_FINE_TUNED_MODEL")
     )
     llm_agent_fine_tuning_job_id: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_LLM_FINE_TUNING_JOB_ID")
     )
-    llm_agent_provider: str = field(
-        default_factory=lambda: os.getenv("LIFESNAP_LLM_PROVIDER", "openai_compatible")
-    )
+    llm_agent_provider: str = field(default_factory=_default_llm_provider)
     llm_agent_timeout_seconds: float = field(
         default_factory=lambda: _env_float("LIFESNAP_LLM_TIMEOUT_SECONDS", 20.0)
     )
@@ -98,6 +139,9 @@ class Settings:
     )
     llm_agent_response_format: str = field(
         default_factory=lambda: os.getenv("LIFESNAP_LLM_RESPONSE_FORMAT", "json_object")
+    )
+    llm_agent_reasoning_effort: str | None = field(
+        default_factory=lambda: _env_optional_str("LIFESNAP_LLM_REASONING_EFFORT")
     )
 
     @property
@@ -122,7 +166,21 @@ class Settings:
 
     @property
     def real_llm_agent_enabled(self) -> bool:
+        if not self.llm_agent_configured:
+            return False
+        if self.deepseek_llm_agent_enabled:
+            return bool(self.llm_agent_api_key)
+        return True
+
+    @property
+    def llm_agent_configured(self) -> bool:
         return bool(self.llm_agent_base_url and self.llm_agent_runtime_model)
+
+    @property
+    def deepseek_llm_agent_enabled(self) -> bool:
+        return self.llm_agent_provider.casefold() == "deepseek" or (
+            (self.llm_agent_base_url or "").rstrip("/").casefold() == "https://api.deepseek.com"
+        )
 
     @property
     def llm_agent_runtime_model(self) -> str | None:

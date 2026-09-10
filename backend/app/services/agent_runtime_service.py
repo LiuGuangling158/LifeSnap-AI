@@ -32,11 +32,14 @@ class AgentRuntimeService:
         fine_tuned_model = settings.llm_agent_fine_tuned_model
         base_model = settings.llm_agent_model
         runtime_model = settings.llm_agent_runtime_model
-        if fine_tuned_model:
+        if fine_tuned_model and settings.real_llm_agent_enabled:
             strategy = "fine_tuned_llm_with_local_fallback"
             fine_tuning_status = "serving_fine_tuned_model"
         elif settings.real_llm_agent_enabled:
             strategy = "base_llm_with_rag_and_function_calling"
+            fine_tuning_status = "training_dataset_ready"
+        elif settings.llm_agent_configured:
+            strategy = "llm_configured_not_ready"
             fine_tuning_status = "training_dataset_ready"
         elif settings.external_ai_parser_endpoint:
             strategy = "external_parser_with_local_fallback"
@@ -46,7 +49,7 @@ class AgentRuntimeService:
             fine_tuning_status = "training_dataset_ready"
 
         return AgentModelTrace(
-            provider=settings.ai_parser_provider_name,
+            provider=settings.llm_agent_provider if settings.llm_agent_configured else settings.ai_parser_provider_name,
             strategy=strategy,
             runtime_model=runtime_model,
             base_model=base_model,

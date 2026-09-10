@@ -3021,14 +3021,16 @@ function integrationGuideText(commandKey) {
       "$env:LIFESNAP_OCR_API_KEY = \"optional-secret\"",
       "$env:LIFESNAP_OCR_PROVIDER = \"external_http\"",
       "$env:LIFESNAP_OCR_TIMEOUT_SECONDS = \"15\"",
-      "$env:LIFESNAP_LLM_API_KEY = \"your-api-key\"",
-      "$env:LIFESNAP_LLM_MODEL = \"your-model-name\"",
+      "$env:DEEPSEEK_API_KEY = \"your-deepseek-api-key\"",
+      "$env:LIFESNAP_LLM_PROVIDER = \"deepseek\"",
+      "$env:LIFESNAP_LLM_MODEL = \"deepseek-v4-flash\"",
+      "$env:LIFESNAP_LLM_BASE_URL = \"https://api.deepseek.com\"",
+      "$env:LIFESNAP_LLM_REASONING_EFFORT = \"none\"",
       "$env:LIFESNAP_LLM_FINE_TUNED_MODEL = \"optional-fine-tuned-model-id\"",
       "$env:LIFESNAP_LLM_FINE_TUNING_JOB_ID = \"optional-training-job-id\"",
-      "$env:LIFESNAP_LLM_BASE_URL = \"https://api.openai.com/v1\"",
-      "$env:LIFESNAP_LLM_PROVIDER = \"openai_compatible\"",
       "$env:LIFESNAP_LLM_TIMEOUT_SECONDS = \"20\"",
       "$env:LIFESNAP_LLM_RESPONSE_FORMAT = \"json_object\"",
+      "# 也可以继续使用通用 OpenAI-compatible 配置：LIFESNAP_LLM_API_KEY / LIFESNAP_LLM_MODEL / LIFESNAP_LLM_BASE_URL",
       "# 如果你已有自建解析服务，也可以继续使用旧协议：",
       "$env:LIFESNAP_AI_PARSE_ENDPOINT = \"https://your-ai-service.example.com/parse\"",
       "$env:LIFESNAP_AI_PARSE_API_KEY = \"optional-secret\"",
@@ -6707,6 +6709,7 @@ function modelStrategyLabel(strategy) {
   return {
     fine_tuned_llm_with_local_fallback: "微调模型优先",
     base_llm_with_rag_and_function_calling: "基础模型增强",
+    llm_configured_not_ready: "大模型待授权",
     external_parser_with_local_fallback: "外部解析服务",
     rule_based_local_fallback: "本地规则兜底",
   }[strategy] ?? (strategy || "本地规则兜底");
@@ -7867,6 +7870,8 @@ function integrationCodeLabel(code) {
     external_chat_intent_invalid_response: "外部聊天意图响应格式异常",
     llm_agent_failed: "大模型 Agent 请求失败",
     llm_agent_invalid_response: "大模型 Agent 响应格式异常",
+    llm_agent_function_calling_unavailable: "大模型工具调用不可用，已降级解析",
+    deepseek_api_key_missing: "DeepSeek API Key 未配置",
   }[code] ?? code;
 }
 
@@ -7879,6 +7884,9 @@ function integrationCapabilityLabel(value) {
     chat_intent_routing: "聊天路由",
     chat_candidate_flow: "候选确认",
     llm_agent_reasoning: "大模型 Agent",
+    llm_json_output: "严格 JSON 输出",
+    llm_function_calling: "函数调用",
+    deepseek_chat_completions: "DeepSeek Chat Completions",
   }[value] ?? value;
 }
 

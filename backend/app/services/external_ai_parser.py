@@ -300,6 +300,7 @@ class ExternalAiParserService:
             "messages": messages,
             "temperature": settings.llm_agent_temperature,
         }
+        self._apply_llm_provider_options(request_body)
         if settings.llm_agent_response_format.casefold() == "json_object":
             request_body["response_format"] = {"type": "json_object"}
         if include_tools:
@@ -308,6 +309,26 @@ class ExternalAiParserService:
                 request_body["tools"] = tools
                 request_body["tool_choice"] = "auto"
         return request_body
+
+    def _apply_llm_provider_options(self, request_body: dict[str, Any]) -> None:
+        if not settings.deepseek_llm_agent_enabled:
+            return
+
+        request_body["stream"] = False
+        reasoning_effort = self._deepseek_reasoning_effort(settings.llm_agent_reasoning_effort)
+        request_body["reasoning_effort"] = reasoning_effort
+        if reasoning_effort == "none":
+            request_body["thinking"] = {"type": "disabled"}
+
+    def _deepseek_reasoning_effort(self, raw_value: str | None) -> str:
+        if raw_value is None:
+            return "none"
+        value = raw_value.strip().casefold()
+        aliases = {"minimal": "low", "medium": "high", "xhigh": "high"}
+        value = aliases.get(value, value)
+        if value not in {"none", "low", "high", "max"}:
+            return "none"
+        return value
 
     def _post_llm_agent_json(
         self,
@@ -360,7 +381,7 @@ class ExternalAiParserService:
             self._assistant_tool_call_message(assistant_message, tool_calls),
             *tool_messages,
         ]
-        follow_up_body = self._llm_request_body(kind, follow_up_messages, include_tools=True)
+        follow_up_body = self._llm_request_body(kind, follow_up_messages, include_tools=False)
         follow_up_response, _ = self._post_llm_agent_json(endpoint, follow_up_body)
         if follow_up_response is None:
             raise ValueError("LLM tool-call follow-up failed.")
