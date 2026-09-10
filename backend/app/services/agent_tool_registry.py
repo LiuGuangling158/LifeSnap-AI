@@ -31,7 +31,7 @@ class AgentToolRegistry:
         AgentFunctionToolCapability(
             name="route_chat_intent",
             label="识别用户意图",
-            description="判断用户是在记账、建提醒、写日记、追问日记，还是请求未支持能力。",
+            description="判断用户是在记账、查账单分析、建提醒、写日记、追问日记，还是请求未支持能力。",
             input_schema={"message": "string"},
             side_effect="read",
         ),
@@ -48,6 +48,13 @@ class AgentToolRegistry:
             label="判断花销分类",
             description="按显式分类、商家、物品和场景关键词判断账单分类。",
             input_schema={"text": "string", "transaction_type": "TransactionType"},
+            side_effect="read",
+        ),
+        AgentFunctionToolCapability(
+            name="analyze_bills",
+            label="分析账单统计",
+            description="读取本地账单统计，计算月度支出、收入、分类占比和商户排行。",
+            input_schema={"text": "string", "period": "string", "category": "string"},
             side_effect="read",
         ),
         AgentFunctionToolCapability(
@@ -134,7 +141,7 @@ class AgentToolRegistry:
 
     def llm_tool_definitions(self, kind: str) -> list[dict[str, Any]]:
         names_by_kind = {
-            "chat_intent": ("knowledge_search",),
+            "chat_intent": ("knowledge_search", "analyze_bills"),
             "bill": ("knowledge_search", "classify_bill_category"),
             "task": ("knowledge_search",),
         }

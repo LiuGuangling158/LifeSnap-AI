@@ -42,6 +42,13 @@ class BootstrapService:
                     requires_confirmation=True,
                 ),
                 AssistantToolCapability(
+                    id="bill_analysis",
+                    label="账单分析",
+                    description="读取本地账单统计，回答月度支出、收入、分类占比和商户排行。",
+                    input_modes=["text", "voice"],
+                    requires_confirmation=False,
+                ),
+                AssistantToolCapability(
                     id="task_candidate",
                     label="提醒候选",
                     description="从一句话整理待办标题、时间、分类和优先级，确认后保存提醒。",
@@ -88,6 +95,7 @@ class BootstrapService:
             feature_flags={
                 "manual_bills": True,
                 "bill_statistics": True,
+                "bill_analysis": True,
                 "attachments": True,
                 "stored_text_ocr_fallback": True,
                 "bill_candidates": True,

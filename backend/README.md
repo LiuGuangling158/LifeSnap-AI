@@ -6,8 +6,9 @@ FastAPI backend for LifeSnap AI.
 
 The backend currently provides the MVP shell, health check, bill management,
 task/reminder management, attachment metadata, dashboard summary, and rule-based
-AI candidate flows for bills, tasks, and diaries. OCR and AI parsing can delegate to
-configured providers, including a direct OpenAI-compatible LLM Agent, while keeping local fallback behavior.
+AI candidate flows for bills, tasks, diaries, and read-only bill analysis. OCR
+and AI parsing can delegate to configured providers, including a direct
+OpenAI-compatible LLM Agent, while keeping local fallback behavior.
 
 ## Local Run
 
@@ -328,7 +329,7 @@ POST /agent/bill-candidates/{candidate_id}/check-duplicate?time_window_minutes=1
 ```
 
 This uses the same duplicate rule as `POST /bills/check-duplicate`. Candidates
-missing required fields, such as `amount` or `merchant`, return `400`.
+missing `amount` return `400`.
 
 Confirm a bill candidate and save it as a bill:
 
@@ -336,7 +337,9 @@ Confirm a bill candidate and save it as a bill:
 POST /agent/bill-candidates/{candidate_id}/confirm
 ```
 
-Candidates missing required fields, such as `amount` or `merchant`, cannot be confirmed directly. The user should edit the result and save it through `POST /bills`.
+Candidates missing required fields, such as `amount` or `transaction_type`,
+cannot be confirmed directly. Merchant, category, payment method, paid time and
+note are optional.
 
 Discard a pending bill candidate:
 
@@ -428,8 +431,9 @@ The Agent runtime also exposes three explicit layers:
 - RAG knowledge retrieval from the built-in LifeSnap business knowledge base.
 - Function calling sessions for internal tools such as `privacy_guard`,
   `knowledge_search`, `route_chat_intent`, `classify_bill_category`,
-  `parse_bill_candidate`, `parse_task_candidate`, `parse_diary_candidate`,
-  `update_candidate`, `confirm_candidate`, and `discard_candidate`.
+  `analyze_bills`, `parse_bill_candidate`, `parse_task_candidate`,
+  `parse_diary_candidate`, `update_candidate`, `confirm_candidate`, and
+  `discard_candidate`.
 - Fine-tuning readiness through training-example export plus an optional
   fine-tuned model ID that takes priority over the base model.
 
@@ -530,9 +534,10 @@ the same contract embedded in the model prompt:
 
 Supported `kind` values are `bill`, `task`, and `chat_intent`. `bill` and
 `task` return structured candidate fields. `chat_intent` routes a chat message
-to `create_bill`, `create_task`, `create_diary`, `diary_reflection`, or
-`knowledge_answer` or `unsupported`; the backend then reuses the matching
-candidate flow or answers from its knowledge base.
+to `create_bill`, `create_task`, `create_diary`, `diary_reflection`,
+`analyze_bills`, `knowledge_answer`, or `unsupported`; the backend then reuses
+the matching candidate flow, reads verified bill statistics, or answers from its
+knowledge base.
 
 Inspect the runtime profile, search the local knowledge base, or export
 fine-tuning examples:
@@ -545,9 +550,9 @@ GET /agent/fine-tuning/examples?limit=50
 
 Direct LLM calls receive retrieved knowledge snippets in the user payload under
 `retrieved_knowledge`. Compatible chat-completions requests also include safe
-read-only tool schemas for knowledge search and bill category classification;
-if the provider returns `tool_calls`, the backend executes those local tools and
-asks the model for the final strict JSON. Chat responses include
+read-only tool schemas for knowledge search, bill category classification, and
+bill analysis; if the provider returns `tool_calls`, the backend executes those
+local tools and asks the model for the final strict JSON. Chat responses include
 `knowledge_hits`, `function_calls`, and `model_trace`, so the UI can show the
 RAG evidence, called tools, and whether the runtime is using a base model, a
 configured fine-tuned model, an external parser, or the local rule fallback.
@@ -631,11 +636,12 @@ Content-Type: application/json
 }
 ```
 
-The endpoint returns one of four outcomes:
+The endpoint returns one of five outcomes:
 
 - a bill candidate
 - a task or reminder candidate
 - a diary reflection prompt
+- a read-only bill analysis answer
 - an MVP fallback message for unsupported intents
 
 When `LIFESNAP_AI_PARSE_ENDPOINT` is configured and privacy settings allow

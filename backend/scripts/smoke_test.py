@@ -117,6 +117,14 @@ assert len(body['tools']) == 2
 assert body['thinking'] == {'type': 'disabled'}
 assert body['reasoning_effort'] == 'none'
 assert body['stream'] is False
+chat_body = external_ai_parser._llm_request_body(
+    'chat_intent',
+    [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}],
+    include_tools=True,
+)
+tool_names = [tool['function']['name'] for tool in chat_body['tools']]
+assert 'knowledge_search' in tool_names
+assert 'analyze_bills' in tool_names
 print(json.dumps({'provider': settings.llm_agent_provider, 'model': body['model']}))
 """
     test_env = _deepseek_config_env(DEEPSEEK_API_KEY="sk-deepseek-smoke")
@@ -297,6 +305,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_agent_runtime_profile(client)
     _check_integration_diagnostics(client)
     _check_bill_statistics_overview(client)
+    _check_chat_bill_analysis(client)
     _check_task_statistics_overview(client)
     _check_candidate_discard_flow(client)
     _check_candidate_edit_flow(client)
@@ -806,6 +815,61 @@ def _check_agent_runtime_profile(client: ApiClient) -> None:
         "Agent bill chat",
     )
     client.request("DELETE", f"/agent/bill-candidates/{bill_answer['candidate_id']}")
+
+
+def _check_chat_bill_analysis(client: ApiClient) -> None:
+    now = datetime.now(LOCAL_TZ).replace(second=0, microsecond=0)
+    paid_at = now.replace(hour=12, minute=0).isoformat()
+    bills = [
+        {
+            "amount": "120.00",
+            "merchant": "Smoke Analysis Dining",
+            "category": "餐饮",
+            "transaction_type": "expense",
+            "paid_at": paid_at,
+            "source": "manual",
+        },
+        {
+            "amount": "80.00",
+            "merchant": "Smoke Analysis Metro",
+            "category": "交通",
+            "transaction_type": "expense",
+            "paid_at": paid_at,
+            "source": "manual",
+        },
+    ]
+    created_bill_ids: list[str] = []
+    for index, payload in enumerate(bills, start=1):
+        status, bill = client.request(
+            "POST",
+            "/bills",
+            payload,
+            headers={"Idempotency-Key": f"smoke-chat-analysis-{index}-{time.time_ns()}"},
+        )
+        _assert(status == 201, "Bill analysis setup bills should be created")
+        created_bill_ids.append(bill["id"])
+
+    try:
+        status, body = client.request(
+            "POST",
+            "/chat/messages",
+            {"message": "这个月餐饮花了多少？"},
+        )
+        _assert(status == 200, "POST /chat/messages should support bill analysis")
+        _assert(body["intent"] == "analyze_bills", "Chat should route spending questions to bill analysis")
+        _assert(body["assistant_tool_id"] == "bill_analysis", "Bill analysis should expose selected assistant tool")
+        _assert(body["action_type"] == "none", "Bill analysis should not create a candidate action")
+        _assert(body["candidate"] is None and body["candidate_id"] is None, "Bill analysis should not create candidates")
+        _assert(body["need_user_confirmation"] is False, "Bill analysis should be read-only")
+        _assert("餐饮支出 120.00 元" in body["reply"], "Bill analysis should answer with verified category amount")
+        _assert_agent_function_calls(
+            body,
+            {"privacy_guard", "knowledge_search", "analyze_bills"},
+            "Agent bill analysis",
+        )
+    finally:
+        for bill_id in created_bill_ids:
+            client.request("DELETE", f"/bills/{bill_id}")
 
 
 def _check_integration_diagnostics(client: ApiClient) -> None:

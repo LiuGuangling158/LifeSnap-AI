@@ -29,6 +29,7 @@ from app.schemas.task import TaskPriority, TaskSource, TaskType
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_runtime_service import agent_runtime_service
 from app.services.agent_tool_registry import AgentFunctionCallSession, agent_tool_registry
+from app.services.bill_analysis_service import bill_analysis_service
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
@@ -150,6 +151,22 @@ class RuleBasedChatService:
         "agent",
         "智能体",
     )
+    _bill_analysis_keywords = (
+        "多少",
+        "统计",
+        "分析",
+        "占比",
+        "排行",
+        "最多",
+        "最大",
+        "总共",
+        "合计",
+        "花在哪里",
+        "花哪",
+        "情况",
+        "趋势",
+        "结余",
+    )
 
     def __init__(self) -> None:
         self._rule_bill_parser = RuleBasedBillParser()
@@ -207,10 +224,23 @@ class RuleBasedChatService:
         if context_response is not None:
             return self._with_runtime_trace(context_response, knowledge_hits, function_session)
 
+        if self._looks_like_bill_analysis(text):
+            return self._with_runtime_trace(
+                self._bill_analysis_response(text, function_session=function_session),
+                knowledge_hits,
+                function_session,
+            )
+
         external_route, fallback_warnings = external_ai_parser.route_chat(text)
         if external_route is not None:
             return self._with_runtime_trace(
-                self._response_from_external_route(text, external_route, knowledge_hits, function_session),
+                self._response_from_external_route(
+                    text,
+                    external_route,
+                    knowledge_hits,
+                    function_session,
+                    fallback_warnings=fallback_warnings,
+                ),
                 knowledge_hits,
                 function_session,
             )
@@ -386,13 +416,15 @@ class RuleBasedChatService:
         route: ExternalChatRoute,
         knowledge_hits: list[AgentKnowledgeHit],
         function_session: AgentFunctionCallSession,
+        fallback_warnings: list[str] | None = None,
     ) -> ChatMessageResponse:
+        route_warnings = self._dedupe([*(fallback_warnings or []), *route.warnings])
         if route.intent == ChatIntent.create_diary:
             return self._diary_candidate_response(
                 text,
                 reply=route.reply,
                 route_confidence=route.confidence,
-                fallback_warnings=route.warnings,
+                fallback_warnings=route_warnings,
                 function_session=function_session,
             )
         if route.intent == ChatIntent.create_task:
@@ -400,7 +432,7 @@ class RuleBasedChatService:
                 text,
                 reply=route.reply,
                 route_confidence=route.confidence,
-                fallback_warnings=route.warnings,
+                fallback_warnings=route_warnings,
                 function_session=function_session,
             )
         if route.intent == ChatIntent.create_bill:
@@ -408,7 +440,14 @@ class RuleBasedChatService:
                 text,
                 reply=route.reply,
                 route_confidence=route.confidence,
-                fallback_warnings=route.warnings,
+                fallback_warnings=route_warnings,
+                function_session=function_session,
+            )
+        if route.intent == ChatIntent.analyze_bills:
+            return self._bill_analysis_response(
+                text,
+                route_confidence=route.confidence,
+                fallback_warnings=route_warnings,
                 function_session=function_session,
             )
         if route.intent == ChatIntent.diary_reflection:
@@ -417,14 +456,14 @@ class RuleBasedChatService:
                     text,
                     reply=route.reply,
                     route_confidence=min(route.confidence, 0.78),
-                    fallback_warnings=route.warnings,
+                    fallback_warnings=route_warnings,
                     function_session=function_session,
                 )
             return self._diary_reflection_response(
                 text,
                 reply=route.reply,
                 route_confidence=route.confidence,
-                fallback_warnings=route.warnings,
+                fallback_warnings=route_warnings,
                 function_session=function_session,
             )
         if route.intent == ChatIntent.unsupported and self._looks_like_diary(text):
@@ -432,13 +471,13 @@ class RuleBasedChatService:
                 return self._diary_candidate_response(
                     text,
                     route_confidence=min(route.confidence, 0.7),
-                    fallback_warnings=route.warnings,
+                    fallback_warnings=route_warnings,
                     function_session=function_session,
                 )
             return self._diary_reflection_response(
                 text,
                 route_confidence=min(route.confidence, 0.7),
-                fallback_warnings=route.warnings,
+                fallback_warnings=route_warnings,
                 function_session=function_session,
             )
         if route.intent == ChatIntent.knowledge_answer:
@@ -447,7 +486,7 @@ class RuleBasedChatService:
         return self._unsupported_response(
             reply=route.reply or "这条消息暂时不能直接转换成账单或提醒。",
             confidence=route.confidence,
-            warnings=route.warnings,
+            warnings=route_warnings,
         )
 
     def _response_from_candidate_context(
@@ -1279,6 +1318,38 @@ class RuleBasedChatService:
             ],
             need_user_confirmation=True,
         )
+
+    def _bill_analysis_response(
+        self,
+        text: str,
+        route_confidence: float | None = None,
+        fallback_warnings: list[str] | None = None,
+        function_session: AgentFunctionCallSession | None = None,
+    ) -> ChatMessageResponse:
+        session = function_session or agent_tool_registry.session()
+        analysis = session.call(
+            "analyze_bills",
+            {"text": self._preview_text(text)},
+            lambda: bill_analysis_service.analyze(text),
+            bill_analysis_service.trace_summary,
+        )
+        return ChatMessageResponse(
+            message_id=uuid4(),
+            reply=bill_analysis_service.reply(analysis),
+            intent=ChatIntent.analyze_bills,
+            confidence=route_confidence or 0.86,
+            assistant_tool_id="bill_analysis",
+            action_type=ChatActionType.none,
+            candidate=None,
+            warnings=self._dedupe(fallback_warnings or []),
+            agent_steps=[
+                self._agent_step("理解意图", "识别为账单分析查询。"),
+                self._agent_step("读取统计", f"已读取 {analysis.period_label} 的本地账单统计。"),
+                self._agent_step("生成结论", "基于确定性金额生成分析，没有修改任何记录。"),
+            ],
+            need_user_confirmation=False,
+        )
+
     def _diary_reflection_response(
         self,
         text: str,
@@ -1455,6 +1526,38 @@ class RuleBasedChatService:
         return self._looks_like_simple_bill(text) or any(
             keyword.casefold() in text.casefold() for keyword in self._bill_keywords
         )
+
+    def _looks_like_bill_analysis(self, text: str) -> bool:
+        folded = text.casefold()
+        bill_subject = any(
+            keyword in folded
+            for keyword in (
+                "账单",
+                "花销",
+                "消费",
+                "支出",
+                "收入",
+                "开销",
+                "餐饮",
+                "交通",
+                "购物",
+                "日用",
+                "医疗",
+                "娱乐",
+                "学习",
+                "住房",
+                "本月",
+                "这个月",
+                "上个月",
+                "上月",
+            )
+        )
+        asks_analysis = any(keyword in folded for keyword in self._bill_analysis_keywords)
+        if not bill_subject or not asks_analysis:
+            return False
+        if self._looks_like_simple_bill(text) and any(keyword in text for keyword in ("记一笔", "记账", "保存", "记录")):
+            return False
+        return True
 
     def _looks_like_simple_bill(self, text: str) -> bool:
         return self._money_pattern.search(text.casefold()) is not None

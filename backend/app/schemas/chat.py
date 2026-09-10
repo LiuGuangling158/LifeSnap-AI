@@ -15,6 +15,7 @@ class ChatIntent(str, Enum):
     create_task = "create_task"
     create_diary = "create_diary"
     diary_reflection = "diary_reflection"
+    analyze_bills = "analyze_bills"
     knowledge_answer = "knowledge_answer"
     unsupported = "unsupported"
 

@@ -36,6 +36,10 @@ privacy controls, recovery and export are supporting workflows.
   local fallback active, privacy blockers, credential blockers, function-calling
   mode and the next setup action, so the UI does not present a blocked DeepSeek
   config as an active model.
+- Bill analysis queries such as "这个月餐饮花了多少" now route to a read-only
+  `analyze_bills` function call. The Agent retrieves local statistics and
+  computes category totals, monthly totals and merchant highlights
+  deterministically instead of asking the model to invent numbers.
 - Bills and bill candidates now require only amount and transaction type to save.
   Merchant, category, payment method, time and note can be left blank in the UI;
   blank merchant values are stored as null and displayed as 未填写.
@@ -64,10 +68,10 @@ The isolated smoke suite checks CRUD, statistics, candidate editing, confirmatio
 idempotency, privacy, attachments/OCR fallback, recovery, imports and exports.
 New regressions exercise null updates without record mutation, optional-field
 clearing, intent routing, transaction types, zero amounts, confirmation replay,
-bill category inference, minimal bill confirmation without merchant, contextual
-candidate updates, typed confirmation, typed discard, RAG search, required
-function-call coverage for parse/update/confirm/discard paths and fine-tuning
-dataset export.
+bill category inference, deterministic bill analysis, minimal bill confirmation
+without merchant, contextual candidate updates, typed confirmation, typed
+discard, RAG search, required function-call coverage for
+parse/update/confirm/discard/analyze paths and fine-tuning dataset export.
 Frontend JavaScript syntax is checked separately.
 
 Browser automation could not initialize because the Windows sandbox failed to
@@ -87,7 +91,7 @@ claimed as verified. External model quality is not tested without model credenti
    idempotency records need an atomic transaction before multi-user deployment.
 4. Date boundaries differ between UTC task summaries and stored bill timestamps.
    Choose a configurable business timezone and test midnight/month-end boundaries.
-5. Cross-record natural-language analysis is excluded by the execution plan and
-   is not provided by the current intent router. A future analysis tool should
-   retrieve scoped records, calculate totals deterministically, then ask the
-   model to explain those verified results.
+5. Bill statistics questions are now supported for local monthly totals,
+   category spend and merchant highlights. Broader cross-record analysis across
+   diaries, tasks, subscriptions and warranties still needs scoped retrieval,
+   deterministic calculations and a separate explanation layer.

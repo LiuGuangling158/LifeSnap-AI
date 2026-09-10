@@ -69,6 +69,7 @@ const assistantSessionStorageKey = "lifesnap_assistant_session";
 const knownAssistantToolIds = [
   "knowledge_search",
   "bill_candidate",
+  "bill_analysis",
   "task_candidate",
   "diary_candidate",
   "diary_reflection",
@@ -3066,7 +3067,7 @@ function integrationGuideText(commandKey) {
       "",
       "chat_intent response:",
       "{",
-      "  \"intent\": \"create_bill | create_task | create_diary | diary_reflection | knowledge_answer | unsupported\",",
+      "  \"intent\": \"create_bill | create_task | create_diary | diary_reflection | analyze_bills | knowledge_answer | unsupported\",",
       "  \"confidence\": 0.88,",
       "  \"reply\": \"我先整理成一个待确认事项。\",",
       "  \"warnings\": []",
@@ -6510,7 +6511,7 @@ function runtimeChip(iconName, label, value, enabled) {
 }
 
 function renderAssistantCapabilities() {
-  const preferredToolIds = ["bill_candidate", "task_candidate", "diary_candidate", "attachment_bill_recognition"];
+  const preferredToolIds = ["bill_candidate", "bill_analysis", "task_candidate", "diary_candidate", "attachment_bill_recognition"];
   const toolsById = new Map(assistantTools().map((tool) => [tool.id, tool]));
   const tools = preferredToolIds.map((toolId) => toolsById.get(toolId)).filter(Boolean);
   if (!tools.length) {
@@ -6539,6 +6540,7 @@ function renderAssistantCapabilities() {
 function assistantComposerPlaceholder() {
   return {
     bill_candidate: "例如：午餐 28 元 微信支付 餐饮",
+    bill_analysis: "例如：这个月餐饮花了多少？",
     task_candidate: "例如：提醒我明天 10 点开会",
     diary_candidate: "例如：今天完成了项目复盘，心情很轻松，晴天",
     diary_reflection: "例如：今天有点累，但完成了一个重要任务",
@@ -6554,6 +6556,7 @@ function assistantTools() {
   return [
     { id: "knowledge_search", label: "知识库检索", requires_confirmation: false },
     { id: "bill_candidate", label: "记账候选", requires_confirmation: true },
+    { id: "bill_analysis", label: "账单分析", requires_confirmation: false },
     { id: "task_candidate", label: "提醒候选", requires_confirmation: true },
     { id: "diary_candidate", label: "日记候选", requires_confirmation: true },
     { id: "diary_reflection", label: "日记追问", requires_confirmation: false },
@@ -6565,6 +6568,7 @@ function iconForAssistantTool(toolId) {
   return {
     knowledge_search: "search",
     bill_candidate: "wallet",
+    bill_analysis: "pie-chart",
     task_candidate: "bell",
     diary_candidate: "book",
     diary_reflection: "book",
@@ -6575,6 +6579,7 @@ function iconForAssistantTool(toolId) {
 function renderAssistantQuickPrompts() {
   return `<div class="assistant-prompts" aria-label="试试这些例子">
     <button type="button" data-chat-example="沙县小吃&#10;午餐 28 元 微信支付 餐饮">${icon("utensils")}记一笔午餐</button>
+    <button type="button" data-chat-example="这个月餐饮花了多少？">${icon("pie-chart")}查消费</button>
     <button type="button" data-chat-example="工资收入 6800 元">${icon("income")}记一笔收入</button>
     <button type="button" data-chat-example="你有 RAG 知识库和函数调用吗？">${icon("search")}问问 Agent 链路</button>
     <button type="button" data-chat-example="提醒我明天 10 点开会">${icon("bell")}记一个待办</button>
@@ -8199,6 +8204,7 @@ function renderAuditEventDetail(event) {
 function chatIntentDisplay(intent) {
   return {
     create_bill: "记账",
+    analyze_bills: "账单分析",
     create_task: "提醒",
     create_diary: "日记",
     diary_reflection: "日记追问",

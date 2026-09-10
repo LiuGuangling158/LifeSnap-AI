@@ -105,6 +105,13 @@ def route_chat(text: str) -> dict[str, Any]:
             "reply": "我会先检索知识库，再通过函数调用选择工具，并可接入微调后的大模型。",
             "warnings": [],
         }
+    if looks_like_bill_analysis(text):
+        return {
+            "intent": "analyze_bills",
+            "confidence": 0.87,
+            "reply": "我会先读取本地账单统计，再给出消费分析。",
+            "warnings": [],
+        }
     if looks_like_diary(text):
         return {
             "intent": "diary_reflection",
@@ -156,6 +163,13 @@ def looks_like_agent_capability_question(text: str) -> bool:
             "fine-tuning",
             "大模型",
         )
+    )
+
+
+def looks_like_bill_analysis(text: str) -> bool:
+    lowered = text.casefold()
+    return any(keyword in lowered for keyword in ("账单", "消费", "支出", "收入", "花销", "餐饮")) and any(
+        keyword in lowered for keyword in ("多少", "统计", "分析", "占比", "排行", "最多", "合计")
     )
 
 
@@ -391,6 +405,7 @@ def run_self_test() -> None:
     assert receipt["text"]
     assert route_chat("明天 9 点提醒我交房租")["intent"] == "create_task"
     assert route_chat("午餐 28 元 微信支付")["intent"] == "create_bill"
+    assert route_chat("这个月餐饮花了多少")["intent"] == "analyze_bills"
     assert parse_bill("瑞幸咖啡\n微信支付\n实付 18.50 元")["data"]["amount"] == "18.50"
     assert parse_task("明天下午 3 点提醒我开项目会", {})["data"]["remind_at"]
     print("Mock AI provider self-test passed")

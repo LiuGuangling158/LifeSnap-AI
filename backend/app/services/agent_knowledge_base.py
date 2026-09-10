@@ -61,6 +61,16 @@ class AgentKnowledgeBase:
             ),
         ),
         KnowledgeDocument(
+            source_id="bill_analysis_policy",
+            title="账单分析规则",
+            content=(
+                "当用户询问本月或某月花了多少、收入多少、分类占比、商户排行或消费分析时，"
+                "Agent 应先读取本地账单统计，再基于确定性金额生成解释，不能让模型编造数字。"
+            ),
+            tags=("bill", "analysis", "function_calling"),
+            keywords=("账单分析", "消费分析", "统计", "花了多少", "支出多少", "收入多少", "占比", "排行", "最多"),
+        ),
+        KnowledgeDocument(
             source_id="candidate_confirmation_policy",
             title="候选确认机制",
             content=(

@@ -24,6 +24,7 @@ from app.schemas.chat import ChatIntent
 from app.schemas.task import TaskPriority, TaskType
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_tool_registry import agent_tool_registry
+from app.services.bill_analysis_service import bill_analysis_service
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.settings_store import settings_store
 
@@ -483,6 +484,33 @@ class ExternalAiParserService:
                 "matched_keywords": list(match.matched_keywords),
             }
 
+        if name == "analyze_bills":
+            text = self._optional_text(arguments.get("text")) or original_text
+            analysis = bill_analysis_service.analyze(text)
+            return {
+                "period_label": analysis.period_label,
+                "category": analysis.category,
+                "bill_count": analysis.bill_count,
+                "total_expense": str(analysis.total_expense),
+                "total_income": str(analysis.total_income),
+                "total_refund": str(analysis.total_refund),
+                "net_amount": str(analysis.net_amount),
+                "category_amount": str(analysis.category_amount) if analysis.category_amount is not None else None,
+                "category_count": analysis.category_count,
+                "category_percentage": str(analysis.category_percentage)
+                if analysis.category_percentage is not None
+                else None,
+                "top_category": analysis.top_category,
+                "top_category_amount": str(analysis.top_category_amount)
+                if analysis.top_category_amount is not None
+                else None,
+                "top_merchant": analysis.top_merchant,
+                "top_merchant_amount": str(analysis.top_merchant_amount)
+                if analysis.top_merchant_amount is not None
+                else None,
+                "reply": bill_analysis_service.reply(analysis),
+            }
+
         return {"error": "unsupported_agent_tool", "name": name}
 
     def _tool_limit(self, raw_value: Any, *, default: int, maximum: int) -> int:
@@ -513,10 +541,11 @@ class ExternalAiParserService:
                 "create_task",
                 "create_diary",
                 "diary_reflection",
+                "analyze_bills",
                 "knowledge_answer",
                 "unsupported",
             ],
-            "unsupported_examples": ["subscription_auto_create", "warranty_auto_create", "cross_record_search"],
+            "unsupported_examples": ["subscription_auto_create", "warranty_auto_create", "non_bill_cross_record_search"],
             "confirmation_required": True,
         }
         payload["output_contract"] = self._llm_output_contract(kind)
@@ -525,7 +554,7 @@ class ExternalAiParserService:
     def _llm_output_contract(self, kind: str) -> dict[str, Any]:
         if kind == "chat_intent":
             return {
-                "intent": "create_bill | create_task | create_diary | diary_reflection | knowledge_answer | unsupported",
+                "intent": "create_bill | create_task | create_diary | diary_reflection | analyze_bills | knowledge_answer | unsupported",
                 "confidence": "number from 0 to 1",
                 "reply": "short Chinese reply or clarification question",
                 "warnings": "array of stable warning strings",
@@ -590,9 +619,10 @@ class ExternalAiParserService:
         if kind == "chat_intent":
             return (
                 shared
-                + "判断用户意图，只允许 create_bill、create_task、create_diary、diary_reflection、knowledge_answer、unsupported。"
+                + "判断用户意图，只允许 create_bill、create_task、create_diary、diary_reflection、analyze_bills、knowledge_answer、unsupported。"
+                + "当用户询问本月或某月账单、支出、收入、分类占比、商户排行或消费分析时，返回 analyze_bills，不要编造统计数字。"
                 + "当用户询问 Agent 自身、RAG 知识库、函数调用、工具链、模型策略或微调时，返回 knowledge_answer。"
-                + "订阅、保修、复杂统计查询和跨记录搜索属于非 MVP，除非能降级为普通账单或待办，否则返回 unsupported。"
+                + "订阅、保修和非账单类跨记录搜索属于非 MVP，除非能降级为普通账单或待办，否则返回 unsupported。"
                 + "如果缺少关键信息，reply 要用一句中文追问。"
             )
         if kind == "bill":
