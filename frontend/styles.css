@@ -5366,6 +5366,58 @@ td {
   font-size: 10px;
 }
 
+.assistant-runtime-status {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 24px auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+  border: 1px solid #dbe7df;
+  border-radius: var(--radius);
+  background: #fbfcfb;
+  padding: 7px 9px;
+}
+
+.assistant-runtime-status > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 7px;
+  background: #edf7f2;
+  color: #14785f;
+}
+
+.assistant-runtime-status.is-local > span {
+  background: #eef4fb;
+  color: #2e6694;
+}
+
+.assistant-runtime-status.is-blocked > span {
+  background: #fff4e3;
+  color: #9b5b10;
+}
+
+.assistant-runtime-status .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.assistant-runtime-status strong {
+  color: #25332c;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.assistant-runtime-status small {
+  overflow: hidden;
+  color: #6c7872;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .assistant-capabilities {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

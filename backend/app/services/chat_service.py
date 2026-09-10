@@ -341,17 +341,21 @@ class RuleBasedChatService:
     ) -> ChatMessageResponse:
         runtime = agent_runtime_service.profile()
         model = runtime.model_profile
-        model_text = model.runtime_model or "本地规则解析"
+        if model.external_model_ready:
+            model_text = model.runtime_model or f"{model.provider} 外部解析服务"
+        else:
+            model_text = "本地规则解析兜底"
         fine_tune_text = (
             f"已配置微调模型 {model.fine_tuned_model}"
-            if model.fine_tuned_model
+            if model.fine_tuned_model and model.external_model_ready
             else "已准备微调样本导出，配置微调模型后会优先使用"
         )
+        next_action_text = f"当前下一步：{model.next_action}" if model.next_action else "外部模型当前可用。"
         reply = (
             "我现在按 RAG 知识库、函数调用和模型策略三段工作："
             f"先检索 {sum(source.document_count for source in runtime.knowledge_sources)} 条本地业务知识，"
             f"再从 {len(runtime.function_tools)} 个内部函数工具里选择要调用的能力，"
-            f"最后使用 {model_text} 生成候选或回答。{fine_tune_text}。"
+            f"最后使用 {model_text} 生成候选或回答。{fine_tune_text}。{next_action_text}"
         )
         return ChatMessageResponse(
             message_id=uuid4(),

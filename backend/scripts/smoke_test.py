@@ -82,6 +82,7 @@ class ApiClient:
 
 def main() -> int:
     _check_deepseek_config_defaults()
+    _check_external_parser_profile_when_deepseek_key_missing()
     with TemporaryDirectory(prefix="lifesnap-smoke-") as data_dir:
         return _run_isolated_smoke(data_dir)
 
@@ -90,12 +91,20 @@ def _check_deepseek_config_defaults() -> None:
     script = """
 import json
 from app.core.config import settings
+from app.services.agent_runtime_service import agent_runtime_service
 from app.services.external_ai_parser import external_ai_parser
 assert settings.llm_agent_provider == 'deepseek'
 assert settings.llm_agent_base_url == 'https://api.deepseek.com'
 assert settings.llm_agent_model == 'deepseek-v4-flash'
 assert settings.llm_agent_api_key == 'sk-deepseek-smoke'
 assert settings.real_llm_agent_enabled
+model_trace = agent_runtime_service.model_trace()
+assert model_trace.provider == 'deepseek'
+assert model_trace.external_model_configured
+assert not model_trace.external_model_ready
+assert model_trace.local_fallback_active
+assert model_trace.strategy == 'llm_configured_blocked_by_privacy'
+assert 'local_only_mode_enabled' in model_trace.privacy_blockers
 body = external_ai_parser._llm_request_body(
     'bill',
     [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}],
@@ -171,6 +180,9 @@ assert body['reasoning_effort'] == 'high'
 def _deepseek_config_env(**overrides: str) -> dict[str, str]:
     test_env = os.environ.copy()
     for name in (
+        "LIFESNAP_AI_PARSE_ENDPOINT",
+        "LIFESNAP_AI_PARSE_API_KEY",
+        "LIFESNAP_AI_PARSE_PROVIDER",
         "DEEPSEEK_API_KEY",
         "LIFESNAP_LLM_BASE_URL",
         "LIFESNAP_LLM_API_KEY",
@@ -180,10 +192,50 @@ def _deepseek_config_env(**overrides: str) -> dict[str, str]:
         "LIFESNAP_DEEPSEEK_API_KEY",
         "LIFESNAP_DEEPSEEK_MODEL",
         "LIFESNAP_DEEPSEEK_BASE_URL",
+        "LIFESNAP_DATA_DIR",
     ):
         test_env[name] = ""
+    test_env["LIFESNAP_DATA_DIR"] = str(BACKEND_DIR / ".lifesnap-smoke-config-data")
     test_env.update(overrides)
     return test_env
+
+
+def _check_external_parser_profile_when_deepseek_key_missing() -> None:
+    script = """
+from app.schemas.settings import PrivacySettingsUpdate
+from app.services.agent_runtime_service import agent_runtime_service
+from app.services.settings_store import settings_store
+settings_store.update_privacy_settings(
+    PrivacySettingsUpdate(local_only_mode=False, allow_ai_text_processing=True)
+)
+model_trace = agent_runtime_service.model_trace()
+assert model_trace.provider == 'lifesnap_mock_ai'
+assert model_trace.strategy == 'external_parser_with_local_fallback'
+assert model_trace.external_model_configured
+assert model_trace.external_model_ready
+assert not model_trace.local_fallback_active
+assert model_trace.runtime_model is None
+assert model_trace.reasoning_effort is None
+assert model_trace.credential_blockers == []
+assert model_trace.function_calling_mode == 'local_trace_only'
+"""
+    with TemporaryDirectory(prefix="lifesnap-smoke-parser-profile-") as data_dir:
+        test_env = _deepseek_config_env(
+            LIFESNAP_DATA_DIR=data_dir,
+            LIFESNAP_LLM_PROVIDER="deepseek",
+            LIFESNAP_LLM_MODEL="deepseek-v4-flash",
+            LIFESNAP_AI_PARSE_ENDPOINT="http://127.0.0.1:8787/parse",
+            LIFESNAP_AI_PARSE_PROVIDER="lifesnap_mock_ai",
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=BACKEND_DIR,
+            env=test_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    _assert(result.returncode == 0, f"External parser profile fallback failed: {result.stderr}")
 
 
 def _run_isolated_smoke(data_dir: str) -> int:
@@ -706,6 +758,15 @@ def _check_agent_runtime_profile(client: ApiClient) -> None:
         runtime["model_profile"]["rag_enabled"] and runtime["model_profile"]["function_calling_enabled"],
         "Agent model profile should include RAG and function calling flags",
     )
+    model_profile = runtime["model_profile"]
+    _assert(model_profile["external_model_configured"] is False, "Default runtime should not be externally configured")
+    _assert(model_profile["external_model_ready"] is False, "Default runtime should not mark external model ready")
+    _assert(model_profile["local_fallback_active"] is True, "Default runtime should expose local fallback")
+    _assert(
+        model_profile["function_calling_mode"] == "local_trace_only",
+        "Default runtime should keep function calls on local trace mode",
+    )
+    _assert(model_profile["next_action"], "Default runtime should explain how to enable DeepSeek")
 
     status, hits = client.request("GET", "/agent/knowledge/search?q=RAG%20%E7%9F%A5%E8%AF%86%E5%BA%93%20%E5%BE%AE%E8%B0%83%20%E5%87%BD%E6%95%B0%E8%B0%83%E7%94%A8&limit=5")
     _assert(status == 200 and len(hits) >= 3, "Agent knowledge search should retrieve RAG documents")

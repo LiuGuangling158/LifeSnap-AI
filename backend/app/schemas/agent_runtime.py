@@ -30,6 +30,16 @@ class AgentModelTrace(BaseModel):
     fine_tuned_model: str | None = Field(default=None, max_length=160)
     fine_tuning_status: str = Field(min_length=1, max_length=80)
     response_format: str | None = Field(default=None, max_length=80)
+    reasoning_effort: str | None = Field(default=None, max_length=40)
+    external_model_configured: bool = False
+    external_model_ready: bool = False
+    local_fallback_active: bool = True
+    endpoint_configured: bool = False
+    api_key_configured: bool = False
+    privacy_blockers: list[str] = Field(default_factory=list)
+    credential_blockers: list[str] = Field(default_factory=list)
+    next_action: str | None = Field(default=None, max_length=220)
+    function_calling_mode: str = Field(default="local_trace_only", max_length=80)
     rag_enabled: bool = True
     function_calling_enabled: bool = True
 

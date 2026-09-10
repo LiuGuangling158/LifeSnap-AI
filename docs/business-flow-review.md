@@ -31,6 +31,11 @@ privacy controls, recovery and export are supporting workflows.
   `DEEPSEEK_API_KEY`. The backend defaults to `https://api.deepseek.com` and
   `deepseek-v4-flash`, then keeps the same RAG, function-calling and
   confirmation-before-save workflow.
+- Agent runtime readiness is now explicit. `/agent/runtime` and chat
+  `model_trace` distinguish external model configured, external model ready,
+  local fallback active, privacy blockers, credential blockers, function-calling
+  mode and the next setup action, so the UI does not present a blocked DeepSeek
+  config as an active model.
 - Bills and bill candidates now require only amount and transaction type to save.
   Merchant, category, payment method, time and note can be left blank in the UI;
   blank merchant values are stored as null and displayed as 未填写.

@@ -3635,6 +3635,16 @@ function normalizeModelTrace(trace) {
     fine_tuned_model: trace.fine_tuned_model ? String(trace.fine_tuned_model).slice(0, 160) : null,
     fine_tuning_status: String(trace.fine_tuning_status ?? "training_dataset_ready").slice(0, 80),
     response_format: trace.response_format ? String(trace.response_format).slice(0, 80) : null,
+    reasoning_effort: trace.reasoning_effort ? String(trace.reasoning_effort).slice(0, 40) : null,
+    external_model_configured: Boolean(trace.external_model_configured),
+    external_model_ready: Boolean(trace.external_model_ready),
+    local_fallback_active: trace.local_fallback_active !== false,
+    endpoint_configured: Boolean(trace.endpoint_configured),
+    api_key_configured: Boolean(trace.api_key_configured),
+    privacy_blockers: Array.isArray(trace.privacy_blockers) ? trace.privacy_blockers.map(String).slice(0, 6) : [],
+    credential_blockers: Array.isArray(trace.credential_blockers) ? trace.credential_blockers.map(String).slice(0, 6) : [],
+    next_action: trace.next_action ? String(trace.next_action).slice(0, 220) : null,
+    function_calling_mode: String(trace.function_calling_mode ?? "local_trace_only").slice(0, 80),
     rag_enabled: Boolean(trace.rag_enabled),
     function_calling_enabled: Boolean(trace.function_calling_enabled),
   };
@@ -6442,14 +6452,49 @@ function renderAssistantRuntimePanel() {
   const model = runtime.model_profile ?? {};
   const knowledgeCount = (runtime.knowledge_sources ?? []).reduce((total, source) => total + Number(source.document_count ?? 0), 0);
   const toolCount = (runtime.function_tools ?? []).length;
+  const runtimeStatus = assistantRuntimeStatus(model);
   return `
     <div class="assistant-runtime-panel" aria-label="Agent 架构状态">
       ${runtimeChip("search", "RAG 知识库", `${knowledgeCount} 条知识`, runtime.rag_enabled)}
       ${runtimeChip("settings", "Function Calling", `${toolCount} 个函数`, runtime.function_calling_enabled)}
-      ${runtimeChip("spark", "模型策略", modelStrategyLabel(model.strategy), true)}
+      ${runtimeChip("spark", "模型策略", modelStrategyLabel(model.strategy), !model.external_model_configured || model.external_model_ready)}
       ${runtimeChip("file-text", "微调", fineTuningStatusLabel(model.fine_tuning_status), runtime.fine_tuning_ready)}
+      <div class="assistant-runtime-status ${escapeHtml(runtimeStatus.tone)}">
+        <span>${icon(runtimeStatus.icon)}</span>
+        <strong>${escapeHtml(runtimeStatus.label)}</strong>
+        <small>${escapeHtml(runtimeStatus.detail)}</small>
+      </div>
     </div>
   `;
+}
+
+function assistantRuntimeStatus(model = {}) {
+  const provider = providerLabel(model.provider);
+  const blockers = [...(model.credential_blockers ?? []), ...(model.privacy_blockers ?? [])]
+    .map(integrationCodeLabel)
+    .join("、");
+  if (model.external_model_ready) {
+    return {
+      icon: "check-circle",
+      tone: "is-ready",
+      label: `${provider} 已就绪`,
+      detail: [model.runtime_model, functionCallingModeLabel(model.function_calling_mode), model.reasoning_effort ? `推理 ${model.reasoning_effort}` : null].filter(Boolean).join(" · "),
+    };
+  }
+  if (model.external_model_configured) {
+    return {
+      icon: "alert-circle",
+      tone: "is-blocked",
+      label: `${provider} 未就绪`,
+      detail: blockers || model.next_action || "检查模型连接配置",
+    };
+  }
+  return {
+    icon: "spark",
+    tone: "is-local",
+    label: "本地 Agent 可用",
+    detail: model.next_action || "配置 DeepSeek 后可启用大模型解析",
+  };
 }
 
 function runtimeChip(iconName, label, value, enabled) {
@@ -6663,15 +6708,31 @@ function runtimeTraceSummary(hits, calls, model) {
 }
 
 function renderModelTrace(model) {
+  const meta = [
+    providerLabel(model.provider),
+    modelStrategyLabel(model.strategy),
+    fineTuningStatusLabel(model.fine_tuning_status),
+    functionCallingModeLabel(model.function_calling_mode),
+  ].filter(Boolean);
   return `
     <div class="chat-runtime-model">
       <span>${icon("spark")}</span>
       <div>
-        <strong>${escapeHtml(model.runtime_model || "本地规则解析")}</strong>
-        <small>${escapeHtml([model.provider, modelStrategyLabel(model.strategy), fineTuningStatusLabel(model.fine_tuning_status)].filter(Boolean).join(" · "))}</small>
+        <strong>${escapeHtml(modelTraceTitle(model))}</strong>
+        <small>${escapeHtml(meta.join(" · "))}</small>
       </div>
     </div>
   `;
+}
+
+function modelTraceTitle(model = {}) {
+  if (model.external_model_ready) {
+    return model.runtime_model || providerLabel(model.provider);
+  }
+  if (model.external_model_configured) {
+    return "本地规则解析兜底";
+  }
+  return "本地规则解析";
 }
 
 function renderKnowledgeHit(hit) {
@@ -6709,10 +6770,29 @@ function modelStrategyLabel(strategy) {
   return {
     fine_tuned_llm_with_local_fallback: "微调模型优先",
     base_llm_with_rag_and_function_calling: "基础模型增强",
+    llm_configured_blocked_by_privacy: "大模型被隐私阻断",
     llm_configured_not_ready: "大模型待授权",
+    external_parser_blocked_by_privacy: "外部解析被隐私阻断",
     external_parser_with_local_fallback: "外部解析服务",
     rule_based_local_fallback: "本地规则兜底",
   }[strategy] ?? (strategy || "本地规则兜底");
+}
+
+function providerLabel(provider) {
+  return {
+    deepseek: "DeepSeek",
+    openai_compatible: "OpenAI Compatible",
+    external_http: "外部解析服务",
+    rule_based: "本地规则",
+  }[provider] ?? (provider || "本地规则");
+}
+
+function functionCallingModeLabel(mode) {
+  return {
+    deepseek_native_tool_calls_with_local_execution: "DeepSeek tools",
+    native_tool_calls_with_local_execution: "原生 tools",
+    local_trace_only: "本地函数链路",
+  }[mode] ?? mode;
 }
 
 function fineTuningStatusLabel(status) {

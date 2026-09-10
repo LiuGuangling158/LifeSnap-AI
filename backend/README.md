@@ -551,6 +551,11 @@ asks the model for the final strict JSON. Chat responses include
 `knowledge_hits`, `function_calls`, and `model_trace`, so the UI can show the
 RAG evidence, called tools, and whether the runtime is using a base model, a
 configured fine-tuned model, an external parser, or the local rule fallback.
+`model_trace` separates configured state from ready state with fields such as
+`external_model_configured`, `external_model_ready`, `local_fallback_active`,
+`privacy_blockers`, `credential_blockers`, `function_calling_mode`, and
+`next_action`. This prevents the UI from claiming DeepSeek is active when the
+API key is missing or privacy settings still block external AI processing.
 
 For bills, the provider/model should return either top-level candidate fields or
 a `data` object compatible with `BillCandidateData`:
