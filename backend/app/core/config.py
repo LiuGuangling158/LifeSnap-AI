@@ -59,6 +59,12 @@ def _default_llm_base_url() -> str | None:
 
 
 def _default_llm_api_key() -> str | None:
+    if _deepseek_requested():
+        return _env_first_optional_str(
+            "DEEPSEEK_API_KEY",
+            "LIFESNAP_DEEPSEEK_API_KEY",
+            "LIFESNAP_LLM_API_KEY",
+        )
     return _env_first_optional_str(
         "LIFESNAP_LLM_API_KEY",
         "DEEPSEEK_API_KEY",

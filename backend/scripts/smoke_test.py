@@ -87,26 +87,30 @@ def main() -> int:
 
 
 def _check_deepseek_config_defaults() -> None:
-    test_env = os.environ.copy()
-    for name in (
-        "LIFESNAP_LLM_BASE_URL",
-        "LIFESNAP_LLM_API_KEY",
-        "LIFESNAP_LLM_MODEL",
-        "LIFESNAP_LLM_PROVIDER",
-        "LIFESNAP_DEEPSEEK_API_KEY",
-        "LIFESNAP_DEEPSEEK_MODEL",
-        "LIFESNAP_DEEPSEEK_BASE_URL",
-    ):
-        test_env[name] = ""
-    test_env["DEEPSEEK_API_KEY"] = "sk-lifesnap-smoke"
     script = """
+import json
 from app.core.config import settings
+from app.services.external_ai_parser import external_ai_parser
 assert settings.llm_agent_provider == 'deepseek'
 assert settings.llm_agent_base_url == 'https://api.deepseek.com'
 assert settings.llm_agent_model == 'deepseek-v4-flash'
-assert settings.llm_agent_api_key == 'sk-lifesnap-smoke'
+assert settings.llm_agent_api_key == 'sk-deepseek-smoke'
 assert settings.real_llm_agent_enabled
+body = external_ai_parser._llm_request_body(
+    'bill',
+    [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}],
+    include_tools=True,
+)
+assert body['model'] == 'deepseek-v4-flash'
+assert body['response_format'] == {'type': 'json_object'}
+assert body['tool_choice'] == 'auto'
+assert len(body['tools']) == 2
+assert body['thinking'] == {'type': 'disabled'}
+assert body['reasoning_effort'] == 'none'
+assert body['stream'] is False
+print(json.dumps({'provider': settings.llm_agent_provider, 'model': body['model']}))
 """
+    test_env = _deepseek_config_env(DEEPSEEK_API_KEY="sk-deepseek-smoke")
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=BACKEND_DIR,
@@ -116,6 +120,70 @@ assert settings.real_llm_agent_enabled
         text=True,
     )
     _assert(result.returncode == 0, f"DeepSeek config defaults failed: {result.stderr}")
+
+    key_priority_script = """
+from app.core.config import settings
+assert settings.llm_agent_provider == 'deepseek'
+assert settings.llm_agent_api_key == 'sk-deepseek-specific'
+assert settings.llm_agent_model == 'deepseek-v4-pro'
+"""
+    priority_env = _deepseek_config_env(
+        DEEPSEEK_API_KEY="sk-deepseek-specific",
+        LIFESNAP_LLM_API_KEY="sk-generic-should-not-win",
+        LIFESNAP_LLM_PROVIDER="deepseek",
+        LIFESNAP_DEEPSEEK_MODEL="deepseek-v4-pro",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", key_priority_script],
+        cwd=BACKEND_DIR,
+        env=priority_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    _assert(result.returncode == 0, f"DeepSeek key priority failed: {result.stderr}")
+
+    reasoning_script = """
+from app.services.external_ai_parser import external_ai_parser
+body = external_ai_parser._llm_request_body(
+    'bill',
+    [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}],
+    include_tools=True,
+)
+assert body['thinking'] == {'type': 'enabled'}
+assert body['reasoning_effort'] == 'high'
+"""
+    reasoning_env = _deepseek_config_env(
+        DEEPSEEK_API_KEY="sk-deepseek-smoke",
+        LIFESNAP_LLM_REASONING_EFFORT="high",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", reasoning_script],
+        cwd=BACKEND_DIR,
+        env=reasoning_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    _assert(result.returncode == 0, f"DeepSeek reasoning options failed: {result.stderr}")
+
+
+def _deepseek_config_env(**overrides: str) -> dict[str, str]:
+    test_env = os.environ.copy()
+    for name in (
+        "DEEPSEEK_API_KEY",
+        "LIFESNAP_LLM_BASE_URL",
+        "LIFESNAP_LLM_API_KEY",
+        "LIFESNAP_LLM_MODEL",
+        "LIFESNAP_LLM_PROVIDER",
+        "LIFESNAP_LLM_REASONING_EFFORT",
+        "LIFESNAP_DEEPSEEK_API_KEY",
+        "LIFESNAP_DEEPSEEK_MODEL",
+        "LIFESNAP_DEEPSEEK_BASE_URL",
+    ):
+        test_env[name] = ""
+    test_env.update(overrides)
+    return test_env
 
 
 def _run_isolated_smoke(data_dir: str) -> int:

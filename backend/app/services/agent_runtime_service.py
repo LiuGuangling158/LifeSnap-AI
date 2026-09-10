@@ -48,8 +48,14 @@ class AgentRuntimeService:
             strategy = "rule_based_local_fallback"
             fine_tuning_status = "training_dataset_ready"
 
+        provider = (
+            settings.llm_agent_provider
+            if settings.llm_agent_configured
+            else settings.ai_parser_provider_name
+        )
+
         return AgentModelTrace(
-            provider=settings.llm_agent_provider if settings.llm_agent_configured else settings.ai_parser_provider_name,
+            provider=provider,
             strategy=strategy,
             runtime_model=runtime_model,
             base_model=base_model,
@@ -69,7 +75,12 @@ class AgentRuntimeService:
                     messages=[
                         {"role": "system", "content": "Extract a LifeSnap bill candidate as strict JSON."},
                         {"role": "user", "content": self._bill_training_prompt(bill)},
-                            {"role": "assistant", "content": self._json_content({"intent": "create_bill", "data": self._bill_target_data(bill)})},
+                        {
+                            "role": "assistant",
+                            "content": self._json_content(
+                                {"intent": "create_bill", "data": self._bill_target_data(bill)}
+                            ),
+                        },
                     ],
                 )
             )
@@ -84,7 +95,12 @@ class AgentRuntimeService:
                         messages=[
                             {"role": "system", "content": "Extract a LifeSnap task candidate as strict JSON."},
                             {"role": "user", "content": self._task_training_prompt(task)},
-                                {"role": "assistant", "content": self._json_content({"intent": "create_task", "data": self._task_target_data(task)})},
+                            {
+                                "role": "assistant",
+                                "content": self._json_content(
+                                    {"intent": "create_task", "data": self._task_target_data(task)}
+                                ),
+                            },
                         ],
                     )
                 )

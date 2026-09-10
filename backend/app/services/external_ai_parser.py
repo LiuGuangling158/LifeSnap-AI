@@ -317,8 +317,9 @@ class ExternalAiParserService:
         request_body["stream"] = False
         reasoning_effort = self._deepseek_reasoning_effort(settings.llm_agent_reasoning_effort)
         request_body["reasoning_effort"] = reasoning_effort
-        if reasoning_effort == "none":
-            request_body["thinking"] = {"type": "disabled"}
+        request_body["thinking"] = {
+            "type": "disabled" if reasoning_effort == "none" else "enabled"
+        }
 
     def _deepseek_reasoning_effort(self, raw_value: str | None) -> str:
         if raw_value is None:
