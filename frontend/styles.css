@@ -5806,6 +5806,18 @@ td {
   stroke: #19a974;
 }
 
+.chat-analysis-chart-head i.cumulative,
+.chat-analysis-plot polyline.cumulative {
+  background: #f08a24;
+  stroke: #f08a24;
+}
+
+.chat-analysis-chart-head i.budget,
+.chat-analysis-plot line.budget {
+  background: #7a6fb0;
+  stroke: #7a6fb0;
+}
+
 .chat-analysis-plot {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
@@ -5828,12 +5840,18 @@ td {
   background: linear-gradient(to bottom, transparent 31%, #e6eef4 31%, transparent 32%, transparent 66%, #e6eef4 66%, transparent 67%);
 }
 
-.chat-analysis-plot polyline {
+.chat-analysis-plot polyline,
+.chat-analysis-plot line {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 3;
   vector-effect: non-scaling-stroke;
+}
+
+.chat-analysis-plot line.budget {
+  stroke-dasharray: 6 6;
+  stroke-width: 2;
 }
 
 .chat-analysis-axis {

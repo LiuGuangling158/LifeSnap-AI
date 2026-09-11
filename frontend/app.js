@@ -7054,6 +7054,8 @@ function renderChatAnalysis(response) {
         <span>${icon("pie-chart")}</span>
         <strong>账单分析摘要</strong>
       </div>
+      ${renderChatAnalysisDailyLineChart(analysis)}
+      ${renderChatAnalysisLineChart(analysis)}
       <div class="chat-result-grid">
         ${rows.map(([label, value]) => `
           <div>
@@ -7062,7 +7064,6 @@ function renderChatAnalysis(response) {
           </div>
         `).join("")}
       </div>
-      ${renderChatAnalysisLineChart(analysis)}
       ${renderChatAnalysisBudgetVisual(analysis)}
       ${renderChatAnalysisCategories(analysis)}
       ${analysis.ai_assessment ? `
@@ -7074,6 +7075,51 @@ function renderChatAnalysis(response) {
       <button class="button ghost" type="button" data-route="bills">
         ${icon("wallet")}查看记账
       </button>
+    </div>
+  `;
+}
+
+function renderChatAnalysisDailyLineChart(analysis) {
+  const items = analysis.daily_points ?? [];
+  if (!items.length) {
+    return "";
+  }
+  const budget = Number(analysis.budget_amount ?? 0);
+  const maxValue = Math.max(
+    ...items.map((item) => Math.max(Number(item.total_expense ?? 0), Number(item.cumulative_expense ?? 0))),
+    Number.isFinite(budget) ? budget : 0,
+    0,
+  );
+  const max = maxValue > 0 ? maxValue : 100;
+  const expensePoints = chatAnalysisLinePoints(items, max, "total_expense");
+  const cumulativePoints = chatAnalysisLinePoints(items, max, "cumulative_expense");
+  const budgetY = Number.isFinite(budget) && budget > 0 ? Math.max(10, 104 - (budget / max) * 88).toFixed(2) : null;
+  const mid = max / 2;
+  return `
+    <div class="chat-analysis-chart" aria-label="本月每日支出折线图">
+      <div class="chat-analysis-chart-head">
+        <strong>本月支出折线</strong>
+        <span><i class="expense"></i>日支出</span>
+        <span><i class="cumulative"></i>累计</span>
+        ${budgetY ? `<span><i class="budget"></i>预算</span>` : ""}
+      </div>
+      <div class="chat-analysis-plot">
+        <div class="chat-analysis-scale" aria-hidden="true">
+          <span>${compactMoney(max)}</span>
+          <span>${compactMoney(mid)}</span>
+          <span>0</span>
+        </div>
+        <svg viewBox="0 0 300 112" preserveAspectRatio="none" aria-hidden="true">
+          ${budgetY ? `<line class="budget" x1="0" y1="${budgetY}" x2="300" y2="${budgetY}" />` : ""}
+          <polyline class="expense" points="${expensePoints}" />
+          <polyline class="cumulative" points="${cumulativePoints}" />
+        </svg>
+      </div>
+      <div class="chat-analysis-axis" aria-hidden="true">
+        <span>${escapeHtml(formatMonthDay(items[0]?.date || ""))}</span>
+        <span>${escapeHtml(formatMonthDay(items[Math.floor(items.length / 2)]?.date || ""))}</span>
+        <span>${escapeHtml(formatMonthDay(items[items.length - 1]?.date || ""))}</span>
+      </div>
     </div>
   `;
 }
@@ -7094,7 +7140,7 @@ function renderChatAnalysisLineChart(analysis) {
   return `
     <div class="chat-analysis-chart" aria-label="近几个月收支折线图">
       <div class="chat-analysis-chart-head">
-        <strong>收支折线</strong>
+        <strong>近六月收支折线</strong>
         <span><i class="expense"></i>支出</span>
         <span><i class="income"></i>收入</span>
       </div>
