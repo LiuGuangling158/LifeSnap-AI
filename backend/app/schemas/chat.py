@@ -47,6 +47,30 @@ class ChatMessageRequest(BaseModel):
     context_candidate_id: UUID | None = None
 
 
+class ChatBillAnalysisDailyPoint(BaseModel):
+    date: date
+    total_expense: Decimal
+    total_income: Decimal
+    cumulative_expense: Decimal
+    budget_usage_percentage: Decimal
+
+
+class ChatBillAnalysisTrendPoint(BaseModel):
+    label: str
+    year: int
+    month: int
+    total_expense: Decimal
+    total_income: Decimal
+    net_amount: Decimal
+
+
+class ChatBillAnalysisCategoryPoint(BaseModel):
+    category: str
+    amount: Decimal
+    count: int
+    percentage: Decimal
+
+
 class ChatBillAnalysis(BaseModel):
     period_label: str
     category: str | None = None
@@ -75,6 +99,10 @@ class ChatBillAnalysis(BaseModel):
     top_merchant_amount: Decimal | None = None
     top_day: date | None = None
     top_day_expense: Decimal | None = None
+    daily_points: list[ChatBillAnalysisDailyPoint] = Field(default_factory=list)
+    monthly_trend: list[ChatBillAnalysisTrendPoint] = Field(default_factory=list)
+    category_breakdown: list[ChatBillAnalysisCategoryPoint] = Field(default_factory=list)
+    ai_assessment: str = ""
 
 
 class ChatMessageResponse(BaseModel):

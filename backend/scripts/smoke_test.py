@@ -125,6 +125,13 @@ chat_body = external_ai_parser._llm_request_body(
 tool_names = [tool['function']['name'] for tool in chat_body['tools']]
 assert 'knowledge_search' in tool_names
 assert 'analyze_bills' in tool_names
+analysis_tool_result = external_ai_parser._execute_llm_read_tool(
+    'analyze_bills',
+    {'text': '这个月消费趋势和预算情况怎么样？'},
+    '这个月消费趋势和预算情况怎么样？',
+)
+assert analysis_tool_result['privacy'] == 'financial_values_redacted_for_external_model'
+assert 'total_expense' not in analysis_tool_result
 print(json.dumps({'provider': settings.llm_agent_provider, 'model': body['model']}))
 """
     test_env = _deepseek_config_env(DEEPSEEK_API_KEY="sk-deepseek-smoke")
@@ -864,6 +871,7 @@ def _check_chat_bill_analysis(client: ApiClient) -> None:
         _assert("餐饮支出 120.00 元" in body["reply"], "Bill analysis should answer with verified category amount")
         _assert(body["analysis"]["category"] == "餐饮", "Bill analysis should return structured category")
         _assert(body["analysis"]["category_amount"] == "120.00", "Bill analysis should expose category amount")
+        _assert(body["analysis"]["ai_assessment"], "Bill analysis should include AI assessment text")
         _assert_agent_function_calls(
             body,
             {"privacy_guard", "knowledge_search", "analyze_bills"},
@@ -885,6 +893,13 @@ def _check_chat_bill_analysis(client: ApiClient) -> None:
         _assert(total_expense >= 200, "Detailed analysis should include setup bill expenses")
         _assert(abs(budget_remaining - (5000 - total_expense)) < 0.01, "Detailed analysis should expose remaining budget")
         _assert(top_day_expense > 0, "Detailed analysis should expose top day")
+        _assert(len(detailed["analysis"]["daily_points"]) >= 28, "Detailed analysis should expose daily chart points")
+        _assert(len(detailed["analysis"]["monthly_trend"]) >= 2, "Detailed analysis should expose monthly trend points")
+        _assert(detailed["analysis"]["category_breakdown"], "Detailed analysis should expose category bars")
+        _assert(
+            detailed["analysis"]["ai_assessment"].startswith("AI 评估："),
+            "Detailed analysis should include an AI assessment",
+        )
     finally:
         for bill_id in created_bill_ids:
             client.request("DELETE", f"/bills/{bill_id}")

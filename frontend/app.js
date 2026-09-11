@@ -3637,6 +3637,49 @@ function normalizeChatAnalysis(analysis) {
     top_merchant_amount: analysis.top_merchant_amount ?? null,
     top_day: analysis.top_day ? String(analysis.top_day) : null,
     top_day_expense: analysis.top_day_expense ?? null,
+    daily_points: Array.isArray(analysis.daily_points)
+      ? analysis.daily_points.map(normalizeChatAnalysisDailyPoint).filter(Boolean).slice(0, 31)
+      : [],
+    monthly_trend: Array.isArray(analysis.monthly_trend)
+      ? analysis.monthly_trend.map(normalizeChatAnalysisTrendPoint).filter(Boolean).slice(0, 12)
+      : [],
+    category_breakdown: Array.isArray(analysis.category_breakdown)
+      ? analysis.category_breakdown.map(normalizeChatAnalysisCategoryPoint).filter(Boolean).slice(0, 6)
+      : [],
+    ai_assessment: String(analysis.ai_assessment ?? "").slice(0, 360),
+  };
+}
+
+function normalizeChatAnalysisDailyPoint(point) {
+  if (!point || typeof point !== "object") return null;
+  return {
+    date: point.date ? String(point.date) : "",
+    total_expense: point.total_expense ?? 0,
+    total_income: point.total_income ?? 0,
+    cumulative_expense: point.cumulative_expense ?? 0,
+    budget_usage_percentage: point.budget_usage_percentage ?? 0,
+  };
+}
+
+function normalizeChatAnalysisTrendPoint(point) {
+  if (!point || typeof point !== "object") return null;
+  return {
+    label: String(point.label ?? "").slice(0, 20),
+    year: Number(point.year ?? 0),
+    month: Number(point.month ?? 0),
+    total_expense: point.total_expense ?? 0,
+    total_income: point.total_income ?? 0,
+    net_amount: point.net_amount ?? 0,
+  };
+}
+
+function normalizeChatAnalysisCategoryPoint(point) {
+  if (!point || typeof point !== "object") return null;
+  return {
+    category: String(point.category ?? "其他").slice(0, 40),
+    amount: point.amount ?? 0,
+    count: Number(point.count ?? 0),
+    percentage: point.percentage ?? 0,
   };
 }
 
@@ -7019,11 +7062,118 @@ function renderChatAnalysis(response) {
           </div>
         `).join("")}
       </div>
+      ${renderChatAnalysisLineChart(analysis)}
+      ${renderChatAnalysisBudgetVisual(analysis)}
+      ${renderChatAnalysisCategories(analysis)}
+      ${analysis.ai_assessment ? `
+        <p class="chat-analysis-assessment">
+          <strong>AI 评估</strong>
+          <span>${escapeHtml(analysis.ai_assessment.replace(/^AI\s*评估[：:]?\s*/, ""))}</span>
+        </p>
+      ` : ""}
       <button class="button ghost" type="button" data-route="bills">
         ${icon("wallet")}查看记账
       </button>
     </div>
   `;
+}
+
+function renderChatAnalysisLineChart(analysis) {
+  const items = analysis.monthly_trend ?? [];
+  if (!items.length) {
+    return "";
+  }
+  const maxValue = Math.max(
+    ...items.map((item) => Math.max(Number(item.total_expense ?? 0), Number(item.total_income ?? 0))),
+    0,
+  );
+  const max = maxValue > 0 ? maxValue : 100;
+  const expensePoints = chatAnalysisLinePoints(items, max, "total_expense");
+  const incomePoints = chatAnalysisLinePoints(items, max, "total_income");
+  const mid = max / 2;
+  return `
+    <div class="chat-analysis-chart" aria-label="近几个月收支折线图">
+      <div class="chat-analysis-chart-head">
+        <strong>收支折线</strong>
+        <span><i class="expense"></i>支出</span>
+        <span><i class="income"></i>收入</span>
+      </div>
+      <div class="chat-analysis-plot">
+        <div class="chat-analysis-scale" aria-hidden="true">
+          <span>${compactMoney(max)}</span>
+          <span>${compactMoney(mid)}</span>
+          <span>0</span>
+        </div>
+        <svg viewBox="0 0 300 112" preserveAspectRatio="none" aria-hidden="true">
+          <polyline class="expense" points="${expensePoints}" />
+          <polyline class="income" points="${incomePoints}" />
+        </svg>
+      </div>
+      <div class="chat-analysis-axis" aria-hidden="true">
+        <span>${escapeHtml(items[0]?.label || "")}</span>
+        <span>${escapeHtml(items[Math.floor(items.length / 2)]?.label || "")}</span>
+        <span>${escapeHtml(items[items.length - 1]?.label || "")}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderChatAnalysisBudgetVisual(analysis) {
+  const budget = Number(analysis.budget_amount ?? 0);
+  if (!Number.isFinite(budget) || budget <= 0) {
+    return "";
+  }
+  const usage = Number(analysis.budget_usage_percentage ?? 0);
+  const progress = Math.max(0, Math.min(100, Number.isFinite(usage) ? usage : 0));
+  const overBudget = Number(analysis.budget_remaining ?? 0) < 0;
+  return `
+    <div class="chat-analysis-budget">
+      <div>
+        <span>预算使用</span>
+        <strong class="${overBudget ? "expense" : "income"}">${usage.toFixed(2)}%</strong>
+      </div>
+      <span class="chat-analysis-track" aria-hidden="true">
+        <i style="width:${progress}%"></i>
+      </span>
+      <small>${escapeHtml(chatAnalysisBudgetLabel(analysis) || `月预算 ${money(budget)}`)}</small>
+    </div>
+  `;
+}
+
+function renderChatAnalysisCategories(analysis) {
+  const categories = analysis.category_breakdown ?? [];
+  if (!categories.length) {
+    return "";
+  }
+  const maxAmount = Math.max(...categories.map((item) => Number(item.amount ?? 0)), 0) || 1;
+  return `
+    <div class="chat-analysis-categories" aria-label="分类支出分析">
+      <strong>分类分布</strong>
+      ${categories.map((item) => {
+        const amount = Number(item.amount ?? 0);
+        const width = Math.max(5, Math.min(100, (amount / maxAmount) * 100));
+        return `
+          <div class="chat-analysis-category-row">
+            <span>${escapeHtml(item.category)}</span>
+            <b>${money(amount)}</b>
+            <i aria-hidden="true"><em style="width:${width}%"></em></i>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function chatAnalysisLinePoints(items, max, field) {
+  if (!items.length) {
+    return "";
+  }
+  return items.map((item, index) => {
+    const x = items.length === 1 ? 150 : (index / (items.length - 1)) * 300;
+    const value = Number(item[field] ?? 0);
+    const y = 104 - (value / max) * 88;
+    return `${x.toFixed(2)},${Math.max(10, y).toFixed(2)}`;
+  }).join(" ");
 }
 
 function chatAnalysisChangeLabel(analysis) {

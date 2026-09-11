@@ -39,8 +39,11 @@ privacy controls, recovery and export are supporting workflows.
 - Bill analysis queries such as "这个月餐饮花了多少" now route to a read-only
   `analyze_bills` function call. The Agent retrieves local statistics and
   computes category totals, monthly totals, previous-month deltas, budget usage,
-  top spending day and merchant highlights
-  deterministically instead of asking the model to invent numbers.
+  top spending day and merchant highlights deterministically instead of asking
+  the model to invent numbers. Budget and spending questions also return chart
+  data for a spending line chart, budget progress and category bars, followed by
+  a local AI assessment. External LLM tool output redacts concrete financial
+  values and delegates those calculations back to the local backend.
 - Bills and bill candidates now require only amount and transaction type to save.
   Merchant, category, payment method, time and note can be left blank in the UI;
   blank merchant values are stored as null and displayed as 未填写.

@@ -12,6 +12,33 @@ from app.services.settings_store import settings_store
 
 
 @dataclass(frozen=True)
+class BillAnalysisDailyPoint:
+    date: date
+    total_expense: Decimal
+    total_income: Decimal
+    cumulative_expense: Decimal
+    budget_usage_percentage: Decimal
+
+
+@dataclass(frozen=True)
+class BillAnalysisTrendPoint:
+    label: str
+    year: int
+    month: int
+    total_expense: Decimal
+    total_income: Decimal
+    net_amount: Decimal
+
+
+@dataclass(frozen=True)
+class BillAnalysisCategoryPoint:
+    category: str
+    amount: Decimal
+    count: int
+    percentage: Decimal
+
+
+@dataclass(frozen=True)
 class BillAnalysisResult:
     year: int
     month: int
@@ -42,6 +69,10 @@ class BillAnalysisResult:
     top_merchant_amount: Decimal | None
     top_day: date | None
     top_day_expense: Decimal | None
+    daily_points: tuple[BillAnalysisDailyPoint, ...]
+    monthly_trend: tuple[BillAnalysisTrendPoint, ...]
+    category_breakdown: tuple[BillAnalysisCategoryPoint, ...]
+    ai_assessment: str
     comparison_requested: bool
     budget_requested: bool
     detailed_requested: bool
@@ -84,6 +115,9 @@ class BillAnalysisService:
         if category is not None:
             category_delta = (category_amount or Decimal("0")) - (previous_category_amount or Decimal("0"))
         expense_delta = monthly.total_expense - previous_monthly.total_expense
+        daily_points = self._daily_points(overview.daily_breakdown, budget_settings.monthly_budget)
+        monthly_trend = self._monthly_trend_points(overview.monthly_trend)
+        category_breakdown = self._category_points(monthly.category_breakdown)
         return BillAnalysisResult(
             year=year,
             month=month,
@@ -119,6 +153,19 @@ class BillAnalysisService:
             top_merchant_amount=top_merchant.amount if top_merchant else None,
             top_day=top_day.date if top_day else None,
             top_day_expense=top_day.total_expense if top_day else None,
+            daily_points=daily_points,
+            monthly_trend=monthly_trend,
+            category_breakdown=category_breakdown,
+            ai_assessment=self._assessment_text(
+                total_expense=monthly.total_expense,
+                expense_delta=expense_delta,
+                previous_total_expense=previous_monthly.total_expense,
+                budget_amount=budget_settings.monthly_budget,
+                budget_usage_percentage=self._percentage(monthly.total_expense, budget_settings.monthly_budget),
+                budget_remaining=budget_settings.monthly_budget - monthly.total_expense,
+                top_category=top_category.category if top_category else None,
+                top_category_percentage=top_category.percentage if top_category else None,
+            ),
             comparison_requested=self._comparison_requested(text),
             budget_requested=self._budget_requested(text),
             detailed_requested=self._detailed_requested(text),
@@ -246,6 +293,70 @@ class BillAnalysisService:
         if previous == 0:
             return None
         return ((delta / previous) * Decimal("100")).quantize(Decimal("0.01"))
+
+    def _daily_points(self, daily_breakdown, budget_amount: Decimal) -> tuple[BillAnalysisDailyPoint, ...]:
+        cumulative = Decimal("0")
+        points = []
+        for item in daily_breakdown:
+            cumulative += item.total_expense
+            points.append(
+                BillAnalysisDailyPoint(
+                    date=item.date,
+                    total_expense=item.total_expense,
+                    total_income=item.total_income,
+                    cumulative_expense=cumulative,
+                    budget_usage_percentage=self._percentage(cumulative, budget_amount),
+                )
+            )
+        return tuple(points)
+
+    def _monthly_trend_points(self, monthly_trend) -> tuple[BillAnalysisTrendPoint, ...]:
+        return tuple(
+            BillAnalysisTrendPoint(
+                label=f"{item.month}月",
+                year=item.year,
+                month=item.month,
+                total_expense=item.total_expense,
+                total_income=item.total_income,
+                net_amount=item.net_amount,
+            )
+            for item in monthly_trend
+        )
+
+    def _category_points(self, category_breakdown) -> tuple[BillAnalysisCategoryPoint, ...]:
+        return tuple(
+            BillAnalysisCategoryPoint(
+                category=item.category,
+                amount=item.amount,
+                count=item.count,
+                percentage=item.percentage,
+            )
+            for item in category_breakdown[:6]
+        )
+
+    def _assessment_text(
+        self,
+        *,
+        total_expense: Decimal,
+        expense_delta: Decimal,
+        previous_total_expense: Decimal,
+        budget_amount: Decimal,
+        budget_usage_percentage: Decimal,
+        budget_remaining: Decimal,
+        top_category: str | None,
+        top_category_percentage: Decimal | None,
+    ) -> str:
+        if total_expense == 0:
+            return "AI 评估：本期还没有支出记录，先积累几笔账单后再看趋势会更准。"
+        if budget_amount > 0 and budget_remaining < 0:
+            return "AI 评估：本期已经超出月预算，建议先暂停非必要消费，并重点复盘最高分类和最高商户。"
+        if budget_amount > 0 and budget_usage_percentage >= Decimal("80"):
+            return "AI 评估：预算使用率已经偏高，接下来适合按日查看支出峰值，控制高频小额消费。"
+        if previous_total_expense > 0 and expense_delta > 0:
+            return "AI 评估：本期支出较上期上升，建议关注增长最快的分类，判断是不是临时支出。"
+        if top_category and (top_category_percentage or Decimal("0")) >= Decimal("50"):
+            return f"AI 评估：支出主要集中在{top_category}，可以优先从这个分类里找节省空间。"
+        return "AI 评估：当前预算压力可控，继续保持记录习惯，月底再结合分类和趋势复盘会更清楚。"
 
     def _comparison_requested(self, text: str) -> bool:
         return any(keyword in text for keyword in ("趋势", "环比", "比上月", "比上个月", "对比", "相比", "变化", "多了吗", "少了吗"))

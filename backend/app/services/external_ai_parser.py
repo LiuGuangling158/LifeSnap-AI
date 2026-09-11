@@ -24,7 +24,6 @@ from app.schemas.chat import ChatIntent
 from app.schemas.task import TaskPriority, TaskType
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_tool_registry import agent_tool_registry
-from app.services.bill_analysis_service import bill_analysis_service
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.settings_store import settings_store
 
@@ -485,49 +484,10 @@ class ExternalAiParserService:
             }
 
         if name == "analyze_bills":
-            text = self._optional_text(arguments.get("text")) or original_text
-            analysis = bill_analysis_service.analyze(text)
             return {
-                "period_label": analysis.period_label,
-                "category": analysis.category,
-                "bill_count": analysis.bill_count,
-                "total_expense": str(analysis.total_expense),
-                "total_income": str(analysis.total_income),
-                "total_refund": str(analysis.total_refund),
-                "net_amount": str(analysis.net_amount),
-                "category_amount": str(analysis.category_amount) if analysis.category_amount is not None else None,
-                "category_count": analysis.category_count,
-                "category_percentage": str(analysis.category_percentage)
-                if analysis.category_percentage is not None
-                else None,
-                "previous_period_label": analysis.previous_period_label,
-                "previous_total_expense": str(analysis.previous_total_expense),
-                "expense_delta": str(analysis.expense_delta),
-                "expense_delta_percentage": str(analysis.expense_delta_percentage)
-                if analysis.expense_delta_percentage is not None
-                else None,
-                "previous_category_amount": str(analysis.previous_category_amount)
-                if analysis.previous_category_amount is not None
-                else None,
-                "category_delta": str(analysis.category_delta) if analysis.category_delta is not None else None,
-                "category_delta_percentage": str(analysis.category_delta_percentage)
-                if analysis.category_delta_percentage is not None
-                else None,
-                "budget_amount": str(analysis.budget_amount),
-                "budget_usage_percentage": str(analysis.budget_usage_percentage),
-                "budget_remaining": str(analysis.budget_remaining),
-                "budget_warning_threshold_percent": analysis.budget_warning_threshold_percent,
-                "top_category": analysis.top_category,
-                "top_category_amount": str(analysis.top_category_amount)
-                if analysis.top_category_amount is not None
-                else None,
-                "top_merchant": analysis.top_merchant,
-                "top_merchant_amount": str(analysis.top_merchant_amount)
-                if analysis.top_merchant_amount is not None
-                else None,
-                "top_day": analysis.top_day.isoformat() if analysis.top_day else None,
-                "top_day_expense": str(analysis.top_day_expense) if analysis.top_day_expense is not None else None,
-                "reply": bill_analysis_service.reply(analysis),
+                "analysis_available": True,
+                "privacy": "financial_values_redacted_for_external_model",
+                "instruction": "Return intent analyze_bills. The backend will compute charts and assessment locally.",
             }
 
         return {"error": "unsupported_agent_tool", "name": name}

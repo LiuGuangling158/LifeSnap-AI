@@ -5747,6 +5747,190 @@ td {
   color: #2c5c88;
 }
 
+.chat-analysis-chart,
+.chat-analysis-budget,
+.chat-analysis-categories,
+.chat-analysis-assessment {
+  min-width: 0;
+}
+
+.chat-analysis-chart {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.chat-analysis-chart-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #30455a;
+  font-size: 12px;
+}
+
+.chat-analysis-chart-head strong {
+  margin-right: auto;
+  color: #223129;
+  font-size: 13px;
+}
+
+.chat-analysis-chart-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.chat-analysis-chart-head i,
+.chat-analysis-category-row i em {
+  display: block;
+  border-radius: 999px;
+}
+
+.chat-analysis-chart-head i {
+  width: 8px;
+  height: 8px;
+}
+
+.chat-analysis-chart-head i.expense,
+.chat-analysis-plot polyline.expense,
+.chat-analysis-track i,
+.chat-analysis-category-row i em {
+  background: #2f8bd2;
+  stroke: #2f8bd2;
+}
+
+.chat-analysis-chart-head i.income,
+.chat-analysis-plot polyline.income {
+  background: #19a974;
+  stroke: #19a974;
+}
+
+.chat-analysis-plot {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 6px;
+  height: 124px;
+}
+
+.chat-analysis-scale {
+  display: grid;
+  align-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.chat-analysis-plot svg {
+  width: 100%;
+  height: 112px;
+  align-self: end;
+  border-bottom: 1px solid #dce6ee;
+  background: linear-gradient(to bottom, transparent 31%, #e6eef4 31%, transparent 32%, transparent 66%, #e6eef4 66%, transparent 67%);
+}
+
+.chat-analysis-plot polyline {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.chat-analysis-axis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding-left: 40px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.chat-analysis-axis span:nth-child(2) {
+  text-align: center;
+}
+
+.chat-analysis-axis span:last-child {
+  text-align: right;
+}
+
+.chat-analysis-budget {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-analysis-budget > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-analysis-budget span,
+.chat-analysis-budget small,
+.chat-analysis-categories > strong,
+.chat-analysis-category-row span,
+.chat-analysis-category-row b,
+.chat-analysis-assessment span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-analysis-budget strong {
+  color: #2f8bd2;
+  font-size: 15px;
+}
+
+.chat-analysis-track,
+.chat-analysis-category-row i {
+  overflow: hidden;
+  height: 7px;
+  border-radius: 999px;
+  background: #e6edf2;
+}
+
+.chat-analysis-track i {
+  display: block;
+  height: 100%;
+}
+
+.chat-analysis-categories {
+  display: grid;
+  gap: 7px;
+}
+
+.chat-analysis-categories > strong,
+.chat-analysis-assessment strong {
+  color: #223129;
+  font-size: 13px;
+}
+
+.chat-analysis-category-row {
+  display: grid;
+  grid-template-columns: minmax(58px, 0.8fr) minmax(76px, auto);
+  gap: 6px 10px;
+  align-items: center;
+}
+
+.chat-analysis-category-row i {
+  grid-column: 1 / -1;
+}
+
+.chat-analysis-category-row i em {
+  height: 100%;
+}
+
+.chat-analysis-category-row b {
+  text-align: right;
+}
+
+.chat-analysis-assessment {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  border-top: 1px solid #dce6ee;
+  padding-top: 9px;
+  line-height: 1.5;
+}
+
 .chat-result-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

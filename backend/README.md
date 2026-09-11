@@ -645,8 +645,12 @@ The endpoint returns one of five outcomes:
 - an MVP fallback message for unsupported intents
 
 Bill analysis responses include a structured `analysis` object with period,
-category amount, monthly totals, previous-month deltas, budget usage and top
-spending highlights. The object is read-only and does not create candidates.
+category amount, monthly totals, previous-month deltas, budget usage, top
+spending highlights, daily chart points, monthly trend points, category bars and
+an `ai_assessment`. The object is read-only and does not create candidates.
+When a compatible external LLM is enabled, the model may route the request to
+`analyze_bills`, but concrete financial values are computed and returned by the
+local backend rather than sent back to the external model as tool output.
 
 When `LIFESNAP_AI_PARSE_ENDPOINT` is configured and privacy settings allow
 external processing, chat intent routing first calls the external provider with

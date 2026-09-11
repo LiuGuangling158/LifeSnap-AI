@@ -21,6 +21,9 @@ from app.schemas.chat import (
     ChatAgentStep,
     ChatAgentStepStatus,
     ChatBillAnalysis,
+    ChatBillAnalysisCategoryPoint,
+    ChatBillAnalysisDailyPoint,
+    ChatBillAnalysisTrendPoint,
     ChatIntent,
     ChatMessageRequest,
     ChatMessageResponse,
@@ -30,7 +33,7 @@ from app.schemas.task import TaskPriority, TaskSource, TaskType
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_runtime_service import agent_runtime_service
 from app.services.agent_tool_registry import AgentFunctionCallSession, agent_tool_registry
-from app.services.bill_analysis_service import bill_analysis_service
+from app.services.bill_analysis_service import BillAnalysisResult, bill_analysis_service
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
@@ -1352,7 +1355,7 @@ class RuleBasedChatService:
             need_user_confirmation=False,
         )
 
-    def _chat_bill_analysis(self, analysis) -> ChatBillAnalysis:
+    def _chat_bill_analysis(self, analysis: BillAnalysisResult) -> ChatBillAnalysis:
         return ChatBillAnalysis(
             period_label=analysis.period_label,
             category=analysis.category,
@@ -1381,6 +1384,37 @@ class RuleBasedChatService:
             top_merchant_amount=analysis.top_merchant_amount,
             top_day=analysis.top_day,
             top_day_expense=analysis.top_day_expense,
+            daily_points=[
+                ChatBillAnalysisDailyPoint(
+                    date=point.date,
+                    total_expense=point.total_expense,
+                    total_income=point.total_income,
+                    cumulative_expense=point.cumulative_expense,
+                    budget_usage_percentage=point.budget_usage_percentage,
+                )
+                for point in analysis.daily_points
+            ],
+            monthly_trend=[
+                ChatBillAnalysisTrendPoint(
+                    label=point.label,
+                    year=point.year,
+                    month=point.month,
+                    total_expense=point.total_expense,
+                    total_income=point.total_income,
+                    net_amount=point.net_amount,
+                )
+                for point in analysis.monthly_trend
+            ],
+            category_breakdown=[
+                ChatBillAnalysisCategoryPoint(
+                    category=point.category,
+                    amount=point.amount,
+                    count=point.count,
+                    percentage=point.percentage,
+                )
+                for point in analysis.category_breakdown
+            ],
+            ai_assessment=analysis.ai_assessment,
         )
 
     def _diary_reflection_response(
