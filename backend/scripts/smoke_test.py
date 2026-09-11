@@ -93,6 +93,7 @@ import json
 from app.core.config import settings
 from app.services.agent_runtime_service import agent_runtime_service
 from app.services.external_ai_parser import external_ai_parser
+from app.services.ocr_service import ocr_service
 assert settings.llm_agent_provider == 'deepseek'
 assert settings.llm_agent_base_url == 'https://api.deepseek.com'
 assert settings.llm_agent_model == 'deepseek-v4-flash'
@@ -100,6 +101,7 @@ assert settings.llm_agent_api_key == 'sk-deepseek-smoke'
 assert settings.llm_agent_chat_api_key == 'sk-deepseek-smoke'
 assert settings.llm_agent_api_key_for_kind('chat_intent') == 'sk-deepseek-smoke'
 assert settings.llm_agent_api_key_for_kind('bill') == 'sk-deepseek-smoke'
+assert not settings.real_ocr_enabled
 assert settings.real_llm_agent_enabled
 model_trace = agent_runtime_service.model_trace()
 assert model_trace.provider == 'deepseek'
@@ -135,6 +137,24 @@ analysis_tool_result = external_ai_parser._execute_llm_read_tool(
 )
 assert analysis_tool_result['privacy'] == 'financial_values_redacted_for_external_model'
 assert 'total_expense' not in analysis_tool_result
+tool_call_response = {
+    'choices': [
+        {
+            'message': {
+                'content': None,
+                'tool_calls': [
+                    {
+                        'id': 'call_1',
+                        'type': 'function',
+                        'function': {'name': 'knowledge_search', 'arguments': '{"query":"预算"}'},
+                    }
+                ],
+            }
+        }
+    ]
+}
+assert external_ai_parser._llm_response_message(tool_call_response)['tool_calls'][0]['id'] == 'call_1'
+assert external_ai_parser._llm_tool_calls(external_ai_parser._llm_response_message(tool_call_response))[0]['function']['name'] == 'knowledge_search'
 print(json.dumps({'provider': settings.llm_agent_provider, 'model': body['model']}))
 """
     test_env = _deepseek_config_env(DEEPSEEK_API_KEY="sk-deepseek-smoke")
@@ -180,6 +200,10 @@ assert settings.llm_agent_api_key_for_kind('chat_intent') == 'sk-chat-scoped'
 assert settings.llm_agent_api_key_for_kind('bill') == 'sk-default-scoped'
 assert settings.llm_agent_api_key_for_kind('task') == 'sk-default-scoped'
 assert settings.external_ocr_api_key == 'sk-image-scoped'
+assert settings.external_ocr_provider == 'kimi_vision'
+assert settings.external_ocr_endpoint == 'https://api.moonshot.cn/v1/chat/completions'
+assert settings.external_ocr_model == 'kimi-k2.6'
+assert settings.kimi_vision_ocr_enabled
 assert settings.external_ai_parser_api_key == 'sk-default-scoped'
 assert settings.llm_agent_api_key_configured
 assert settings.real_llm_agent_enabled
@@ -200,6 +224,37 @@ assert settings.real_llm_agent_enabled
         text=True,
     )
     _assert(result.returncode == 0, f"Scoped AI key routing failed: {result.stderr}")
+
+    kimi_vision_script = """
+from app.services.ocr_service import ocr_service
+body = ocr_service._kimi_vision_request_body(
+    filename='receipt.png',
+    content_type='image/png',
+    content=b'fake-image-bytes',
+)
+assert body['model'] == 'kimi-k2.6'
+assert body['messages'][1]['content'][0]['type'] == 'image_url'
+assert body['messages'][1]['content'][0]['image_url']['url'].startswith('data:image/png;base64,')
+parsed = ocr_service._kimi_vision_response_data(
+    {'choices': [{'message': {'content': '{"text":"瑞幸咖啡 实付 18.50 元","confidence":0.91,"provider":"kimi_vision","warnings":[]}'}}]}
+)
+assert parsed['text'].startswith('瑞幸咖啡')
+assert parsed['confidence'] == 0.91
+plain = ocr_service._kimi_vision_response_data(
+    {'choices': [{'message': {'content': '商户：便利店\\n金额：12.30 元'}}]}
+)
+assert plain['text'].startswith('商户')
+assert 'kimi_vision_non_json_response' in plain['warnings']
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", kimi_vision_script],
+        cwd=BACKEND_DIR,
+        env=scoped_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    _assert(result.returncode == 0, f"Kimi vision OCR adapter failed: {result.stderr}")
 
     reasoning_script = """
 from app.services.external_ai_parser import external_ai_parser
@@ -236,6 +291,17 @@ def _deepseek_config_env(**overrides: str) -> dict[str, str]:
         "LIFESNAP_LLM_DEFAULT_API_KEY",
         "LIFESNAP_IMAGE_BILL_API_KEY",
         "LIFESNAP_OCR_API_KEY",
+        "LIFESNAP_OCR_ENDPOINT",
+        "LIFESNAP_OCR_PROVIDER",
+        "LIFESNAP_OCR_MODEL",
+        "LIFESNAP_KIMI_API_KEY",
+        "LIFESNAP_KIMI_OCR_ENDPOINT",
+        "LIFESNAP_KIMI_VISION_MODEL",
+        "LIFESNAP_KIMI_BASE_URL",
+        "MOONSHOT_API_KEY",
+        "MOONSHOT_BASE_URL",
+        "MOONSHOT_VISION_MODEL",
+        "KIMI_API_KEY",
         "LIFESNAP_DEEPSEEK_CHAT_API_KEY",
         "LIFESNAP_CHAT_LLM_API_KEY",
         "DEEPSEEK_CHAT_API_KEY",
@@ -299,6 +365,16 @@ def _run_isolated_smoke(data_dir: str) -> int:
     test_env["LIFESNAP_DATA_DIR"] = data_dir
     test_env["LIFESNAP_OCR_ENDPOINT"] = ""
     test_env["LIFESNAP_OCR_API_KEY"] = ""
+    test_env["LIFESNAP_OCR_PROVIDER"] = ""
+    test_env["LIFESNAP_OCR_MODEL"] = ""
+    test_env["LIFESNAP_KIMI_API_KEY"] = ""
+    test_env["LIFESNAP_KIMI_OCR_ENDPOINT"] = ""
+    test_env["LIFESNAP_KIMI_VISION_MODEL"] = ""
+    test_env["LIFESNAP_KIMI_BASE_URL"] = ""
+    test_env["MOONSHOT_API_KEY"] = ""
+    test_env["MOONSHOT_BASE_URL"] = ""
+    test_env["MOONSHOT_VISION_MODEL"] = ""
+    test_env["KIMI_API_KEY"] = ""
     test_env["LIFESNAP_AI_PARSE_ENDPOINT"] = ""
     test_env["LIFESNAP_AI_PARSE_API_KEY"] = ""
     test_env["LIFESNAP_DEFAULT_AI_API_KEY"] = ""

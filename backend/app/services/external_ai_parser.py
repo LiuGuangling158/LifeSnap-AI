@@ -634,15 +634,7 @@ class ExternalAiParserService:
         return f"{url}/chat/completions"
 
     def _llm_response_content(self, response_body: dict[str, Any]) -> str:
-        choices = response_body.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise ValueError("LLM response must include choices.")
-        choice = choices[0]
-        if not isinstance(choice, dict):
-            raise ValueError("LLM choice must be an object.")
-        message = choice.get("message")
-        if not isinstance(message, dict):
-            raise ValueError("LLM choice must include a message object.")
+        message = self._llm_response_message(response_body)
         content = message.get("content")
         if isinstance(content, str):
             return content
@@ -654,6 +646,18 @@ class ExternalAiParserService:
             if parts:
                 return "".join(parts)
         raise ValueError("LLM message content must be text.")
+
+    def _llm_response_message(self, response_body: dict[str, Any]) -> dict[str, Any]:
+        choices = response_body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValueError("LLM response must include choices.")
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            raise ValueError("LLM choice must be an object.")
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise ValueError("LLM choice must include a message object.")
+        return message
 
     def _json_object_from_text(self, text: str) -> dict[str, Any]:
         cleaned = text.strip()

@@ -119,17 +119,23 @@ class DiagnosticsService:
 
     def _ocr_integration_check(self) -> IntegrationCheck:
         configured = settings.real_ocr_enabled
-        blockers = self._external_ai_privacy_blockers()
+        blockers = self._external_ai_privacy_blockers() + self._ocr_credential_blockers()
         warnings: list[str] = []
         next_action: str | None = None
 
         if not configured:
             warnings.append("ocr_engine_not_configured")
             next_action = "Set LIFESNAP_OCR_ENDPOINT to enable external OCR."
+        elif "kimi_api_key_missing" in blockers:
+            next_action = "Set LIFESNAP_IMAGE_BILL_API_KEY, LIFESNAP_KIMI_API_KEY, or MOONSHOT_API_KEY before using Kimi Vision OCR."
         elif blockers:
             next_action = "Disable local-only mode and allow AI text processing before using external OCR."
         if configured:
             warnings.append("original_attachment_required_for_external_ocr")
+
+        capabilities = ["attachment_text_recognition", "stored_text_fallback"]
+        if settings.kimi_vision_ocr_enabled:
+            capabilities.extend(["kimi_vision_chat_completions", "image_bill_text_extraction"])
 
         return IntegrationCheck(
             name="ocr",
@@ -140,7 +146,7 @@ class DiagnosticsService:
             endpoint_configured=bool(settings.external_ocr_endpoint),
             api_key_configured=bool(settings.external_ocr_api_key),
             timeout_seconds=settings.external_ocr_timeout_seconds,
-            capabilities=["attachment_text_recognition", "stored_text_fallback"],
+            capabilities=capabilities,
             privacy_blockers=blockers,
             warnings=warnings,
             next_action=next_action,
@@ -488,6 +494,11 @@ class DiagnosticsService:
     def _llm_credential_blockers(self) -> list[str]:
         if settings.llm_agent_configured and settings.deepseek_llm_agent_enabled and not settings.llm_agent_api_key_configured:
             return ["deepseek_api_key_missing"]
+        return []
+
+    def _ocr_credential_blockers(self) -> list[str]:
+        if settings.real_ocr_enabled and settings.kimi_vision_ocr_enabled and not settings.external_ocr_api_key:
+            return ["kimi_api_key_missing"]
         return []
 
     def _configured_ai_provider_name(self) -> str:

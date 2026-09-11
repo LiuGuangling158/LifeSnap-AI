@@ -63,6 +63,62 @@ def _env_first_optional_str(*names: str) -> str | None:
     return None
 
 
+KIMI_OCR_PROVIDERS = {"kimi", "kimi_vision", "moonshot", "moonshot_vision", "moonshot_kimi"}
+
+
+def _chat_completions_url(base_url: str) -> str:
+    url = base_url.rstrip("/")
+    if url.endswith("/chat/completions"):
+        return url
+    return f"{url}/chat/completions"
+
+
+def _kimi_ocr_requested() -> bool:
+    provider = _env_optional_str("LIFESNAP_OCR_PROVIDER")
+    if provider and provider.casefold() in KIMI_OCR_PROVIDERS:
+        return True
+    if _env_first_optional_str("LIFESNAP_IMAGE_BILL_API_KEY", "LIFESNAP_KIMI_API_KEY", "MOONSHOT_API_KEY", "KIMI_API_KEY"):
+        return True
+    return False
+
+
+def _default_ocr_endpoint() -> str | None:
+    endpoint = _env_first_optional_str("LIFESNAP_OCR_ENDPOINT", "LIFESNAP_KIMI_OCR_ENDPOINT")
+    if endpoint:
+        return endpoint
+    if _kimi_ocr_requested():
+        return _chat_completions_url(_env_first_optional_str("LIFESNAP_KIMI_BASE_URL", "MOONSHOT_BASE_URL") or "https://api.moonshot.cn/v1")
+    return None
+
+
+def _default_ocr_api_key() -> str | None:
+    return _env_first_optional_str(
+        "LIFESNAP_IMAGE_BILL_API_KEY",
+        "LIFESNAP_KIMI_API_KEY",
+        "MOONSHOT_API_KEY",
+        "KIMI_API_KEY",
+        "LIFESNAP_OCR_API_KEY",
+    )
+
+
+def _default_ocr_provider() -> str:
+    provider = _env_optional_str("LIFESNAP_OCR_PROVIDER")
+    if provider:
+        return provider
+    if _kimi_ocr_requested():
+        return "kimi_vision"
+    return "external_http"
+
+
+def _default_ocr_model() -> str | None:
+    model = _env_first_optional_str("LIFESNAP_OCR_MODEL", "LIFESNAP_KIMI_VISION_MODEL", "MOONSHOT_VISION_MODEL")
+    if model:
+        return model
+    if _kimi_ocr_requested():
+        return "kimi-k2.6"
+    return None
+
+
 def _deepseek_requested() -> bool:
     provider = _env_optional_str("LIFESNAP_LLM_PROVIDER")
     if provider and provider.casefold() == "deepseek":
@@ -170,11 +226,10 @@ class Settings:
     local_attachment_file_dir: Path = DATA_DIR / "attachment_files"
     local_audit_path: Path = DATA_DIR / "audit_events.json"
     local_idempotency_path: Path = DATA_DIR / "idempotency.json"
-    external_ocr_endpoint: str | None = field(default_factory=lambda: os.getenv("LIFESNAP_OCR_ENDPOINT"))
-    external_ocr_api_key: str | None = field(
-        default_factory=lambda: _env_first_optional_str("LIFESNAP_IMAGE_BILL_API_KEY", "LIFESNAP_OCR_API_KEY")
-    )
-    external_ocr_provider: str = field(default_factory=lambda: os.getenv("LIFESNAP_OCR_PROVIDER", "external_http"))
+    external_ocr_endpoint: str | None = field(default_factory=_default_ocr_endpoint)
+    external_ocr_api_key: str | None = field(default_factory=_default_ocr_api_key)
+    external_ocr_provider: str = field(default_factory=_default_ocr_provider)
+    external_ocr_model: str | None = field(default_factory=_default_ocr_model)
     external_ocr_timeout_seconds: float = field(
         default_factory=lambda: _env_float("LIFESNAP_OCR_TIMEOUT_SECONDS", 15.0)
     )
@@ -222,6 +277,10 @@ class Settings:
     @property
     def ocr_provider_name(self) -> str:
         return self.external_ocr_provider if self.real_ocr_enabled else "stored_text_stub"
+
+    @property
+    def kimi_vision_ocr_enabled(self) -> bool:
+        return self.external_ocr_provider.casefold() in KIMI_OCR_PROVIDERS
 
     @property
     def real_ai_parser_enabled(self) -> bool:
