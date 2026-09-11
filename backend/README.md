@@ -416,8 +416,8 @@ DELETE /agent/task-candidates/{candidate_id}
 
 Bill and task parsing can use one of three paths:
 
-- direct DeepSeek/OpenAI-compatible LLM Agent via `DEEPSEEK_API_KEY` or
-  `LIFESNAP_LLM_*`
+- direct DeepSeek/OpenAI-compatible LLM Agent via `LIFESNAP_DEEPSEEK_CHAT_API_KEY`,
+  `DEEPSEEK_API_KEY`, or `LIFESNAP_LLM_*`
 - custom external HTTP parser via `LIFESNAP_AI_PARSE_ENDPOINT`
 - built-in rule-based fallback when no external parser is available or the call fails
 
@@ -437,10 +437,13 @@ The Agent runtime also exposes three explicit layers:
 - Fine-tuning readiness through training-example export plus an optional
   fine-tuned model ID that takes priority over the base model.
 
-Configure the direct DeepSeek LLM Agent:
+Configure the direct DeepSeek LLM Agent. The backend loads environment variables
+from the process environment, then from `.env` in the project root or `backend/.env`:
 
 ```powershell
-$env:DEEPSEEK_API_KEY = "your-deepseek-api-key"
+$env:LIFESNAP_DEEPSEEK_CHAT_API_KEY = "your-deepseek-chat-api-key"
+$env:LIFESNAP_DEFAULT_AI_API_KEY = "your-default-ai-api-key"
+$env:LIFESNAP_IMAGE_BILL_API_KEY = "your-image-bill-api-key"
 $env:LIFESNAP_LLM_PROVIDER = "deepseek"
 $env:LIFESNAP_LLM_MODEL = "deepseek-v4-flash"
 $env:LIFESNAP_LLM_BASE_URL = "https://api.deepseek.com"
@@ -451,10 +454,22 @@ $env:LIFESNAP_LLM_TIMEOUT_SECONDS = "20"
 $env:LIFESNAP_LLM_RESPONSE_FORMAT = "json_object"
 ```
 
-For DeepSeek, setting only `DEEPSEEK_API_KEY` is enough to choose provider
-`deepseek`, base URL `https://api.deepseek.com`, and default model
-`deepseek-v4-flash`. Set `LIFESNAP_DEEPSEEK_MODEL` or `LIFESNAP_LLM_MODEL` to
-switch to another DeepSeek model such as `deepseek-v4-pro`.
+For DeepSeek chat routing, setting only `LIFESNAP_DEEPSEEK_CHAT_API_KEY` or
+`DEEPSEEK_API_KEY` is enough to choose provider `deepseek`, base URL
+`https://api.deepseek.com`, and default model `deepseek-v4-flash`. Set
+`LIFESNAP_DEEPSEEK_MODEL` or `LIFESNAP_LLM_MODEL` to switch to another DeepSeek
+model such as `deepseek-v4-pro`.
+
+API keys can be scoped by capability:
+
+- `LIFESNAP_DEEPSEEK_CHAT_API_KEY`: chat intent routing and assistant planning.
+- `LIFESNAP_IMAGE_BILL_API_KEY`: image/PDF bill recognition through the OCR provider.
+- `LIFESNAP_DEFAULT_AI_API_KEY`: bill/task/diary parsing and custom parser fallback.
+
+The scoped variables take priority over legacy variables. If they are omitted,
+the backend falls back to `DEEPSEEK_API_KEY`, `LIFESNAP_DEEPSEEK_API_KEY`,
+`LIFESNAP_LLM_API_KEY`, `LIFESNAP_OCR_API_KEY`, or `LIFESNAP_AI_PARSE_API_KEY`
+where appropriate.
 
 `LIFESNAP_LLM_BASE_URL` may point to OpenAI or any compatible provider. If the
 base URL is omitted while `LIFESNAP_LLM_API_KEY` and `LIFESNAP_LLM_MODEL` are
@@ -462,7 +477,8 @@ set, it defaults to `https://api.openai.com/v1`. For local compatible gateways,
 the API key can be omitted as long as `LIFESNAP_LLM_BASE_URL` and
 `LIFESNAP_LLM_MODEL` are set.
 When provider is `deepseek`, an API key is required and can be supplied through
-`DEEPSEEK_API_KEY`, `LIFESNAP_DEEPSEEK_API_KEY`, or `LIFESNAP_LLM_API_KEY`.
+`LIFESNAP_DEEPSEEK_CHAT_API_KEY`, `DEEPSEEK_API_KEY`,
+`LIFESNAP_DEEPSEEK_API_KEY`, or `LIFESNAP_LLM_API_KEY`.
 If `LIFESNAP_LLM_FINE_TUNED_MODEL` is set, that model is sent to the compatible
 chat-completions API instead of `LIFESNAP_LLM_MODEL`; the base model is kept as
 profile metadata.

@@ -97,6 +97,9 @@ assert settings.llm_agent_provider == 'deepseek'
 assert settings.llm_agent_base_url == 'https://api.deepseek.com'
 assert settings.llm_agent_model == 'deepseek-v4-flash'
 assert settings.llm_agent_api_key == 'sk-deepseek-smoke'
+assert settings.llm_agent_chat_api_key == 'sk-deepseek-smoke'
+assert settings.llm_agent_api_key_for_kind('chat_intent') == 'sk-deepseek-smoke'
+assert settings.llm_agent_api_key_for_kind('bill') == 'sk-deepseek-smoke'
 assert settings.real_llm_agent_enabled
 model_trace = agent_runtime_service.model_trace()
 assert model_trace.provider == 'deepseek'
@@ -167,6 +170,37 @@ assert settings.llm_agent_model == 'deepseek-v4-pro'
     )
     _assert(result.returncode == 0, f"DeepSeek key priority failed: {result.stderr}")
 
+    scoped_key_script = """
+from app.core.config import settings
+assert settings.llm_agent_provider == 'deepseek'
+assert settings.llm_agent_api_key == 'sk-chat-scoped'
+assert settings.llm_agent_chat_api_key == 'sk-chat-scoped'
+assert settings.llm_agent_default_api_key == 'sk-default-scoped'
+assert settings.llm_agent_api_key_for_kind('chat_intent') == 'sk-chat-scoped'
+assert settings.llm_agent_api_key_for_kind('bill') == 'sk-default-scoped'
+assert settings.llm_agent_api_key_for_kind('task') == 'sk-default-scoped'
+assert settings.external_ocr_api_key == 'sk-image-scoped'
+assert settings.external_ai_parser_api_key == 'sk-default-scoped'
+assert settings.llm_agent_api_key_configured
+assert settings.real_llm_agent_enabled
+"""
+    scoped_env = _deepseek_config_env(
+        LIFESNAP_LLM_PROVIDER="deepseek",
+        LIFESNAP_LLM_MODEL="deepseek-v4-flash",
+        LIFESNAP_DEEPSEEK_CHAT_API_KEY="sk-chat-scoped",
+        LIFESNAP_DEFAULT_AI_API_KEY="sk-default-scoped",
+        LIFESNAP_IMAGE_BILL_API_KEY="sk-image-scoped",
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", scoped_key_script],
+        cwd=BACKEND_DIR,
+        env=scoped_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    _assert(result.returncode == 0, f"Scoped AI key routing failed: {result.stderr}")
+
     reasoning_script = """
 from app.services.external_ai_parser import external_ai_parser
 body = external_ai_parser._llm_request_body(
@@ -198,6 +232,13 @@ def _deepseek_config_env(**overrides: str) -> dict[str, str]:
         "LIFESNAP_AI_PARSE_ENDPOINT",
         "LIFESNAP_AI_PARSE_API_KEY",
         "LIFESNAP_AI_PARSE_PROVIDER",
+        "LIFESNAP_DEFAULT_AI_API_KEY",
+        "LIFESNAP_LLM_DEFAULT_API_KEY",
+        "LIFESNAP_IMAGE_BILL_API_KEY",
+        "LIFESNAP_OCR_API_KEY",
+        "LIFESNAP_DEEPSEEK_CHAT_API_KEY",
+        "LIFESNAP_CHAT_LLM_API_KEY",
+        "DEEPSEEK_CHAT_API_KEY",
         "DEEPSEEK_API_KEY",
         "LIFESNAP_LLM_BASE_URL",
         "LIFESNAP_LLM_API_KEY",
@@ -257,11 +298,19 @@ def _run_isolated_smoke(data_dir: str) -> int:
     test_env = os.environ.copy()
     test_env["LIFESNAP_DATA_DIR"] = data_dir
     test_env["LIFESNAP_OCR_ENDPOINT"] = ""
+    test_env["LIFESNAP_OCR_API_KEY"] = ""
     test_env["LIFESNAP_AI_PARSE_ENDPOINT"] = ""
+    test_env["LIFESNAP_AI_PARSE_API_KEY"] = ""
+    test_env["LIFESNAP_DEFAULT_AI_API_KEY"] = ""
+    test_env["LIFESNAP_LLM_DEFAULT_API_KEY"] = ""
+    test_env["LIFESNAP_IMAGE_BILL_API_KEY"] = ""
     test_env["LIFESNAP_LLM_BASE_URL"] = ""
     test_env["LIFESNAP_LLM_API_KEY"] = ""
     test_env["LIFESNAP_LLM_MODEL"] = ""
     test_env["LIFESNAP_LLM_PROVIDER"] = ""
+    test_env["LIFESNAP_DEEPSEEK_CHAT_API_KEY"] = ""
+    test_env["LIFESNAP_CHAT_LLM_API_KEY"] = ""
+    test_env["DEEPSEEK_CHAT_API_KEY"] = ""
     test_env["DEEPSEEK_API_KEY"] = ""
     test_env["LIFESNAP_DEEPSEEK_API_KEY"] = ""
     test_env["LIFESNAP_DEEPSEEK_MODEL"] = ""

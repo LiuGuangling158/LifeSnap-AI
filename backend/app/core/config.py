@@ -4,6 +4,36 @@ from pathlib import Path
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+ROOT_DIR = BACKEND_DIR.parent
+
+
+def _load_env_file(path: Path) -> None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        if not name or any(character.isspace() for character in name):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
+
+
+for _env_path in (ROOT_DIR / ".env", BACKEND_DIR / ".env"):
+    _load_env_file(_env_path)
+
 DATA_DIR = Path(os.getenv("LIFESNAP_DATA_DIR", str(BACKEND_DIR / "data"))).resolve()
 
 
@@ -37,7 +67,13 @@ def _deepseek_requested() -> bool:
     provider = _env_optional_str("LIFESNAP_LLM_PROVIDER")
     if provider and provider.casefold() == "deepseek":
         return True
-    if _env_first_optional_str("DEEPSEEK_API_KEY", "LIFESNAP_DEEPSEEK_API_KEY"):
+    if _env_first_optional_str(
+        "LIFESNAP_DEEPSEEK_CHAT_API_KEY",
+        "LIFESNAP_CHAT_LLM_API_KEY",
+        "DEEPSEEK_CHAT_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "LIFESNAP_DEEPSEEK_API_KEY",
+    ):
         return True
     model = _env_first_optional_str("LIFESNAP_DEEPSEEK_MODEL", "LIFESNAP_LLM_MODEL")
     return bool(model and model.casefold().startswith("deepseek"))
@@ -59,6 +95,31 @@ def _default_llm_base_url() -> str | None:
 
 
 def _default_llm_api_key() -> str | None:
+    return _default_llm_chat_api_key() or _default_llm_default_api_key()
+
+
+def _default_llm_chat_api_key() -> str | None:
+    if _deepseek_requested():
+        return _env_first_optional_str(
+            "LIFESNAP_DEEPSEEK_CHAT_API_KEY",
+            "LIFESNAP_CHAT_LLM_API_KEY",
+            "DEEPSEEK_CHAT_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "LIFESNAP_DEEPSEEK_API_KEY",
+            "LIFESNAP_LLM_API_KEY",
+        )
+    return _env_first_optional_str(
+        "LIFESNAP_CHAT_LLM_API_KEY",
+        "LIFESNAP_LLM_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "LIFESNAP_DEEPSEEK_API_KEY",
+    )
+
+
+def _default_llm_default_api_key() -> str | None:
+    scoped_key = _env_first_optional_str("LIFESNAP_DEFAULT_AI_API_KEY", "LIFESNAP_LLM_DEFAULT_API_KEY")
+    if scoped_key:
+        return scoped_key
     if _deepseek_requested():
         return _env_first_optional_str(
             "DEEPSEEK_API_KEY",
@@ -110,7 +171,9 @@ class Settings:
     local_audit_path: Path = DATA_DIR / "audit_events.json"
     local_idempotency_path: Path = DATA_DIR / "idempotency.json"
     external_ocr_endpoint: str | None = field(default_factory=lambda: os.getenv("LIFESNAP_OCR_ENDPOINT"))
-    external_ocr_api_key: str | None = field(default_factory=lambda: os.getenv("LIFESNAP_OCR_API_KEY"))
+    external_ocr_api_key: str | None = field(
+        default_factory=lambda: _env_first_optional_str("LIFESNAP_IMAGE_BILL_API_KEY", "LIFESNAP_OCR_API_KEY")
+    )
     external_ocr_provider: str = field(default_factory=lambda: os.getenv("LIFESNAP_OCR_PROVIDER", "external_http"))
     external_ocr_timeout_seconds: float = field(
         default_factory=lambda: _env_float("LIFESNAP_OCR_TIMEOUT_SECONDS", 15.0)
@@ -119,7 +182,7 @@ class Settings:
         default_factory=lambda: os.getenv("LIFESNAP_AI_PARSE_ENDPOINT")
     )
     external_ai_parser_api_key: str | None = field(
-        default_factory=lambda: os.getenv("LIFESNAP_AI_PARSE_API_KEY")
+        default_factory=lambda: _env_first_optional_str("LIFESNAP_DEFAULT_AI_API_KEY", "LIFESNAP_AI_PARSE_API_KEY")
     )
     external_ai_parser_provider: str = field(
         default_factory=lambda: os.getenv("LIFESNAP_AI_PARSE_PROVIDER", "external_http")
@@ -129,6 +192,8 @@ class Settings:
     )
     llm_agent_base_url: str | None = field(default_factory=_default_llm_base_url)
     llm_agent_api_key: str | None = field(default_factory=_default_llm_api_key)
+    llm_agent_chat_api_key: str | None = field(default_factory=_default_llm_chat_api_key)
+    llm_agent_default_api_key: str | None = field(default_factory=_default_llm_default_api_key)
     llm_agent_model: str | None = field(default_factory=_default_llm_model)
     llm_agent_fine_tuned_model: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_LLM_FINE_TUNED_MODEL")
@@ -175,8 +240,17 @@ class Settings:
         if not self.llm_agent_configured:
             return False
         if self.deepseek_llm_agent_enabled:
-            return bool(self.llm_agent_api_key)
+            return self.llm_agent_api_key_configured
         return True
+
+    @property
+    def llm_agent_api_key_configured(self) -> bool:
+        return bool(self.llm_agent_api_key or self.llm_agent_chat_api_key or self.llm_agent_default_api_key)
+
+    def llm_agent_api_key_for_kind(self, kind: str) -> str | None:
+        if kind.casefold() == "chat_intent":
+            return self.llm_agent_chat_api_key or self.llm_agent_api_key
+        return self.llm_agent_default_api_key or self.llm_agent_api_key
 
     @property
     def llm_agent_configured(self) -> bool:

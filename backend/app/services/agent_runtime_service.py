@@ -86,7 +86,7 @@ class AgentRuntimeService:
             external_model_ready=active_external_ready,
             local_fallback_active=not active_external_ready,
             endpoint_configured=bool(settings.llm_agent_base_url or settings.external_ai_parser_endpoint),
-            api_key_configured=bool(settings.llm_agent_api_key or settings.external_ai_parser_api_key),
+            api_key_configured=bool(settings.llm_agent_api_key_configured or settings.external_ai_parser_api_key),
             privacy_blockers=privacy_blockers,
             credential_blockers=credential_blockers,
             next_action=self._next_action(
@@ -110,7 +110,7 @@ class AgentRuntimeService:
         return blockers
 
     def _credential_blockers(self) -> list[str]:
-        if settings.llm_agent_configured and settings.deepseek_llm_agent_enabled and not settings.llm_agent_api_key:
+        if settings.llm_agent_configured and settings.deepseek_llm_agent_enabled and not settings.llm_agent_api_key_configured:
             return ["deepseek_api_key_missing"]
         return []
 
@@ -136,12 +136,12 @@ class AgentRuntimeService:
         if external_model_ready:
             return None
         if credential_blockers:
-            return "配置 DEEPSEEK_API_KEY 或 LIFESNAP_LLM_API_KEY 后启用 DeepSeek。"
+            return "配置 LIFESNAP_DEEPSEEK_CHAT_API_KEY、DEEPSEEK_API_KEY 或 LIFESNAP_LLM_API_KEY 后启用 DeepSeek。"
         if privacy_blockers:
             return "关闭本地-only 模式并允许 AI 文本处理后，外部大模型才会参与解析。"
         if external_model_configured:
             return "检查大模型 base URL、模型名和 API key 配置。"
-        return "配置 DEEPSEEK_API_KEY 后，可启用 DeepSeek 大模型解析。"
+        return "配置 LIFESNAP_DEEPSEEK_CHAT_API_KEY 或 DEEPSEEK_API_KEY 后，可启用 DeepSeek 大模型解析。"
 
     def fine_tuning_dataset(self, limit: int = 50) -> AgentFineTuningDatasetResponse:
         examples: list[AgentFineTuningExample] = []

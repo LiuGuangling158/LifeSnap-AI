@@ -154,9 +154,9 @@ class DiagnosticsService:
 
         if not configured:
             warnings.append("rule_based_parser_fallback")
-            next_action = "Set DEEPSEEK_API_KEY to enable the built-in DeepSeek LLM agent, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
+            next_action = "Set LIFESNAP_DEEPSEEK_CHAT_API_KEY or DEEPSEEK_API_KEY to enable the built-in DeepSeek LLM agent, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
         elif "deepseek_api_key_missing" in blockers:
-            next_action = "Set DEEPSEEK_API_KEY or LIFESNAP_LLM_API_KEY before using DeepSeek."
+            next_action = "Set LIFESNAP_DEEPSEEK_CHAT_API_KEY, DEEPSEEK_API_KEY, or LIFESNAP_LLM_API_KEY before using DeepSeek."
         elif blockers:
             next_action = "Disable local-only mode and allow AI text processing before using external AI parsing."
 
@@ -173,7 +173,7 @@ class DiagnosticsService:
             configured=configured,
             ready=configured and not blockers,
             endpoint_configured=bool(settings.external_ai_parser_endpoint or settings.llm_agent_base_url),
-            api_key_configured=bool(settings.external_ai_parser_api_key or settings.llm_agent_api_key),
+            api_key_configured=bool(settings.external_ai_parser_api_key or settings.llm_agent_api_key_configured),
             timeout_seconds=(
                 settings.llm_agent_timeout_seconds
                 if settings.real_llm_agent_enabled
@@ -193,9 +193,9 @@ class DiagnosticsService:
 
         if not configured:
             warnings.append("keyword_router_fallback")
-            next_action = "Set DEEPSEEK_API_KEY to enable DeepSeek chat routing, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
+            next_action = "Set LIFESNAP_DEEPSEEK_CHAT_API_KEY or DEEPSEEK_API_KEY to enable DeepSeek chat routing, or set LIFESNAP_AI_PARSE_ENDPOINT for a custom parser."
         elif "deepseek_api_key_missing" in blockers:
-            next_action = "Set DEEPSEEK_API_KEY or LIFESNAP_LLM_API_KEY before using DeepSeek."
+            next_action = "Set LIFESNAP_DEEPSEEK_CHAT_API_KEY, DEEPSEEK_API_KEY, or LIFESNAP_LLM_API_KEY before using DeepSeek."
         elif blockers:
             next_action = "Disable local-only mode and allow AI text processing before using external chat intent routing."
 
@@ -212,7 +212,7 @@ class DiagnosticsService:
             configured=configured,
             ready=configured and not blockers,
             endpoint_configured=bool(settings.external_ai_parser_endpoint or settings.llm_agent_base_url),
-            api_key_configured=bool(settings.external_ai_parser_api_key or settings.llm_agent_api_key),
+            api_key_configured=bool(settings.external_ai_parser_api_key or settings.llm_agent_api_key_configured),
             timeout_seconds=(
                 settings.llm_agent_timeout_seconds
                 if settings.real_llm_agent_enabled
@@ -486,7 +486,7 @@ class DiagnosticsService:
         return blockers
 
     def _llm_credential_blockers(self) -> list[str]:
-        if settings.llm_agent_configured and settings.deepseek_llm_agent_enabled and not settings.llm_agent_api_key:
+        if settings.llm_agent_configured and settings.deepseek_llm_agent_enabled and not settings.llm_agent_api_key_configured:
             return ["deepseek_api_key_missing"]
         return []
 

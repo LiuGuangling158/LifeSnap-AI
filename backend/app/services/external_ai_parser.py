@@ -253,6 +253,7 @@ class ExternalAiParserService:
         endpoint = self._llm_chat_completions_url(settings.llm_agent_base_url)
         if endpoint is None or settings.llm_agent_runtime_model is None:
             return None, []
+        api_key = settings.llm_agent_api_key_for_kind(kind)
 
         messages = [
             {"role": "system", "content": self._llm_system_prompt(kind)},
@@ -265,10 +266,10 @@ class ExternalAiParserService:
             },
         ]
         request_body = self._llm_request_body(kind, messages, include_tools=True)
-        response_body, request_warnings = self._post_llm_agent_json(endpoint, request_body)
+        response_body, request_warnings = self._post_llm_agent_json(endpoint, request_body, api_key)
         if response_body is None and request_body.get("tools"):
             fallback_body = self._llm_request_body(kind, messages, include_tools=False)
-            response_body, fallback_warnings = self._post_llm_agent_json(endpoint, fallback_body)
+            response_body, fallback_warnings = self._post_llm_agent_json(endpoint, fallback_body, api_key)
             if response_body is None:
                 return None, request_warnings or fallback_warnings
             request_warnings = ["llm_agent_function_calling_unavailable"]
@@ -282,6 +283,7 @@ class ExternalAiParserService:
                 text,
                 messages,
                 response_body,
+                api_key,
             )
             content = self._llm_response_content(response_body)
             return self._json_object_from_text(content), request_warnings
@@ -335,13 +337,14 @@ class ExternalAiParserService:
         self,
         endpoint: str,
         request_body: dict[str, Any],
+        api_key: str | None,
     ) -> tuple[dict[str, Any] | None, list[str]]:
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
-        if settings.llm_agent_api_key:
-            headers["Authorization"] = f"Bearer {settings.llm_agent_api_key}"
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         request = Request(
             endpoint,
@@ -367,6 +370,7 @@ class ExternalAiParserService:
         original_text: str,
         messages: list[dict[str, Any]],
         response_body: dict[str, Any],
+        api_key: str | None,
     ) -> dict[str, Any]:
         assistant_message = self._llm_response_message(response_body)
         tool_calls = self._llm_tool_calls(assistant_message)
@@ -383,7 +387,7 @@ class ExternalAiParserService:
             *tool_messages,
         ]
         follow_up_body = self._llm_request_body(kind, follow_up_messages, include_tools=False)
-        follow_up_response, _ = self._post_llm_agent_json(endpoint, follow_up_body)
+        follow_up_response, _ = self._post_llm_agent_json(endpoint, follow_up_body, api_key)
         if follow_up_response is None:
             raise ValueError("LLM tool-call follow-up failed.")
         return follow_up_response
