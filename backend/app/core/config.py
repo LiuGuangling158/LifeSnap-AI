@@ -64,6 +64,7 @@ def _env_first_optional_str(*names: str) -> str | None:
 
 
 KIMI_OCR_PROVIDERS = {"kimi", "kimi_vision", "moonshot", "moonshot_vision", "moonshot_kimi"}
+SILICONFLOW_PROVIDERS = {"siliconflow", "silicon_flow", "silicon-cloud", "siliconcloud"}
 
 
 def _chat_completions_url(base_url: str) -> str:
@@ -80,6 +81,58 @@ def _kimi_ocr_requested() -> bool:
     if _env_first_optional_str("LIFESNAP_IMAGE_BILL_API_KEY", "LIFESNAP_KIMI_API_KEY", "MOONSHOT_API_KEY", "KIMI_API_KEY"):
         return True
     return False
+
+
+def _siliconflow_default_requested() -> bool:
+    provider = _env_first_optional_str("LIFESNAP_DEFAULT_AI_PROVIDER", "LIFESNAP_LLM_DEFAULT_PROVIDER")
+    if provider and provider.casefold() in SILICONFLOW_PROVIDERS:
+        return True
+    base_url = _env_first_optional_str(
+        "LIFESNAP_DEFAULT_AI_BASE_URL",
+        "LIFESNAP_LLM_DEFAULT_BASE_URL",
+        "LIFESNAP_SILICONFLOW_BASE_URL",
+        "SILICONFLOW_BASE_URL",
+    )
+    if base_url and "siliconflow" in base_url.casefold():
+        return True
+    return bool(_env_first_optional_str("LIFESNAP_SILICONFLOW_API_KEY", "SILICONFLOW_API_KEY"))
+
+
+def _default_llm_default_provider() -> str:
+    provider = _env_first_optional_str("LIFESNAP_DEFAULT_AI_PROVIDER", "LIFESNAP_LLM_DEFAULT_PROVIDER")
+    if provider:
+        return provider
+    if _siliconflow_default_requested():
+        return "siliconflow"
+    return _default_llm_provider()
+
+
+def _default_llm_default_base_url() -> str | None:
+    base_url = _env_first_optional_str(
+        "LIFESNAP_DEFAULT_AI_BASE_URL",
+        "LIFESNAP_LLM_DEFAULT_BASE_URL",
+        "LIFESNAP_SILICONFLOW_BASE_URL",
+        "SILICONFLOW_BASE_URL",
+    )
+    if base_url:
+        return base_url
+    if _siliconflow_default_requested():
+        return "https://api.siliconflow.cn/v1"
+    return _default_llm_base_url()
+
+
+def _default_llm_default_model() -> str | None:
+    model = _env_first_optional_str(
+        "LIFESNAP_DEFAULT_AI_MODEL",
+        "LIFESNAP_LLM_DEFAULT_MODEL",
+        "LIFESNAP_SILICONFLOW_MODEL",
+        "SILICONFLOW_MODEL",
+    )
+    if model:
+        return model
+    if _siliconflow_default_requested():
+        return "deepseek-ai/DeepSeek-V4-Flash"
+    return _default_llm_model()
 
 
 def _default_ocr_endpoint() -> str | None:
@@ -173,7 +226,12 @@ def _default_llm_chat_api_key() -> str | None:
 
 
 def _default_llm_default_api_key() -> str | None:
-    scoped_key = _env_first_optional_str("LIFESNAP_DEFAULT_AI_API_KEY", "LIFESNAP_LLM_DEFAULT_API_KEY")
+    scoped_key = _env_first_optional_str(
+        "LIFESNAP_DEFAULT_AI_API_KEY",
+        "LIFESNAP_LLM_DEFAULT_API_KEY",
+        "LIFESNAP_SILICONFLOW_API_KEY",
+        "SILICONFLOW_API_KEY",
+    )
     if scoped_key:
         return scoped_key
     if _deepseek_requested():
@@ -249,6 +307,9 @@ class Settings:
     llm_agent_api_key: str | None = field(default_factory=_default_llm_api_key)
     llm_agent_chat_api_key: str | None = field(default_factory=_default_llm_chat_api_key)
     llm_agent_default_api_key: str | None = field(default_factory=_default_llm_default_api_key)
+    llm_agent_default_provider: str = field(default_factory=_default_llm_default_provider)
+    llm_agent_default_base_url: str | None = field(default_factory=_default_llm_default_base_url)
+    llm_agent_default_model: str | None = field(default_factory=_default_llm_default_model)
     llm_agent_model: str | None = field(default_factory=_default_llm_model)
     llm_agent_fine_tuned_model: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_LLM_FINE_TUNED_MODEL")
@@ -296,10 +357,16 @@ class Settings:
 
     @property
     def real_llm_agent_enabled(self) -> bool:
-        if not self.llm_agent_configured:
+        return any(
+            self.real_llm_agent_enabled_for_kind(kind)
+            for kind in ("chat_intent", "bill", "task", "diary")
+        )
+
+    def real_llm_agent_enabled_for_kind(self, kind: str) -> bool:
+        if not self.llm_agent_configured_for_kind(kind):
             return False
-        if self.deepseek_llm_agent_enabled:
-            return self.llm_agent_api_key_configured
+        if self.llm_agent_api_key_required_for_kind(kind):
+            return bool(self.llm_agent_api_key_for_kind(kind))
         return True
 
     @property
@@ -311,15 +378,50 @@ class Settings:
             return self.llm_agent_chat_api_key or self.llm_agent_api_key
         return self.llm_agent_default_api_key or self.llm_agent_api_key
 
+    def llm_agent_provider_for_kind(self, kind: str) -> str:
+        if kind.casefold() == "chat_intent":
+            return self.llm_agent_provider
+        return self.llm_agent_default_provider or self.llm_agent_provider
+
+    def llm_agent_base_url_for_kind(self, kind: str) -> str | None:
+        if kind.casefold() == "chat_intent":
+            return self.llm_agent_base_url
+        return self.llm_agent_default_base_url or self.llm_agent_base_url
+
+    def llm_agent_runtime_model_for_kind(self, kind: str) -> str | None:
+        if kind.casefold() == "chat_intent":
+            return self.llm_agent_runtime_model
+        return self.llm_agent_fine_tuned_model or self.llm_agent_default_model or self.llm_agent_model
+
+    def llm_agent_configured_for_kind(self, kind: str) -> bool:
+        return bool(self.llm_agent_base_url_for_kind(kind) and self.llm_agent_runtime_model_for_kind(kind))
+
+    def llm_agent_api_key_required_for_kind(self, kind: str) -> bool:
+        provider = self.llm_agent_provider_for_kind(kind).casefold()
+        base_url = (self.llm_agent_base_url_for_kind(kind) or "").casefold()
+        return (
+            provider in {"deepseek", *SILICONFLOW_PROVIDERS}
+            or "api.deepseek.com" in base_url
+            or "api.siliconflow." in base_url
+        )
+
     @property
     def llm_agent_configured(self) -> bool:
         return bool(self.llm_agent_base_url and self.llm_agent_runtime_model)
 
     @property
     def deepseek_llm_agent_enabled(self) -> bool:
-        return self.llm_agent_provider.casefold() == "deepseek" or (
-            (self.llm_agent_base_url or "").rstrip("/").casefold() == "https://api.deepseek.com"
+        return self.deepseek_llm_agent_enabled_for_kind("chat_intent")
+
+    def deepseek_llm_agent_enabled_for_kind(self, kind: str) -> bool:
+        return self.llm_agent_provider_for_kind(kind).casefold() == "deepseek" or (
+            (self.llm_agent_base_url_for_kind(kind) or "").rstrip("/").casefold() == "https://api.deepseek.com"
         )
+
+    def siliconflow_llm_agent_enabled_for_kind(self, kind: str) -> bool:
+        provider = self.llm_agent_provider_for_kind(kind).casefold()
+        base_url = (self.llm_agent_base_url_for_kind(kind) or "").casefold()
+        return provider in SILICONFLOW_PROVIDERS or "api.siliconflow." in base_url
 
     @property
     def llm_agent_runtime_model(self) -> str | None:

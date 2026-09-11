@@ -31,14 +31,14 @@ class AgentRuntimeService:
 
     def model_trace(self) -> AgentModelTrace:
         fine_tuned_model = settings.llm_agent_fine_tuned_model
-        base_model = settings.llm_agent_model
-        runtime_model = settings.llm_agent_runtime_model
-        llm_configured = settings.llm_agent_configured
+        base_model = self._model_summary()
+        runtime_model = self._model_summary(runtime=True)
+        llm_configured = self._llm_configured()
         external_parser_configured = bool(settings.external_ai_parser_endpoint)
         external_model_configured = llm_configured or external_parser_configured
         privacy_blockers = self._privacy_blockers() if external_model_configured else []
         llm_credential_blockers = self._credential_blockers()
-        llm_ready = settings.real_llm_agent_enabled and not privacy_blockers and not llm_credential_blockers
+        llm_ready = self._llm_ready() and not privacy_blockers and not llm_credential_blockers
         external_parser_ready = external_parser_configured and not privacy_blockers
         active_external_ready = llm_ready or external_parser_ready
         credential_blockers = [] if external_parser_ready else llm_credential_blockers
@@ -68,7 +68,7 @@ class AgentRuntimeService:
             fine_tuning_status = "training_dataset_ready"
 
         provider = (
-            settings.llm_agent_provider
+            self._provider_summary()
             if llm_ready or (llm_configured and not external_parser_ready)
             else settings.ai_parser_provider_name
         )
@@ -85,7 +85,11 @@ class AgentRuntimeService:
             external_model_configured=external_model_configured,
             external_model_ready=active_external_ready,
             local_fallback_active=not active_external_ready,
-            endpoint_configured=bool(settings.llm_agent_base_url or settings.external_ai_parser_endpoint),
+            endpoint_configured=bool(
+                settings.llm_agent_base_url_for_kind("chat_intent")
+                or settings.llm_agent_base_url_for_kind("bill")
+                or settings.external_ai_parser_endpoint
+            ),
             api_key_configured=bool(settings.llm_agent_api_key_configured or settings.external_ai_parser_api_key),
             privacy_blockers=privacy_blockers,
             credential_blockers=credential_blockers,
@@ -110,16 +114,28 @@ class AgentRuntimeService:
         return blockers
 
     def _credential_blockers(self) -> list[str]:
-        if settings.llm_agent_configured and settings.deepseek_llm_agent_enabled and not settings.llm_agent_api_key_configured:
-            return ["deepseek_api_key_missing"]
-        return []
+        blockers: list[str] = []
+        for kind in ("chat_intent", "bill"):
+            if not settings.llm_agent_configured_for_kind(kind) or not settings.llm_agent_api_key_required_for_kind(kind):
+                continue
+            if settings.llm_agent_api_key_for_kind(kind):
+                continue
+            if settings.deepseek_llm_agent_enabled_for_kind(kind):
+                blockers.append("deepseek_api_key_missing")
+            elif settings.siliconflow_llm_agent_enabled_for_kind(kind):
+                blockers.append("siliconflow_api_key_missing")
+            else:
+                blockers.append("llm_api_key_missing")
+        return self._dedupe(blockers)
 
     def _reasoning_effort(self) -> str | None:
-        if not settings.deepseek_llm_agent_enabled:
+        if not settings.deepseek_llm_agent_enabled_for_kind("chat_intent"):
             return settings.llm_agent_reasoning_effort
         return settings.llm_agent_reasoning_effort or "none"
 
     def _function_calling_mode(self, llm_ready: bool) -> str:
+        if llm_ready and settings.deepseek_llm_agent_enabled_for_kind("chat_intent") and settings.siliconflow_llm_agent_enabled_for_kind("bill"):
+            return "mixed_deepseek_siliconflow_tool_calls_with_local_execution"
         if llm_ready and settings.deepseek_llm_agent_enabled:
             return "deepseek_native_tool_calls_with_local_execution"
         if llm_ready:
@@ -136,12 +152,46 @@ class AgentRuntimeService:
         if external_model_ready:
             return None
         if credential_blockers:
+            if "siliconflow_api_key_missing" in credential_blockers:
+                return "配置 LIFESNAP_DEFAULT_AI_API_KEY 或 SILICONFLOW_API_KEY 后启用硅基流动默认解析。"
             return "配置 LIFESNAP_DEEPSEEK_CHAT_API_KEY、DEEPSEEK_API_KEY 或 LIFESNAP_LLM_API_KEY 后启用 DeepSeek。"
         if privacy_blockers:
             return "关闭本地-only 模式并允许 AI 文本处理后，外部大模型才会参与解析。"
         if external_model_configured:
             return "检查大模型 base URL、模型名和 API key 配置。"
         return "配置 LIFESNAP_DEEPSEEK_CHAT_API_KEY 或 DEEPSEEK_API_KEY 后，可启用 DeepSeek 大模型解析。"
+
+    def _llm_configured(self) -> bool:
+        return any(settings.llm_agent_configured_for_kind(kind) for kind in ("chat_intent", "bill"))
+
+    def _llm_ready(self) -> bool:
+        return any(settings.real_llm_agent_enabled_for_kind(kind) for kind in ("chat_intent", "bill"))
+
+    def _provider_summary(self) -> str:
+        providers = [
+            settings.llm_agent_provider_for_kind("chat_intent"),
+            settings.llm_agent_provider_for_kind("bill"),
+        ]
+        return "+".join(self._dedupe(providers))
+
+    def _model_summary(self, *, runtime: bool = False) -> str | None:
+        chat_model = settings.llm_agent_runtime_model_for_kind("chat_intent") if runtime else settings.llm_agent_model
+        default_model = settings.llm_agent_runtime_model_for_kind("bill") if runtime else settings.llm_agent_default_model
+        if chat_model == default_model:
+            return chat_model
+        parts = []
+        if chat_model:
+            parts.append(f"chat:{chat_model}")
+        if default_model:
+            parts.append(f"default:{default_model}")
+        return " | ".join(parts) or None
+
+    def _dedupe(self, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            if value and value not in deduped:
+                deduped.append(value)
+        return deduped
 
     def fine_tuning_dataset(self, limit: int = 50) -> AgentFineTuningDatasetResponse:
         examples: list[AgentFineTuningExample] = []

@@ -202,7 +202,7 @@ class ExternalAiParserService:
         text: str,
         source: str,
     ) -> tuple[dict[str, Any] | None, list[str]]:
-        if settings.real_llm_agent_enabled:
+        if settings.real_llm_agent_enabled_for_kind(kind):
             return self._request_llm_agent(kind, text, source)
         return self._request_external_parser(kind, text, source)
 
@@ -250,8 +250,8 @@ class ExternalAiParserService:
         text: str,
         source: str,
     ) -> tuple[dict[str, Any] | None, list[str]]:
-        endpoint = self._llm_chat_completions_url(settings.llm_agent_base_url)
-        if endpoint is None or settings.llm_agent_runtime_model is None:
+        endpoint = self._llm_chat_completions_url(settings.llm_agent_base_url_for_kind(kind))
+        if endpoint is None or settings.llm_agent_runtime_model_for_kind(kind) is None:
             return None, []
         api_key = settings.llm_agent_api_key_for_kind(kind)
 
@@ -298,11 +298,11 @@ class ExternalAiParserService:
         include_tools: bool,
     ) -> dict[str, Any]:
         request_body: dict[str, Any] = {
-            "model": settings.llm_agent_runtime_model,
+            "model": settings.llm_agent_runtime_model_for_kind(kind),
             "messages": messages,
             "temperature": settings.llm_agent_temperature,
         }
-        self._apply_llm_provider_options(request_body)
+        self._apply_llm_provider_options(kind, request_body)
         if settings.llm_agent_response_format.casefold() == "json_object":
             request_body["response_format"] = {"type": "json_object"}
         if include_tools:
@@ -312,8 +312,8 @@ class ExternalAiParserService:
                 request_body["tool_choice"] = "auto"
         return request_body
 
-    def _apply_llm_provider_options(self, request_body: dict[str, Any]) -> None:
-        if not settings.deepseek_llm_agent_enabled:
+    def _apply_llm_provider_options(self, kind: str, request_body: dict[str, Any]) -> None:
+        if not settings.deepseek_llm_agent_enabled_for_kind(kind):
             return
 
         request_body["stream"] = False

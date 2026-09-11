@@ -460,11 +460,24 @@ For DeepSeek chat routing, setting only `LIFESNAP_DEEPSEEK_CHAT_API_KEY` or
 `LIFESNAP_DEEPSEEK_MODEL` or `LIFESNAP_LLM_MODEL` to switch to another DeepSeek
 model such as `deepseek-v4-pro`.
 
-API keys can be scoped by capability:
+API keys and providers can be scoped by capability:
 
 - `LIFESNAP_DEEPSEEK_CHAT_API_KEY`: chat intent routing and assistant planning.
 - `LIFESNAP_IMAGE_BILL_API_KEY`: image/PDF bill recognition through the OCR provider.
 - `LIFESNAP_DEFAULT_AI_API_KEY`: bill/task/diary parsing and custom parser fallback.
+
+For SiliconFlow default parsing, use its OpenAI-compatible endpoint and model:
+
+```powershell
+$env:LIFESNAP_DEFAULT_AI_PROVIDER = "siliconflow"
+$env:LIFESNAP_DEFAULT_AI_BASE_URL = "https://api.siliconflow.cn/v1"
+$env:LIFESNAP_DEFAULT_AI_MODEL = "deepseek-ai/DeepSeek-V4-Flash"
+$env:LIFESNAP_DEFAULT_AI_API_KEY = "your-siliconflow-api-key"
+```
+
+With this mixed setup, `chat_intent` uses the DeepSeek chat key and endpoint,
+while bill/task/diary candidate parsing uses SiliconFlow. Function calling stays
+enabled for both compatible chat-completions providers.
 
 The scoped variables take priority over legacy variables. If they are omitted,
 the backend falls back to `DEEPSEEK_API_KEY`, `LIFESNAP_DEEPSEEK_API_KEY`,

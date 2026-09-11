@@ -192,13 +192,26 @@ assert settings.llm_agent_model == 'deepseek-v4-pro'
 
     scoped_key_script = """
 from app.core.config import settings
+from app.services.external_ai_parser import external_ai_parser
 assert settings.llm_agent_provider == 'deepseek'
 assert settings.llm_agent_api_key == 'sk-chat-scoped'
 assert settings.llm_agent_chat_api_key == 'sk-chat-scoped'
 assert settings.llm_agent_default_api_key == 'sk-default-scoped'
+assert settings.llm_agent_default_provider == 'siliconflow'
+assert settings.llm_agent_default_base_url == 'https://api.siliconflow.cn/v1'
+assert settings.llm_agent_default_model == 'deepseek-ai/DeepSeek-V4-Flash'
 assert settings.llm_agent_api_key_for_kind('chat_intent') == 'sk-chat-scoped'
 assert settings.llm_agent_api_key_for_kind('bill') == 'sk-default-scoped'
 assert settings.llm_agent_api_key_for_kind('task') == 'sk-default-scoped'
+assert settings.llm_agent_provider_for_kind('chat_intent') == 'deepseek'
+assert settings.llm_agent_provider_for_kind('bill') == 'siliconflow'
+assert settings.llm_agent_base_url_for_kind('chat_intent') == 'https://api.deepseek.com'
+assert settings.llm_agent_base_url_for_kind('bill') == 'https://api.siliconflow.cn/v1'
+assert settings.llm_agent_runtime_model_for_kind('chat_intent') == 'deepseek-v4-flash'
+assert settings.llm_agent_runtime_model_for_kind('bill') == 'deepseek-ai/DeepSeek-V4-Flash'
+assert settings.deepseek_llm_agent_enabled_for_kind('chat_intent')
+assert not settings.deepseek_llm_agent_enabled_for_kind('bill')
+assert settings.siliconflow_llm_agent_enabled_for_kind('bill')
 assert settings.external_ocr_api_key == 'sk-image-scoped'
 assert settings.external_ocr_provider == 'kimi_vision'
 assert settings.external_ocr_endpoint == 'https://api.moonshot.cn/v1/chat/completions'
@@ -207,11 +220,27 @@ assert settings.kimi_vision_ocr_enabled
 assert settings.external_ai_parser_api_key == 'sk-default-scoped'
 assert settings.llm_agent_api_key_configured
 assert settings.real_llm_agent_enabled
+chat_body = external_ai_parser._llm_request_body(
+    'chat_intent',
+    [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}],
+    include_tools=True,
+)
+bill_body = external_ai_parser._llm_request_body(
+    'bill',
+    [{'role': 'system', 'content': 's'}, {'role': 'user', 'content': 'u'}],
+    include_tools=True,
+)
+assert chat_body['model'] == 'deepseek-v4-flash'
+assert chat_body['thinking'] == {'type': 'disabled'}
+assert bill_body['model'] == 'deepseek-ai/DeepSeek-V4-Flash'
+assert 'thinking' not in bill_body
+assert bill_body['tool_choice'] == 'auto'
 """
     scoped_env = _deepseek_config_env(
         LIFESNAP_LLM_PROVIDER="deepseek",
         LIFESNAP_LLM_MODEL="deepseek-v4-flash",
         LIFESNAP_DEEPSEEK_CHAT_API_KEY="sk-chat-scoped",
+        LIFESNAP_DEFAULT_AI_PROVIDER="siliconflow",
         LIFESNAP_DEFAULT_AI_API_KEY="sk-default-scoped",
         LIFESNAP_IMAGE_BILL_API_KEY="sk-image-scoped",
     )
@@ -288,7 +317,19 @@ def _deepseek_config_env(**overrides: str) -> dict[str, str]:
         "LIFESNAP_AI_PARSE_API_KEY",
         "LIFESNAP_AI_PARSE_PROVIDER",
         "LIFESNAP_DEFAULT_AI_API_KEY",
+        "LIFESNAP_DEFAULT_AI_PROVIDER",
+        "LIFESNAP_DEFAULT_AI_BASE_URL",
+        "LIFESNAP_DEFAULT_AI_MODEL",
         "LIFESNAP_LLM_DEFAULT_API_KEY",
+        "LIFESNAP_LLM_DEFAULT_PROVIDER",
+        "LIFESNAP_LLM_DEFAULT_BASE_URL",
+        "LIFESNAP_LLM_DEFAULT_MODEL",
+        "LIFESNAP_SILICONFLOW_API_KEY",
+        "LIFESNAP_SILICONFLOW_BASE_URL",
+        "LIFESNAP_SILICONFLOW_MODEL",
+        "SILICONFLOW_API_KEY",
+        "SILICONFLOW_BASE_URL",
+        "SILICONFLOW_MODEL",
         "LIFESNAP_IMAGE_BILL_API_KEY",
         "LIFESNAP_OCR_API_KEY",
         "LIFESNAP_OCR_ENDPOINT",
@@ -378,7 +419,19 @@ def _run_isolated_smoke(data_dir: str) -> int:
     test_env["LIFESNAP_AI_PARSE_ENDPOINT"] = ""
     test_env["LIFESNAP_AI_PARSE_API_KEY"] = ""
     test_env["LIFESNAP_DEFAULT_AI_API_KEY"] = ""
+    test_env["LIFESNAP_DEFAULT_AI_PROVIDER"] = ""
+    test_env["LIFESNAP_DEFAULT_AI_BASE_URL"] = ""
+    test_env["LIFESNAP_DEFAULT_AI_MODEL"] = ""
     test_env["LIFESNAP_LLM_DEFAULT_API_KEY"] = ""
+    test_env["LIFESNAP_LLM_DEFAULT_PROVIDER"] = ""
+    test_env["LIFESNAP_LLM_DEFAULT_BASE_URL"] = ""
+    test_env["LIFESNAP_LLM_DEFAULT_MODEL"] = ""
+    test_env["LIFESNAP_SILICONFLOW_API_KEY"] = ""
+    test_env["LIFESNAP_SILICONFLOW_BASE_URL"] = ""
+    test_env["LIFESNAP_SILICONFLOW_MODEL"] = ""
+    test_env["SILICONFLOW_API_KEY"] = ""
+    test_env["SILICONFLOW_BASE_URL"] = ""
+    test_env["SILICONFLOW_MODEL"] = ""
     test_env["LIFESNAP_IMAGE_BILL_API_KEY"] = ""
     test_env["LIFESNAP_LLM_BASE_URL"] = ""
     test_env["LIFESNAP_LLM_API_KEY"] = ""
