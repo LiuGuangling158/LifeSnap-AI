@@ -219,7 +219,8 @@ class ConfigurableOcrService:
                     ],
                 },
             ],
-            "temperature": 0,
+            "temperature": 1,
+            "response_format": {"type": "json_object"},
         }
 
     def _kimi_vision_response_data(self, response_body: dict) -> dict:

@@ -262,6 +262,8 @@ body = ocr_service._kimi_vision_request_body(
     content=b'fake-image-bytes',
 )
 assert body['model'] == 'kimi-k2.6'
+assert body['temperature'] == 1
+assert body['response_format'] == {'type': 'json_object'}
 assert body['messages'][1]['content'][0]['type'] == 'image_url'
 assert body['messages'][1]['content'][0]['image_url']['url'].startswith('data:image/png;base64,')
 parsed = ocr_service._kimi_vision_response_data(
