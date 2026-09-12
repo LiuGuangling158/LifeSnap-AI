@@ -216,6 +216,7 @@ assert settings.external_ocr_api_key == 'sk-image-scoped'
 assert settings.external_ocr_provider == 'kimi_vision'
 assert settings.external_ocr_endpoint == 'https://api.moonshot.cn/v1/chat/completions'
 assert settings.external_ocr_model == 'kimi-k2.6'
+assert settings.external_ocr_timeout_seconds == 60.0
 assert settings.kimi_vision_ocr_enabled
 assert settings.external_ai_parser_api_key == 'sk-default-scoped'
 assert settings.llm_agent_api_key_configured
@@ -262,7 +263,9 @@ body = ocr_service._kimi_vision_request_body(
     content=b'fake-image-bytes',
 )
 assert body['model'] == 'kimi-k2.6'
-assert body['temperature'] == 1
+assert body['thinking'] == {'type': 'disabled'}
+assert body['max_tokens'] == 1200
+assert 'temperature' not in body
 assert body['response_format'] == {'type': 'json_object'}
 assert body['messages'][1]['content'][0]['type'] == 'image_url'
 assert body['messages'][1]['content'][0]['image_url']['url'].startswith('data:image/png;base64,')

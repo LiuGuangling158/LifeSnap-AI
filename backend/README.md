@@ -958,14 +958,15 @@ $env:LIFESNAP_IMAGE_BILL_API_KEY = "your-kimi-api-key"
 $env:LIFESNAP_OCR_PROVIDER = "kimi_vision"
 $env:LIFESNAP_OCR_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions"
 $env:LIFESNAP_OCR_MODEL = "kimi-k2.6"
-$env:LIFESNAP_OCR_TIMEOUT_SECONDS = "15"
+$env:LIFESNAP_OCR_TIMEOUT_SECONDS = "60"
 ```
 
 When `LIFESNAP_IMAGE_BILL_API_KEY` is set and no OCR endpoint is provided, the
 backend defaults to Kimi Vision with
 `https://api.moonshot.cn/v1/chat/completions` and `kimi-k2.6`. The Kimi adapter
 sends an OpenAI-compatible multi-modal chat request with an inline base64
-`image_url`, then converts the model response into internal OCR text.
+`image_url`, disables thinking for faster OCR, then converts the model response
+into internal OCR text.
 
 Configure a custom external OCR provider instead:
 

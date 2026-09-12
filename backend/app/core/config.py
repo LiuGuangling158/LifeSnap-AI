@@ -172,6 +172,11 @@ def _default_ocr_model() -> str | None:
     return None
 
 
+def _default_ocr_timeout_seconds() -> float:
+    default_timeout = 60.0 if _kimi_ocr_requested() else 15.0
+    return _env_float("LIFESNAP_OCR_TIMEOUT_SECONDS", default_timeout)
+
+
 def _deepseek_requested() -> bool:
     provider = _env_optional_str("LIFESNAP_LLM_PROVIDER")
     if provider and provider.casefold() == "deepseek":
@@ -289,7 +294,7 @@ class Settings:
     external_ocr_provider: str = field(default_factory=_default_ocr_provider)
     external_ocr_model: str | None = field(default_factory=_default_ocr_model)
     external_ocr_timeout_seconds: float = field(
-        default_factory=lambda: _env_float("LIFESNAP_OCR_TIMEOUT_SECONDS", 15.0)
+        default_factory=_default_ocr_timeout_seconds
     )
     external_ai_parser_endpoint: str | None = field(
         default_factory=lambda: os.getenv("LIFESNAP_AI_PARSE_ENDPOINT")
