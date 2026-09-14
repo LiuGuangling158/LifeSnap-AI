@@ -287,6 +287,16 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-admin-knowledge-copy]")) {
+    copyAdminKnowledgeJson();
+    return;
+  }
+
+  if (event.target.closest("[data-admin-knowledge-download]")) {
+    downloadAdminKnowledgeJson();
+    return;
+  }
+
   if (event.target.closest("[data-open-bill-modal]")) {
     state.billDetailsOpen = false;
     state.editingBill = null;
@@ -1203,6 +1213,19 @@ function serializeAdminKnowledgeDocuments(documents = []) {
   return JSON.stringify(editable, null, 2);
 }
 
+function serializeAllKnowledgeDocuments(documents = []) {
+  const viewable = documents.map((document) => ({
+    source_id: document.source_id,
+    source: document.source || "builtin",
+    title: document.title,
+    content: document.content,
+    tags: Array.isArray(document.tags) ? document.tags : [],
+    keywords: Array.isArray(document.keywords) ? document.keywords : [],
+    enabled: document.enabled !== false,
+  }));
+  return JSON.stringify(viewable, null, 2);
+}
+
 async function loadAdminKnowledge({ showToastOnSuccess = false } = {}) {
   if (state.adminKnowledgeLoading) return;
   state.adminKnowledgeLoading = true;
@@ -1329,6 +1352,35 @@ async function revealAdminKey() {
     state.adminKeyRevealLoading = false;
     render();
   }
+}
+
+async function copyAdminKnowledgeJson() {
+  const documents = Array.isArray(state.adminKnowledge?.documents) ? state.adminKnowledge.documents : [];
+  if (!documents.length) {
+    showToast("知识库暂时为空。");
+    return;
+  }
+  try {
+    await copyText(serializeAllKnowledgeDocuments(documents));
+    showToast("已复制现有知识库内容");
+  } catch (error) {
+    showToast(error.message || "复制失败，请手动选择内容");
+  }
+}
+
+function downloadAdminKnowledgeJson() {
+  const documents = Array.isArray(state.adminKnowledge?.documents) ? state.adminKnowledge.documents : [];
+  if (!documents.length) {
+    showToast("知识库暂时为空。");
+    return;
+  }
+  const date = new Date().toISOString().slice(0, 10);
+  downloadText(
+    `lifesnap-agent-knowledge-${date}.json`,
+    serializeAllKnowledgeDocuments(documents),
+    "application/json;charset=utf-8",
+  );
+  showToast("已下载现有知识库 JSON");
 }
 
 function parseAdminKnowledgeDraft(value) {
@@ -5710,6 +5762,7 @@ function renderAdminPage() {
   };
   const documents = Array.isArray(knowledge.documents) ? knowledge.documents : [];
   const adminDocuments = documents.filter((document) => document.source === "admin");
+  const knowledgeJson = serializeAllKnowledgeDocuments(documents);
   const searchResults = state.adminKnowledgeSearchResults ?? [];
   return `
     <div class="simple-admin">
@@ -5735,6 +5788,21 @@ function renderAdminPage() {
           ${diagnosticMetric("最近刷新", formatDate(knowledge.generated_at), "info")}
         </div>
         <p class="admin-note">管理员知识写入 <code>backend/data/agent_knowledge.json</code>；同名 source_id 会覆盖内置知识，enabled=false 会禁用该知识。</p>
+      </section>
+
+      <section class="surface admin-knowledge-reader-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>现有知识库内容</h2>
+            <p>这里是当前实际参与 RAG 检索的完整内容（内置 + 管理员覆盖），只读查看。</p>
+          </div>
+          <div class="action-row">
+            <button class="button ghost" type="button" data-admin-knowledge-copy ${documents.length ? "" : "disabled"}>${icon("copy")}复制 JSON</button>
+            <button class="button ghost" type="button" data-admin-knowledge-download ${documents.length ? "" : "disabled"}>${icon("download")}下载 JSON</button>
+          </div>
+        </div>
+        <textarea class="admin-knowledge-readonly" readonly rows="12" spellcheck="false">${escapeHtml(knowledgeJson)}</textarea>
+        <p class="form-hint">如果这里有内容而下方编辑框是 []，说明当前只有内置知识，还没有管理员自定义条目。</p>
       </section>
 
       <section class="surface admin-knowledge-search-panel">
@@ -5763,7 +5831,7 @@ function renderAdminPage() {
         <div class="simple-section-heading">
           <div>
             <h2>编辑管理员知识</h2>
-            <p>只编辑管理员自定义条目；内置知识保留在代码里，必要时可用相同 source_id 覆盖。</p>
+            <p>这里不是现有知识库全文，只编辑管理员自定义条目；内置知识保留在代码里，必要时可用相同 source_id 覆盖。</p>
           </div>
           <button class="button ghost" type="button" data-admin-knowledge-reset ${state.saving ? "disabled" : ""}>
             ${icon("reset")}恢复内置知识

@@ -27,6 +27,7 @@
 }
 
 .admin-runtime-panel,
+.admin-knowledge-reader-panel,
 .admin-knowledge-search-panel,
 .admin-knowledge-editor-panel,
 .admin-knowledge-list-panel {
@@ -71,6 +72,17 @@
 .admin-knowledge-editor {
   min-height: 320px;
   resize: vertical;
+  font-family: "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.admin-knowledge-readonly {
+  min-height: 260px;
+  resize: vertical;
+  border-color: #dce8df;
+  background: #f8fbf8;
+  color: #253d31;
   font-family: "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
   font-size: 12px;
   line-height: 1.6;
