@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 from urllib.parse import quote
 
@@ -13,7 +14,7 @@ from app.schemas.attachment import (
     AttachmentSource,
 )
 from app.schemas.bill import BillSource
-from app.schemas.ocr import OcrRecognitionStatus
+from app.schemas.ocr import OcrRecognitionStatus, OcrRecognizeResponse
 from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
@@ -166,12 +167,17 @@ def parse_attachment_bill(attachment_id: UUID, request: Request) -> ParseBillRes
             detail="Attachment OCR text is missing",
         )
 
+    existing_candidate = _find_existing_attachment_bill_candidate(attachment)
+    if existing_candidate is not None:
+        return existing_candidate
+
     candidate = bill_parser.parse_bill(
         ParseBillRequest(
             text=attachment.ocr_text,
             source=_bill_source_from_attachment(attachment.source),
         )
     )
+    candidate.source_attachment_id = attachment_id
     saved_candidate = bill_candidate_store.save(candidate)
     if not privacy_settings.keep_ocr_text:
         attachment_store.clear_ocr_text(attachment_id)
@@ -207,6 +213,28 @@ def recognize_and_parse_attachment_bill(
             detail="Attachment not found",
         )
 
+    existing_candidate = _find_existing_attachment_bill_candidate(attachment)
+    if existing_candidate is not None:
+        audit_log_store.record(
+            action="attachment_bill_candidate_reused",
+            entity_type="bill_candidate",
+            entity_id=existing_candidate.candidate_id,
+            request=request,
+            metadata={
+                "attachment_id": attachment_id,
+                "source": attachment.source,
+                "matched_attachment_id": existing_candidate.source_attachment_id,
+            },
+        )
+        return AttachmentBillParseResponse(
+            attachment_id=attachment_id,
+            status=AttachmentBillParseStatus.candidate_reused,
+            ocr=_reused_candidate_ocr_result(attachment),
+            candidate=existing_candidate,
+            warnings=existing_candidate.warnings,
+            manual_entry_required=False,
+        )
+
     ocr_result = ocr_service.recognize(attachment_id)
     if ocr_result is None:
         raise HTTPException(
@@ -236,6 +264,7 @@ def recognize_and_parse_attachment_bill(
             source=_bill_source_from_attachment(attachment.source),
         )
     )
+    candidate.source_attachment_id = attachment_id
     saved_candidate = bill_candidate_store.save(candidate)
     if not privacy_settings.keep_ocr_text:
         attachment_store.clear_ocr_text(attachment_id)
@@ -279,3 +308,43 @@ def _bill_source_from_attachment(source: AttachmentSource) -> BillSource:
     if source == AttachmentSource.album:
         return BillSource.album
     return BillSource.upload
+
+
+def _find_existing_attachment_bill_candidate(
+    attachment: AttachmentRead,
+) -> ParseBillResponse | None:
+    seen_ids: set[UUID] = set()
+    candidate_attachment_ids = [attachment.id]
+    if attachment.duplicate_of is not None:
+        candidate_attachment_ids.append(attachment.duplicate_of)
+
+    duplicates = attachment_store.duplicates_for(attachment.id)
+    if duplicates is not None:
+        candidate_attachment_ids.extend(match.id for match in duplicates.matches)
+
+    for candidate_attachment_id in candidate_attachment_ids:
+        if candidate_attachment_id in seen_ids:
+            continue
+        seen_ids.add(candidate_attachment_id)
+        candidate = bill_candidate_store.find_by_source_attachment(candidate_attachment_id)
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def _reused_candidate_ocr_result(attachment: AttachmentRead) -> OcrRecognizeResponse:
+    has_text = bool(attachment.ocr_text)
+    return OcrRecognizeResponse(
+        attachment_id=attachment.id,
+        status=(
+            OcrRecognitionStatus.recognized
+            if has_text
+            else OcrRecognitionStatus.manual_required
+        ),
+        text=attachment.ocr_text,
+        confidence=1.0 if has_text else 0.0,
+        provider="stored_text_stub",
+        warnings=[] if has_text else ["candidate_reused_without_stored_ocr"],
+        manual_entry_required=False,
+        recognized_at=datetime.now(timezone.utc),
+    )

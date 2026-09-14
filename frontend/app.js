@@ -1182,7 +1182,7 @@ async function importBillImage(file) {
     });
 
     state.editingBill = null;
-    if (result.status === "candidate_created" && result.candidate) {
+    if (isAttachmentBillCandidateResult(result)) {
       state.billDraft = billDraftFromCandidate(result.candidate, uploaded);
       state.toast = "已读出账单，请核对金额后保存";
     } else {
@@ -1218,6 +1218,10 @@ function billDraftFromCandidate(candidate, attachment) {
 
 function fallbackBillDraftFromAttachment(attachment, result) {
   return { amount: "", merchant: "", category: "其他", payment_method: "", transaction_type: "expense", paid_at: new Date().toISOString(), note: "", source: "album", attachment_id: attachment.id, warnings: result?.warnings ?? [], needs_manual_entry: true };
+}
+
+function isAttachmentBillCandidateResult(result) {
+  return ["candidate_created", "candidate_reused"].includes(result?.status) && result?.candidate;
 }
 
 function billDraftNote(candidate, attachment) {
@@ -2099,7 +2103,7 @@ async function analyzeChatAttachments(attachments) {
 }
 
 function chatMessageFromAttachmentResult(attachment, result) {
-  if (result.status === "candidate_created" && result.candidate) {
+  if (isAttachmentBillCandidateResult(result)) {
     return {
       role: "assistant",
       text: `我尝试识别了图片「${attachment.name}」，先整理成一个待确认账单。`,

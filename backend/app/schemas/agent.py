@@ -96,6 +96,7 @@ class DiaryCandidateUpdate(PatchModel):
 class ParseBillResponse(BaseModel):
     candidate_id: UUID
     intent: str = "create_bill"
+    source_attachment_id: UUID | None = None
     confidence: float = Field(ge=0, le=1)
     data: BillCandidateData
     field_confidence: dict[str, float]

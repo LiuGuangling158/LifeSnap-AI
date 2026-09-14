@@ -50,6 +50,7 @@ class AttachmentDuplicateResponse(BaseModel):
 
 class AttachmentBillParseStatus(str, Enum):
     candidate_created = "candidate_created"
+    candidate_reused = "candidate_reused"
     manual_required = "manual_required"
 
 

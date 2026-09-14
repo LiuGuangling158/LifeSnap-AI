@@ -2183,6 +2183,53 @@ def _check_ocr_fallback_flow(client: ApiClient) -> None:
         flow["candidate"]["data"]["merchant"] == "\u745e\u5e78\u5496\u5561",
         "Attachment recognize-and-parse should include parsed bill candidate data",
     )
+    first_candidate_id = flow["candidate"]["candidate_id"]
+    _assert(
+        flow["candidate"]["source_attachment_id"] == attachment_id,
+        "Attachment bill candidate should keep its source attachment id",
+    )
+
+    status, reused = client.request(
+        "POST",
+        f"/attachments/{attachment_id}/recognize-and-parse-bill",
+    )
+    _assert(status == 200, "Repeated attachment recognize-and-parse should return 200")
+    _assert(
+        reused["status"] == "candidate_reused",
+        "Repeated attachment recognize-and-parse should reuse the existing candidate",
+    )
+    _assert(
+        reused["candidate"]["candidate_id"] == first_candidate_id,
+        "Repeated attachment recognize-and-parse must not create another candidate",
+    )
+
+    status, candidates = client.request("GET", "/agent/bill-candidates")
+    _assert(status == 200, "Bill candidate list should return 200")
+    linked_candidates = [
+        item
+        for item in candidates["items"]
+        if item.get("source_attachment_id") == attachment_id
+    ]
+    _assert(
+        len(linked_candidates) == 1,
+        "Only one pending bill candidate should be linked to the attachment",
+    )
+
+    status, duplicate_attachment = client.upload_png()
+    _assert(status == 201, "Duplicate attachment upload should return 201")
+    status, duplicate_reuse = client.request(
+        "POST",
+        f"/attachments/{duplicate_attachment['id']}/recognize-and-parse-bill",
+    )
+    _assert(status == 200, "Duplicate attachment recognize-and-parse should return 200")
+    _assert(
+        duplicate_reuse["status"] == "candidate_reused",
+        "Duplicate attachment should reuse a candidate from a matching image",
+    )
+    _assert(
+        duplicate_reuse["candidate"]["candidate_id"] == first_candidate_id,
+        "Duplicate attachment reuse should return the original candidate id",
+    )
 
 
 def _check_audit_log_and_request_id(client: ApiClient) -> None:

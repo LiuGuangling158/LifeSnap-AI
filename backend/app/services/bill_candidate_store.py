@@ -22,6 +22,12 @@ class LocalBillCandidateStore:
     def get(self, candidate_id: UUID) -> ParseBillResponse | None:
         return self._candidates.get(candidate_id)
 
+    def find_by_source_attachment(self, attachment_id: UUID) -> ParseBillResponse | None:
+        for candidate in self._candidates.values():
+            if candidate.source_attachment_id == attachment_id:
+                return candidate
+        return None
+
     def all(self) -> list[ParseBillResponse]:
         return list(self._candidates.values())
 
