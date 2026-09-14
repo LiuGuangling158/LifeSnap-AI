@@ -64,9 +64,9 @@ class LocalBillStore:
             deleted_only=deleted_only,
         )
         if year is not None:
-            bills = [bill for bill in bills if bill.paid_at.year == year]
+            bills = [bill for bill in bills if self._business_datetime(bill.paid_at).year == year]
         if month is not None:
-            bills = [bill for bill in bills if bill.paid_at.month == month]
+            bills = [bill for bill in bills if self._business_datetime(bill.paid_at).month == month]
         if category is not None:
             bills = [bill for bill in bills if bill.category == category]
         if transaction_type is not None:
@@ -256,7 +256,8 @@ class LocalBillStore:
         return [
             bill
             for bill in self.all()
-            if bill.paid_at.year == year and bill.paid_at.month == month
+            if self._business_datetime(bill.paid_at).year == year
+            and self._business_datetime(bill.paid_at).month == month
         ]
 
     def _totals(self, bills: list[BillRead]) -> dict[str, Decimal]:
@@ -315,7 +316,7 @@ class LocalBillStore:
         days = self._days_in_month(year, month)
         bills_by_date: dict[date, list[BillRead]] = {}
         for bill in bills:
-            paid_date = bill.paid_at.date()
+            paid_date = self._business_datetime(bill.paid_at).date()
             bills_by_date.setdefault(paid_date, []).append(bill)
 
         breakdown: list[DailyBillStatistics] = []
@@ -422,6 +423,9 @@ class LocalBillStore:
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
+
+    def _business_datetime(self, value: datetime) -> datetime:
+        return self._as_utc(value).astimezone(settings.business_tzinfo)
 
     def _load(self) -> None:
         path = settings.local_bill_path

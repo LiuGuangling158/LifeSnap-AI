@@ -1,6 +1,8 @@
 import os
+from datetime import timedelta, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -65,6 +67,15 @@ def _env_first_optional_str(*names: str) -> str | None:
 
 KIMI_OCR_PROVIDERS = {"kimi", "kimi_vision", "moonshot", "moonshot_vision", "moonshot_kimi"}
 SILICONFLOW_PROVIDERS = {"siliconflow", "silicon_flow", "silicon-cloud", "siliconcloud"}
+FALLBACK_IANA_TIMEZONES = {
+    "Asia/Shanghai": 8,
+    "Asia/Chongqing": 8,
+    "Asia/Hong_Kong": 8,
+    "Asia/Macau": 8,
+    "Asia/Singapore": 8,
+    "Asia/Taipei": 8,
+    "Asia/Bangkok": 7,
+}
 
 
 def _chat_completions_url(base_url: str) -> str:
@@ -274,6 +285,9 @@ def _default_llm_provider() -> str:
 class Settings:
     app_name: str = "LifeSnap AI API"
     app_version: str = "0.1.0"
+    business_timezone: str = field(
+        default_factory=lambda: os.getenv("LIFESNAP_BUSINESS_TIMEZONE", "Asia/Shanghai")
+    )
     local_snapshot_path: Path = DATA_DIR / "local_snapshot.json"
     local_bill_path: Path = DATA_DIR / "bills.json"
     local_task_path: Path = DATA_DIR / "tasks.json"
@@ -335,6 +349,16 @@ class Settings:
     llm_agent_reasoning_effort: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_LLM_REASONING_EFFORT")
     )
+
+    @property
+    def business_tzinfo(self):
+        try:
+            return ZoneInfo(self.business_timezone)
+        except ZoneInfoNotFoundError:
+            fallback_hours = FALLBACK_IANA_TIMEZONES.get(self.business_timezone)
+            if fallback_hours is not None:
+                return timezone(timedelta(hours=fallback_hours), self.business_timezone)
+            return timezone.utc
 
     @property
     def real_ocr_enabled(self) -> bool:

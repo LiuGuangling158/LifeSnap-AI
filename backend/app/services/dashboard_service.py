@@ -3,6 +3,7 @@ from typing import TypeVar
 
 from app.schemas.dashboard import DashboardSummary
 from app.schemas.settings import LocalDataSummary
+from app.core.config import settings
 from app.services.attachment_store import attachment_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
@@ -24,7 +25,7 @@ class DashboardService:
         recent_bill_limit: int = 5,
         candidate_limit: int = 5,
     ) -> DashboardSummary:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(settings.business_tzinfo)
         target_year = year or now.year
         target_month = month or now.month
 

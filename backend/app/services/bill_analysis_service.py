@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from decimal import Decimal
 
 from app.schemas.bill import TransactionType
+from app.core.config import settings
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.bill_store import bill_store
 from app.services.settings_store import settings_store
@@ -245,7 +246,7 @@ class BillAnalysisService:
         )
 
     def _resolve_month(self, text: str) -> tuple[int, int, str]:
-        today = date.today()
+        today = datetime.now(settings.business_tzinfo).date()
         if "上个月" in text or "上月" in text:
             month_index = today.year * 12 + today.month - 2
             year = month_index // 12

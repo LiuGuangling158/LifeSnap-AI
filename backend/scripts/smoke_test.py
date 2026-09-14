@@ -495,6 +495,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_agent_runtime_profile(client)
     _check_integration_diagnostics(client)
     _check_bill_statistics_overview(client)
+    _check_bill_business_timezone_boundaries(client)
     _check_chat_bill_analysis(client)
     _check_task_statistics_overview(client)
     _check_candidate_discard_flow(client)
@@ -1228,6 +1229,63 @@ def _check_bill_statistics_overview(client: ApiClient) -> None:
         if item["category"] == "Dining"
     )
     _assert(float(dining["percentage"]) > 0, "Category breakdown should include percentage")
+
+
+def _check_bill_business_timezone_boundaries(client: ApiClient) -> None:
+    payload = {
+        "amount": 88,
+        "merchant": "TZ Boundary Store",
+        "category": "TZ Boundary",
+        "transaction_type": "expense",
+        "paid_at": "2026-08-31T16:30:00+00:00",
+        "source": "manual",
+    }
+    status, bill = client.request(
+        "POST",
+        "/bills",
+        payload,
+        headers={"Idempotency-Key": "smoke-bill-business-timezone-boundary"},
+    )
+    _assert(status == 201, "Business timezone setup bill should be created")
+    try:
+        status, august = client.request(
+            "GET",
+            "/bills?year=2026&month=8&q=TZ%20Boundary",
+        )
+        _assert(status == 200, "August boundary query should return 200")
+        _assert(
+            august["total"] == 0,
+            "UTC August bill should not stay in August when business timezone is September",
+        )
+
+        status, september = client.request(
+            "GET",
+            "/bills?year=2026&month=9&q=TZ%20Boundary",
+        )
+        _assert(status == 200, "September boundary query should return 200")
+        _assert(september["total"] == 1, "Boundary bill should be listed in September")
+
+        status, stats = client.request("GET", "/bills/statistics/monthly?year=2026&month=9")
+        _assert(status == 200, "September boundary statistics should return 200")
+        boundary_category = next(
+            item
+            for item in stats["category_breakdown"]
+            if item["category"] == "TZ Boundary"
+        )
+        _assert(float(boundary_category["amount"]) == 88.0, "Boundary bill should enter September totals")
+
+        status, overview = client.request(
+            "GET",
+            "/bills/statistics/overview?year=2026&month=9&trend_months=1",
+        )
+        _assert(status == 200, "September boundary overview should return 200")
+        first_day = overview["daily_breakdown"][0]
+        _assert(
+            first_day["date"] == "2026-09-01" and float(first_day["total_expense"]) >= 88.0,
+            "Boundary bill should enter the September 1 daily bucket",
+        )
+    finally:
+        client.request("DELETE", f"/bills/{bill['id']}")
 
 
 def _check_task_statistics_overview(client: ApiClient) -> None:

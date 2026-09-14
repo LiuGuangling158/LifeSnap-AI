@@ -164,6 +164,9 @@ Local JSON persistence:
 
 Set `LIFESNAP_DATA_DIR` to an absolute directory to isolate all JSON data,
 snapshots and retained attachments. The default remains `backend/data`.
+Set `LIFESNAP_BUSINESS_TIMEZONE` to an IANA timezone such as `Asia/Shanghai`
+to control bill month and day boundaries for lists, charts, dashboard totals,
+and assistant budget analysis. The default is `Asia/Shanghai`.
 The smoke test uses a temporary data directory and disables external OCR/AI
 endpoints in its child process, so it does not clear user data or call providers.
 

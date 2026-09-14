@@ -16,6 +16,7 @@ from app.schemas.bill import (
 )
 from app.services.audit_log_store import audit_log_store
 from app.services.bill_store import bill_store
+from app.core.config import settings
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
 
 router = APIRouter(prefix="/bills", tags=["bills"])
@@ -65,7 +66,7 @@ def list_bills(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> BillListResponse:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(settings.business_tzinfo)
     target_year = year or (now.year if month is not None else None)
     return bill_store.list(
         year=target_year,
@@ -88,7 +89,7 @@ def get_monthly_bill_statistics(
     year: int | None = Query(default=None, ge=1970),
     month: int | None = Query(default=None, ge=1, le=12),
 ) -> MonthlyBillStatistics:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(settings.business_tzinfo)
     target_year = year or now.year
     target_month = month or now.month
     return bill_store.monthly_statistics(target_year, target_month)
@@ -101,7 +102,7 @@ def get_bill_statistics_overview(
     trend_months: int = Query(default=6, ge=1, le=24),
     top_merchant_limit: int = Query(default=5, ge=1, le=20),
 ) -> BillStatisticsOverview:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(settings.business_tzinfo)
     target_year = year or now.year
     target_month = month or now.month
     return bill_store.statistics_overview(
