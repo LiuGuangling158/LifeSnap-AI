@@ -49,6 +49,18 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    value = raw_value.strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _env_optional_str(name: str) -> str | None:
     raw_value = os.getenv(name)
     if raw_value is None:
@@ -303,6 +315,13 @@ class Settings:
     local_attachment_file_dir: Path = DATA_DIR / "attachment_files"
     local_audit_path: Path = DATA_DIR / "audit_events.json"
     local_idempotency_path: Path = DATA_DIR / "idempotency.json"
+    local_agent_knowledge_path: Path = DATA_DIR / "agent_knowledge.json"
+    admin_api_key: str | None = field(
+        default_factory=lambda: _env_first_optional_str("LIFESNAP_ADMIN_KEY", "LIFESNAP_ADMIN_API_KEY")
+    )
+    allow_admin_key_reveal: bool = field(
+        default_factory=lambda: _env_bool("LIFESNAP_ALLOW_ADMIN_KEY_REVEAL", False)
+    )
     external_ocr_endpoint: str | None = field(default_factory=_default_ocr_endpoint)
     external_ocr_api_key: str | None = field(default_factory=_default_ocr_api_key)
     external_ocr_provider: str = field(default_factory=_default_ocr_provider)

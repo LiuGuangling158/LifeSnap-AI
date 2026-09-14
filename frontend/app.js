@@ -1,3 +1,19 @@
+const i18nRuntime = window.LifeSnapI18n ?? {
+  normalizeLanguage(value) {
+    return String(value || "").toLowerCase().startsWith("en") ? "en-US" : "zh-CN";
+  },
+  getLanguageMeta(language) {
+    const normalized = this.normalizeLanguage(language);
+    return {
+      code: normalized,
+      locale: normalized,
+      title: normalized === "en-US" ? "LifeSnap · Easy Expense Tracking" : "LifeSnap · 轻松记账",
+      speechLocale: normalized,
+    };
+  },
+  applyI18nToDom() {},
+};
+
 const routes = [
   {
     id: "dashboard",
@@ -40,6 +56,14 @@ const routes = [
     subtitle: "把一句话、图片或语音整理成可确认的生活操作。",
   },
   {
+    id: "admin",
+    label: "管理",
+    icon: "database",
+    eyebrow: "RAG 管理",
+    title: "管理员",
+    subtitle: "更新 Agent 的 RAG 业务知识库。",
+  },
+  {
     id: "settings",
     label: "设置",
     icon: "settings",
@@ -66,6 +90,7 @@ const defaultTagSettings = {
 
 const profileStorageKey = "lifesnap_profile_settings";
 const assistantSessionStorageKey = "lifesnap_assistant_session";
+const languageStorageKey = "lifesnap_language";
 const knownAssistantToolIds = [
   "knowledge_search",
   "bill_candidate",
@@ -86,6 +111,7 @@ const initialAssistantSession = loadAssistantSession();
 
 const state = {
   route: getRoute(),
+  language: loadLanguage(),
   loading: true,
   saving: false,
   error: "",
@@ -192,6 +218,14 @@ const state = {
   categorySettings: null,
   budgetSettings: null,
   tagSettings: null,
+  adminKnowledge: null,
+  adminKnowledgeDraft: "[]",
+  adminKnowledgeSearchQuery: "",
+  adminKnowledgeSearchResults: [],
+  adminKnowledgeAdminKey: "",
+  adminKeyRevealLoading: false,
+  adminKnowledgeLoading: false,
+  adminKnowledgeSearching: false,
   bills: [],
   tasks: [],
   profile: loadProfileSettings(),
@@ -229,6 +263,27 @@ document.addEventListener("click", (event) => {
   const routeButton = event.target.closest("[data-route]");
   if (routeButton) {
     window.location.hash = routeButton.dataset.route;
+    return;
+  }
+
+  const languageButton = event.target.closest("[data-language]");
+  if (languageButton) {
+    setLanguage(languageButton.dataset.language);
+    return;
+  }
+
+  if (event.target.closest("[data-admin-knowledge-refresh]")) {
+    loadAdminKnowledge({ showToastOnSuccess: true });
+    return;
+  }
+
+  if (event.target.closest("[data-admin-knowledge-reset]")) {
+    resetAdminKnowledge();
+    return;
+  }
+
+  if (event.target.closest("[data-admin-key-reveal]")) {
+    revealAdminKey();
     return;
   }
 
@@ -1005,6 +1060,18 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-admin-knowledge-search-form]")) {
+    event.preventDefault();
+    await searchAdminKnowledge(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-admin-knowledge-form]")) {
+    event.preventDefault();
+    await submitAdminKnowledge(new FormData(event.target));
+    return;
+  }
+
   if (event.target.matches("[data-profile-form]")) {
     event.preventDefault();
     submitProfileSettings(new FormData(event.target));
@@ -1055,6 +1122,7 @@ async function loadData() {
       categorySettings,
       budgetSettings,
       tagSettings,
+      adminKnowledge,
     ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
@@ -1067,6 +1135,7 @@ async function loadData() {
       api("/settings/categories"),
       api("/settings/budget"),
       api("/settings/tags"),
+      api("/agent/knowledge/documents"),
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
@@ -1098,11 +1167,254 @@ async function loadData() {
     state.categorySettings = categorySettings;
     state.budgetSettings = budgetSettings;
     state.tagSettings = tagSettings;
+    setAdminKnowledge(adminKnowledge);
   } catch (error) {
     state.error = error.message || "后端连接失败";
   } finally {
     state.loading = false;
     render();
+  }
+}
+
+function setAdminKnowledge(knowledge) {
+  const documents = Array.isArray(knowledge?.documents) ? knowledge.documents : [];
+  state.adminKnowledge = {
+    generated_at: knowledge?.generated_at || new Date().toISOString(),
+    total: Number(knowledge?.total ?? documents.length),
+    builtin_count: Number(knowledge?.builtin_count ?? documents.filter((item) => item.source === "builtin").length),
+    admin_count: Number(knowledge?.admin_count ?? documents.filter((item) => item.source === "admin").length),
+    active_count: Number(knowledge?.active_count ?? documents.filter((item) => item.enabled !== false).length),
+    documents,
+  };
+  state.adminKnowledgeDraft = serializeAdminKnowledgeDocuments(documents);
+}
+
+function serializeAdminKnowledgeDocuments(documents = []) {
+  const editable = documents
+    .filter((document) => document.source === "admin")
+    .map((document) => ({
+      source_id: document.source_id,
+      title: document.title,
+      content: document.content,
+      tags: Array.isArray(document.tags) ? document.tags : [],
+      keywords: Array.isArray(document.keywords) ? document.keywords : [],
+      enabled: document.enabled !== false,
+    }));
+  return JSON.stringify(editable, null, 2);
+}
+
+async function loadAdminKnowledge({ showToastOnSuccess = false } = {}) {
+  if (state.adminKnowledgeLoading) return;
+  state.adminKnowledgeLoading = true;
+  render();
+  try {
+    const knowledge = await api("/agent/knowledge/documents");
+    setAdminKnowledge(knowledge);
+    if (showToastOnSuccess) {
+      state.toast = "知识库状态已刷新";
+    }
+  } catch (error) {
+    state.toast = error.message || "知识库加载失败";
+  } finally {
+    state.adminKnowledgeLoading = false;
+    render();
+  }
+}
+
+async function searchAdminKnowledge(formData) {
+  const query = String(formData.get("q") || "").trim();
+  state.adminKnowledgeSearchQuery = query;
+  if (!query) {
+    state.adminKnowledgeSearchResults = [];
+    render();
+    return;
+  }
+  state.adminKnowledgeSearching = true;
+  render();
+  try {
+    state.adminKnowledgeSearchResults = await api(`/agent/knowledge/search?q=${encodeURIComponent(query)}&limit=5`);
+  } catch (error) {
+    state.adminKnowledgeSearchResults = [];
+    state.toast = error.message || "知识库检索失败";
+  } finally {
+    state.adminKnowledgeSearching = false;
+    render();
+  }
+}
+
+async function submitAdminKnowledge(formData) {
+  if (state.saving) return;
+  const adminKey = String(formData.get("admin_key") || state.adminKnowledgeAdminKey || "").trim();
+  const draft = String(formData.get("documents_json") || "").trim() || "[]";
+  state.adminKnowledgeAdminKey = adminKey;
+  state.adminKnowledgeDraft = draft;
+  if (!adminKey) {
+    showToast("请输入管理员密钥。需要与后端 LIFESNAP_ADMIN_KEY 一致。");
+    return;
+  }
+
+  let documents;
+  try {
+    documents = parseAdminKnowledgeDraft(draft);
+  } catch (error) {
+    showToast(error.message || "知识库 JSON 格式不正确");
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const updated = await api("/agent/knowledge/documents", {
+      method: "PUT",
+      headers: adminKnowledgeHeaders(adminKey),
+      body: JSON.stringify({ documents }),
+    });
+    setAdminKnowledge(updated);
+    await refreshAgentRuntimeProfile();
+    state.toast = "RAG 知识库已更新，Agent 会在下一次对话中使用新知识。";
+  } catch (error) {
+    state.toast = adminKnowledgeErrorMessage(error);
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function resetAdminKnowledge() {
+  if (state.saving) return;
+  const adminKey = state.adminKnowledgeAdminKey.trim();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再重置。需要与后端 LIFESNAP_ADMIN_KEY 一致。");
+    return;
+  }
+  if (!window.confirm("确认清空管理员自定义知识，恢复为内置 RAG 知识库吗？")) {
+    return;
+  }
+
+  state.saving = true;
+  render();
+  try {
+    const updated = await api("/agent/knowledge/reset", {
+      method: "POST",
+      headers: adminKnowledgeHeaders(adminKey),
+      body: JSON.stringify({ confirm: true }),
+    });
+    setAdminKnowledge(updated);
+    state.adminKnowledgeSearchResults = [];
+    await refreshAgentRuntimeProfile();
+    state.toast = "管理员知识已重置，当前使用内置 RAG 知识库。";
+  } catch (error) {
+    state.toast = adminKnowledgeErrorMessage(error);
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function revealAdminKey() {
+  if (state.adminKeyRevealLoading || state.saving) return;
+  state.adminKeyRevealLoading = true;
+  render();
+  try {
+    const result = await api("/agent/admin-key");
+    const adminKey = String(result?.admin_key || "").trim();
+    if (!adminKey) {
+      throw new Error("未读取到管理员密钥。");
+    }
+    state.adminKnowledgeAdminKey = adminKey;
+    state.toast = "已从本机环境填入管理员密钥。";
+  } catch (error) {
+    state.toast = adminKeyRevealErrorMessage(error);
+  } finally {
+    state.adminKeyRevealLoading = false;
+    render();
+  }
+}
+
+function parseAdminKnowledgeDraft(value) {
+  const parsed = JSON.parse(value || "[]");
+  if (!Array.isArray(parsed)) {
+    throw new Error("知识库 JSON 必须是数组。");
+  }
+  return parsed.map(normalizeAdminKnowledgeDocumentInput);
+}
+
+function normalizeAdminKnowledgeDocumentInput(document, index) {
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    throw new Error(`第 ${index + 1} 条知识必须是对象。`);
+  }
+  const sourceId = String(document.source_id || "").trim();
+  const title = String(document.title || "").trim();
+  const content = String(document.content || "").trim();
+  if (!sourceId || !title || !content) {
+    throw new Error(`第 ${index + 1} 条知识缺少 source_id、title 或 content。`);
+  }
+  if (sourceId.length > 80 || title.length > 80 || content.length > 2000) {
+    throw new Error(`第 ${index + 1} 条知识超出长度限制。`);
+  }
+  return {
+    source_id: sourceId,
+    title,
+    content,
+    tags: normalizeAdminKnowledgeLabels(document.tags, 8),
+    keywords: normalizeAdminKnowledgeLabels(document.keywords, 24),
+    enabled: document.enabled !== false,
+  };
+}
+
+function normalizeAdminKnowledgeLabels(value, limit) {
+  if (Array.isArray(value)) {
+    return normalizeLabels(value, [], limit);
+  }
+  return parseLabelInput(value, limit);
+}
+
+function adminKnowledgeHeaders(adminKey) {
+  return {
+    "Content-Type": "application/json",
+    "X-LifeSnap-Admin-Key": adminKey,
+  };
+}
+
+function adminKnowledgeErrorMessage(error) {
+  const message = error?.message || "知识库更新失败";
+  if (message === "Admin API key is not configured") {
+    return "后端还没有配置 LIFESNAP_ADMIN_KEY，暂时不能保存管理员知识。";
+  }
+  if (message === "Invalid admin API key") {
+    return "管理员密钥不正确，请检查 LIFESNAP_ADMIN_KEY。";
+  }
+  return message;
+}
+
+function adminKeyRevealErrorMessage(error) {
+  const message = error?.message || "管理员密钥读取失败";
+  if (message === "Admin key reveal is disabled") {
+    return "后端没有打开本机密钥读取开关：请设置 LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true 后重启。";
+  }
+  if (message === "Admin key reveal is only available from localhost") {
+    return "管理员密钥只能在本机 localhost 预览里读取。";
+  }
+  if (message === "Admin API key is not configured") {
+    return "后端还没有配置 LIFESNAP_ADMIN_KEY。";
+  }
+  return message;
+}
+
+async function refreshAgentRuntimeProfile() {
+  try {
+    const runtime = await api("/agent/runtime");
+    if (state.bootstrap?.capabilities) {
+      state.bootstrap = {
+        ...state.bootstrap,
+        capabilities: {
+          ...state.bootstrap.capabilities,
+          agent_runtime: runtime,
+        },
+      };
+    }
+  } catch {
+    // Runtime profile refresh is best-effort; the saved knowledge is already active server-side.
   }
 }
 
@@ -2328,7 +2640,7 @@ function startVoiceInput() {
   const initialDraft = state.chatDraft.trim();
   let spokenText = "";
 
-  recognition.lang = "zh-CN";
+  recognition.lang = currentSpeechLocale();
   recognition.interimResults = true;
   recognition.continuous = false;
 
@@ -3806,10 +4118,53 @@ function getRoute() {
   return routes.some((route) => route.id === id) ? id : "dashboard";
 }
 
+function loadLanguage() {
+  try {
+    return i18nRuntime.normalizeLanguage(window.localStorage?.getItem(languageStorageKey));
+  } catch {
+    return "zh-CN";
+  }
+}
+
+function setLanguage(language) {
+  const nextLanguage = i18nRuntime.normalizeLanguage(language);
+  if (state.language === nextLanguage) return;
+  state.language = nextLanguage;
+  try {
+    window.localStorage?.setItem(languageStorageKey, nextLanguage);
+  } catch {
+    // The language switch still works for the current session if storage is unavailable.
+  }
+  render();
+}
+
+function currentLanguageMeta() {
+  return i18nRuntime.getLanguageMeta(state.language);
+}
+
+function currentLocale() {
+  return currentLanguageMeta().locale;
+}
+
+function currentSpeechLocale() {
+  return currentLanguageMeta().speechLocale;
+}
+
+function localizedWeekdays() {
+  return state.language === "en-US" ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] : ["一", "二", "三", "四", "五", "六", "日"];
+}
+
+function applyCurrentLanguage() {
+  const meta = currentLanguageMeta();
+  document.documentElement.lang = meta.code;
+  document.title = meta.title;
+  i18nRuntime.applyI18nToDom(app, meta.code);
+}
+
 function render() {
   const route = routes.find((item) => item.id === state.route) ?? routes[0];
   const primaryAction = getPrimaryAction();
-  const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "assistant", "settings"].includes(state.route);
+  const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "assistant", "admin", "settings"].includes(state.route);
   app.innerHTML = `
     <div class="app-shell mobile-shell simple-shell">
       ${renderSidebar()}
@@ -3849,6 +4204,7 @@ function render() {
       ${state.toast ? renderToast() : ""}
     </div>
   `;
+  applyCurrentLanguage();
   afterRender();
   scheduleToastDismissal();
 }
@@ -3973,7 +4329,7 @@ function renderSidebar() {
     <nav class="nav" aria-label="主导航">
       ${item("dashboard", "首页", "home")}${item("bills", "账单", "receipt")}${item("assistant", "AI 帮记", "spark")}
       <p class="nav-group-label">生活小事</p>${item("tasks", "待办", "check")}${item("diary", "日记", "book")}
-      <p class="nav-group-label">管理</p>${item("settings", "设置", "settings")}
+      <p class="nav-group-label">管理</p>${item("admin", "管理员", "database")}${item("settings", "设置", "settings")}
     </nav><div class="simple-sidebar-note">${icon("check-circle")}每笔收支，由你确认。</div>
   </aside>`;
 }
@@ -3995,6 +4351,7 @@ function renderPage() {
   if (state.route === "tasks") return renderTasksPage();
   if (state.route === "diary") return renderDiaryMobilePage();
   if (state.route === "assistant") return renderAssistantPage();
+  if (state.route === "admin") return renderAdminPage();
   if (state.route === "settings") return renderProfilePage();
   return renderDashboard();
 }
@@ -4007,7 +4364,7 @@ function renderDashboard() {
   const remaining = budget - expense;
   const recent = (dashboard.recent_bills ?? []).slice(0, 5);
   const now = new Date();
-  const dateLabel = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(now);
+  const dateLabel = new Intl.DateTimeFormat(currentLocale(), { month: "long", day: "numeric", weekday: "long" }).format(now);
   const tasks = [...new Map([...(dashboard.today_tasks ?? []), ...(dashboard.upcoming_reminders ?? [])].map(task => [task.id, task])).values()].slice(0, 3);
   return `<div class="simple-home">
     <header class="simple-page-header"><div><p class="simple-kicker">${escapeHtml(dateLabel)}</p><h1>记好每一笔，心里更有数。</h1><p>花了多少、花在哪里，打开就知道。</p></div><button class="button primary" type="button" data-open-bill-modal>${icon("plus")}记一笔</button></header>
@@ -4424,9 +4781,9 @@ function renderTaskCalendarModal() {
   const monthDate = dateFromMonthKey(state.taskCalendarMonthKey || monthKeyFromDate(new Date()));
   const selectedKey = taskSelectedDateKey();
   const days = diaryCalendarDays(monthDate);
-  const monthLabel = monthDate.toLocaleDateString("zh-CN", { year: "numeric", month: "long" });
+  const monthLabel = monthDate.toLocaleDateString(currentLocale(), { year: "numeric", month: "long" });
   const selectedTasks = taskCalendarTasksForDate(selectedKey);
-  const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+  const calendarWeekdays = localizedWeekdays();
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal diary-calendar-modal" role="dialog" aria-modal="true" aria-labelledby="task-calendar-title">
@@ -4449,7 +4806,7 @@ function renderTaskCalendarModal() {
           </button>
         </div>
         <div class="diary-calendar-weekdays" aria-hidden="true">
-          ${weekdays.map((day) => `<span>${day}</span>`).join("")}
+          ${calendarWeekdays.map((day) => `<span>${day}</span>`).join("")}
         </div>
         <div class="diary-calendar-grid">
           ${days.map((day) => renderTaskCalendarDay(day, monthDate, selectedKey)).join("")}
@@ -4680,7 +5037,7 @@ function compareReminderTasks(a, b) {
   const statusWeight = (task) => (task.status === "done" ? 1 : 0);
   return statusWeight(a) - statusWeight(b)
     || compareReminderTasksBySort(a, b)
-    || String(a.title ?? "").localeCompare(String(b.title ?? ""), "zh-CN");
+    || String(a.title ?? "").localeCompare(String(b.title ?? ""), currentLocale());
 }
 
 function compareReminderTasksBySort(a, b) {
@@ -4748,7 +5105,7 @@ function shortTaskTime(task) {
   if (!target) {
     return "未设置时间";
   }
-  const time = target.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  const time = target.toLocaleTimeString(currentLocale(), { hour: "2-digit", minute: "2-digit" });
   const now = new Date();
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
@@ -5002,9 +5359,9 @@ function renderDiaryCalendarModal() {
   const monthDate = dateFromMonthKey(state.diaryCalendarMonthKey || monthKeyFromDate(new Date()));
   const selectedKey = state.diarySelectedDateKey || todayDateKey();
   const days = diaryCalendarDays(monthDate);
-  const monthLabel = monthDate.toLocaleDateString("zh-CN", { year: "numeric", month: "long" });
+  const monthLabel = monthDate.toLocaleDateString(currentLocale(), { year: "numeric", month: "long" });
   const selectedEntry = diaryEntryForDate(selectedKey);
-  const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+  const calendarWeekdays = localizedWeekdays();
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal diary-calendar-modal" role="dialog" aria-modal="true" aria-labelledby="diary-calendar-title">
@@ -5027,7 +5384,7 @@ function renderDiaryCalendarModal() {
           </button>
         </div>
         <div class="diary-calendar-weekdays" aria-hidden="true">
-          ${weekdays.map((day) => `<span>${day}</span>`).join("")}
+          ${calendarWeekdays.map((day) => `<span>${day}</span>`).join("")}
         </div>
         <div class="diary-calendar-grid">
           ${days.map((day) => renderDiaryCalendarDay(day, monthDate, selectedKey)).join("")}
@@ -5226,7 +5583,7 @@ function formatDiaryTime(value) {
     return "未设置";
   }
   const prefix = dateKeyFromDate(date) === todayDateKey() ? "今天" : formatMonthDay(date);
-  return `${prefix} ${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+  return `${prefix} ${date.toLocaleTimeString(currentLocale(), { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 function defaultRepeatStartDate() {
@@ -5287,7 +5644,7 @@ function diaryDateLabel(dateKey) {
   if (dateKey === todayDateKey()) {
     return "今天";
   }
-  return date.toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+  return date.toLocaleDateString(currentLocale(), { month: "long", day: "numeric" });
 }
 
 function diaryEntryTimestamp(dateKey) {
@@ -5343,17 +5700,197 @@ function renderDiaryPage() {
   `;
 }
 
+function renderAdminPage() {
+  const knowledge = state.adminKnowledge ?? {
+    total: 0,
+    builtin_count: 0,
+    admin_count: 0,
+    active_count: 0,
+    documents: [],
+  };
+  const documents = Array.isArray(knowledge.documents) ? knowledge.documents : [];
+  const adminDocuments = documents.filter((document) => document.source === "admin");
+  const searchResults = state.adminKnowledgeSearchResults ?? [];
+  return `
+    <div class="simple-admin">
+      <header class="simple-page-header">
+        <div>
+          <p class="simple-kicker">Agent RAG 管理</p>
+          <h1>管理员页面</h1>
+          <p>更新本地业务知识库，下一次对话和 function calling 检索会直接使用新内容。</p>
+        </div>
+        <div class="action-row">
+          <button class="button ghost" type="button" data-admin-knowledge-refresh ${state.adminKnowledgeLoading ? "disabled" : ""}>
+            ${icon("refresh")}${state.adminKnowledgeLoading ? "刷新中..." : "刷新知识库"}
+          </button>
+          <button class="button" type="button" data-route="assistant">${icon("spark")}去测试 Agent</button>
+        </div>
+      </header>
+
+      <section class="surface admin-runtime-panel">
+        <div class="diagnostics-summary admin-summary-grid">
+          ${diagnosticMetric("活跃知识", knowledge.active_count ?? 0, "ok")}
+          ${diagnosticMetric("内置知识", knowledge.builtin_count ?? 0, "info")}
+          ${diagnosticMetric("管理员知识", knowledge.admin_count ?? 0, adminDocuments.length ? "warning" : "fallback")}
+          ${diagnosticMetric("最近刷新", formatDate(knowledge.generated_at), "info")}
+        </div>
+        <p class="admin-note">管理员知识写入 <code>backend/data/agent_knowledge.json</code>；同名 source_id 会覆盖内置知识，enabled=false 会禁用该知识。</p>
+      </section>
+
+      <section class="surface admin-knowledge-search-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>RAG 检索测试</h2>
+            <p>先用真实问题测试命中情况，再决定是否补充关键词或正文。</p>
+          </div>
+        </div>
+        <form class="simple-search admin-search" data-admin-knowledge-search-form role="search">
+          ${icon("search")}
+          <label class="sr-only" for="admin-knowledge-query">测试检索词</label>
+          <input id="admin-knowledge-query" name="q" maxlength="160" placeholder="例如：奶茶应该归到什么分类？" value="${escapeHtml(state.adminKnowledgeSearchQuery)}" />
+          <button class="button" type="submit" ${state.adminKnowledgeSearching ? "disabled" : ""}>
+            ${state.adminKnowledgeSearching ? "检索中..." : "测试检索"}
+          </button>
+        </form>
+        ${searchResults.length ? `
+          <div class="admin-search-results">
+            ${searchResults.map(renderKnowledgeHit).join("")}
+          </div>
+        ` : `<p class="form-hint">还没有检索结果。保存知识后，可以在这里验证 RAG 是否命中。</p>`}
+      </section>
+
+      <section class="surface admin-knowledge-editor-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>编辑管理员知识</h2>
+            <p>只编辑管理员自定义条目；内置知识保留在代码里，必要时可用相同 source_id 覆盖。</p>
+          </div>
+          <button class="button ghost" type="button" data-admin-knowledge-reset ${state.saving ? "disabled" : ""}>
+            ${icon("reset")}恢复内置知识
+          </button>
+        </div>
+        <form class="admin-knowledge-form" data-admin-knowledge-form>
+          <div class="field full">
+            <label for="admin_key">管理员密钥 <small>对应后端 LIFESNAP_ADMIN_KEY</small></label>
+            <div class="admin-key-row">
+              <input id="admin_key" name="admin_key" type="password" autocomplete="off" placeholder="输入管理员密钥后才能保存" value="${escapeHtml(state.adminKnowledgeAdminKey)}" />
+              <button class="button ghost" type="button" data-admin-key-reveal ${state.adminKeyRevealLoading ? "disabled" : ""}>
+                ${icon("key")}${state.adminKeyRevealLoading ? "读取中..." : "填入本机密钥"}
+              </button>
+            </div>
+            <small class="form-hint">仅当后端启用 LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true 且从本机访问时可用。</small>
+          </div>
+          <div class="field full">
+            <label for="admin_knowledge_json">知识库 JSON <small>数组格式，最多 50 条</small></label>
+            <textarea id="admin_knowledge_json" name="documents_json" class="admin-knowledge-editor" spellcheck="false" rows="14" placeholder="[]">${escapeHtml(state.adminKnowledgeDraft || "[]")}</textarea>
+          </div>
+          <details class="simple-details admin-json-example">
+            <summary><span>${icon("file-text")}JSON 示例</span><small>source_id、title、content 必填 ${icon("chevron-right")}</small></summary>
+            <div class="simple-details-content">
+              <pre><code>${escapeHtml(adminKnowledgeExampleJson())}</code></pre>
+            </div>
+          </details>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-admin-knowledge-refresh ${state.adminKnowledgeLoading ? "disabled" : ""}>重新读取</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>${icon("save")}${state.saving ? "保存中..." : "保存知识库"}</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="surface admin-knowledge-list-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>当前知识条目</h2>
+            <p>这里展示实际参与管理视图的知识，管理员覆盖项会标记为自定义。</p>
+          </div>
+        </div>
+        ${renderAdminKnowledgeDocuments(documents)}
+      </section>
+    </div>
+  `;
+}
+
+function renderAdminKnowledgeDocuments(documents) {
+  if (!documents.length) {
+    return `<p class="form-hint">知识库暂时为空。</p>`;
+  }
+  return `
+    <div class="admin-knowledge-list">
+      ${documents.map(renderAdminKnowledgeDocument).join("")}
+    </div>
+  `;
+}
+
+function renderAdminKnowledgeDocument(document) {
+  const tags = Array.isArray(document.tags) ? document.tags : [];
+  const keywords = Array.isArray(document.keywords) ? document.keywords : [];
+  const source = document.source === "admin" ? "管理员" : "内置";
+  const enabled = document.enabled !== false;
+  return `
+    <article class="admin-knowledge-card ${document.source === "admin" ? "is-admin" : ""} ${enabled ? "" : "is-disabled"}">
+      <div class="admin-knowledge-card-head">
+        <div>
+          <strong>${escapeHtml(document.title)}</strong>
+          <small>${escapeHtml(document.source_id)} · ${source}${enabled ? "" : " · 已禁用"}</small>
+        </div>
+        <span>${escapeHtml(source)}</span>
+      </div>
+      <p>${escapeHtml(document.content)}</p>
+      ${tags.length ? `<div class="category-preview-list">${tags.map((tag) => `<span class="category-preview-chip">${escapeHtml(tag)}</span>`).join("")}</div>` : ""}
+      ${keywords.length ? `<small class="admin-keywords">关键词：${escapeHtml(keywords.join("、"))}</small>` : ""}
+    </article>
+  `;
+}
+
+function adminKnowledgeExampleJson() {
+  return JSON.stringify([
+    {
+      source_id: "bill_category_milk_tea",
+      title: "奶茶分类规则",
+      content: "用户提到奶茶、果茶、咖啡店饮品时，默认归类为餐饮；如果用户明确说是请客或礼物，再按用户意图调整备注。",
+      tags: ["bill", "category", "admin"],
+      keywords: ["奶茶", "果茶", "咖啡", "饮品", "分类"],
+      enabled: true,
+    },
+  ], null, 2);
+}
+
+function renderLanguageSettings() {
+  const option = (language, label) => `
+    <button class="language-option ${state.language === language ? "is-active" : ""}" type="button"
+      data-language="${escapeHtml(language)}" aria-pressed="${state.language === language}">
+      ${label}
+    </button>
+  `;
+  return `
+    <section class="surface simple-settings-group language-settings">
+      <div class="language-row">
+        <div>
+          <h2>语言</h2>
+          <p>切换后只影响界面展示，不会修改已有账单、分类和智能体参数。</p>
+        </div>
+        <div class="language-switch" role="group" aria-label="界面语言">
+          ${option("zh-CN", "中文")}
+          ${option("en-US", "English")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderProfilePage() {
   const summary = state.bootstrap?.data_summary ?? {};
   const snapshot = state.snapshotStatus;
   const row = (symbol, title, note, attribute) => `<button class="simple-setting-row" type="button" ${attribute} ${state.saving ? "disabled" : ""}>${icon(symbol)}<span><strong>${title}</strong><small>${note}</small></span>${icon("chevron-right")}</button>`;
   return `<div class="simple-settings">
     <header class="simple-page-header"><div><p class="simple-kicker">按你的习惯来</p><h1>更多与设置</h1><p>日常工具、个人偏好和数据管理。</p></div></header>
+    ${renderLanguageSettings()}
     <section class="surface simple-settings-group"><h2>生活记录</h2>${row("check", "待办事项", "查看、新增和完成待办", 'data-route="tasks"')}${row("book", "我的日记", "记录文字、照片和心情", 'data-route="diary"')}</section>
     <section class="surface simple-settings-group"><h2>记账偏好</h2>${row("pie-chart", "月预算", `当前预算 ${money(getBudgetSettings().monthly_budget)}`, "data-open-budget-settings")}${row("grid", "收支分类", "调整餐饮、交通等常用分类", "data-open-category-settings")}${row("settings", "隐私设置", "选择图片和文字是否允许交给外部 AI 处理", "data-open-privacy-settings")}</section>
     <section class="surface simple-settings-group"><h2>我的数据</h2>${row("download", "导出备份文件", "下载账单、待办和日记，方便保留或迁移", "data-export-json")}${row("upload", "从备份文件恢复", "选择之前导出的文件，预览后再导入", "data-import-json")}${row("trash", "回收站", escapeHtml(recycleBinText(summary)), "data-open-recycle-bin")}</section>
     <details class="surface simple-details"><summary><span>更多设置</span><small>个人资料、备份与问题排查 ${icon("chevron-right")}</small></summary><div class="simple-details-content">
       ${row("user", "个人资料", "修改昵称和签名", "data-profile-placeholder")}${row("tag", "日记标签", "管理记录生活的常用标签", "data-open-tag-settings")}
+      ${row("database", "管理员页面", "更新 Agent 的 RAG 知识库", 'data-route="admin"')}
       ${row("save", "保存本机备份", "在当前设备上保留一份可恢复的记录", "data-snapshot-save")}
       ${snapshot?.exists ? row("refresh", "恢复本机备份", escapeHtml(snapshotText(snapshot)), 'data-settings-action="loadSnapshot"') : ""}
       ${row("file-text", "最近操作", "查看记录的新增、修改和删除操作", "data-open-audit-log")}${row("check-circle", "连接与问题排查", "识别不可用时，在这里查看原因", "data-open-diagnostics")}
@@ -8729,7 +9266,7 @@ function empty(message) {
 
 function money(value) {
   const number = Number(value ?? 0);
-  return new Intl.NumberFormat("zh-CN", {
+  return new Intl.NumberFormat(currentLocale(), {
     style: "currency",
     currency: "CNY",
     maximumFractionDigits: 2,
@@ -8751,7 +9288,7 @@ function compactMoney(value) {
     return `${(number / 10000).toFixed(1)}万`;
   }
   if (number >= 1000) {
-    return `${Math.round(number).toLocaleString("zh-CN")}`;
+    return `${Math.round(number).toLocaleString(currentLocale())}`;
   }
   return String(Math.round(number));
 }
@@ -8770,7 +9307,7 @@ function downloadText(filename, content, mimeType) {
 
 function formatDate(value) {
   if (!value) return "未设置";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(currentLocale(), {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -8990,6 +9527,7 @@ function icon(name) {
     lightbulb: '<path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 4h-6c0-2 0-3-1-4z"></path>',
     "pie-chart": '<path d="M12 3v9h9"></path><path d="M19.1 15A8 8 0 1 1 9 4.6"></path><path d="M14 3.3A8 8 0 0 1 20.7 10H14V3.3z"></path>',
     "file-text": '<path d="M6 3h9l3 3v15H6V3z"></path><path d="M14 3v4h4"></path><path d="M9 11h6"></path><path d="M9 15h6"></path><path d="M9 19h4"></path>',
+    database: '<ellipse cx="12" cy="5" rx="7" ry="3"></ellipse><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5"></path><path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"></path>',
     grid: '<rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect>',
     tag: '<path d="M20 13 13 20l-9-9V4h7l9 9z"></path><circle cx="8.5" cy="8.5" r="1"></circle>',
     cloud: '<path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6.2 8.8 4.5 4.5 0 0 0 7 18z"></path>',
@@ -8999,6 +9537,7 @@ function icon(name) {
     close: '<path d="M6 6l12 12"></path><path d="M18 6L6 18"></path>',
     save: '<path d="M5 3h12l2 2v16H5V3z"></path><path d="M8 3v6h8"></path><path d="M8 17h8"></path>',
     copy: '<rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>',
+    key: '<circle cx="7.5" cy="14.5" r="3.5"></circle><path d="M10 12l8-8"></path><path d="M15 7l2 2"></path><path d="M13 9l2 2"></path>',
     spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"></path>',
   };
   return `<span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24">${paths[name] ?? paths.layout}</svg></span>`;

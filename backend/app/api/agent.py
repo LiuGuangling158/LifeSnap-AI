@@ -1,9 +1,15 @@
+import hmac
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
+from app.core.config import settings
 from app.schemas.bill import BillRead, DuplicateBillCheckResponse
 from app.schemas.agent_runtime import (
+    AgentAdminKeyRevealResponse,
+    AgentKnowledgeBaseResetRequest,
+    AgentKnowledgeBaseResponse,
+    AgentKnowledgeBaseUpdateRequest,
     AgentFineTuningDatasetResponse,
     AgentKnowledgeHit,
     AgentRuntimeProfile,
@@ -38,6 +44,42 @@ from app.services.task_parser import task_parser
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
+_LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def require_admin_api_key(
+    admin_key: str | None = Header(default=None, alias="X-LifeSnap-Admin-Key"),
+) -> None:
+    if not settings.admin_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin API key is not configured",
+        )
+    if not admin_key or not hmac.compare_digest(admin_key, settings.admin_api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin API key",
+        )
+
+
+def require_local_key_reveal(request: Request) -> None:
+    client_host = request.client.host if request.client else ""
+    if client_host not in _LOCAL_CLIENT_HOSTS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin key reveal is only available from localhost",
+        )
+    if not settings.allow_admin_key_reveal:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin key reveal is disabled",
+        )
+    if not settings.admin_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Admin API key is not configured",
+        )
+
 
 @router.get("/runtime", response_model=AgentRuntimeProfile)
 def get_agent_runtime() -> AgentRuntimeProfile:
@@ -50,6 +92,69 @@ def search_agent_knowledge(
     limit: int = Query(default=3, ge=1, le=10),
 ) -> list[AgentKnowledgeHit]:
     return agent_knowledge_base.search(q, limit=limit)
+
+
+@router.get("/knowledge/documents", response_model=AgentKnowledgeBaseResponse)
+def list_agent_knowledge_documents() -> AgentKnowledgeBaseResponse:
+    return agent_knowledge_base.response()
+
+
+@router.get("/admin-key", response_model=AgentAdminKeyRevealResponse)
+def reveal_admin_key(
+    request: Request,
+    _: None = Depends(require_local_key_reveal),
+) -> AgentAdminKeyRevealResponse:
+    audit_log_store.record(
+        action="admin_key_revealed",
+        entity_type="admin_key",
+        request=request,
+        metadata={"local_only": True},
+    )
+    return AgentAdminKeyRevealResponse(
+        available=True,
+        admin_key=settings.admin_api_key,
+        detail="Admin key loaded from local environment",
+    )
+
+
+@router.put("/knowledge/documents", response_model=AgentKnowledgeBaseResponse)
+def update_agent_knowledge_documents(
+    payload: AgentKnowledgeBaseUpdateRequest,
+    request: Request,
+    _: None = Depends(require_admin_api_key),
+) -> AgentKnowledgeBaseResponse:
+    response = agent_knowledge_base.replace_admin_documents(payload.documents)
+    audit_log_store.record(
+        action="agent_knowledge_updated",
+        entity_type="agent_knowledge_base",
+        request=request,
+        metadata={
+            "admin_document_count": response.admin_count,
+            "active_document_count": response.active_count,
+        },
+    )
+    return response
+
+
+@router.post("/knowledge/reset", response_model=AgentKnowledgeBaseResponse)
+def reset_agent_knowledge_documents(
+    payload: AgentKnowledgeBaseResetRequest,
+    request: Request,
+    _: None = Depends(require_admin_api_key),
+) -> AgentKnowledgeBaseResponse:
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Set confirm to true before resetting admin knowledge documents",
+        )
+    response = agent_knowledge_base.reset_admin_documents()
+    audit_log_store.record(
+        action="agent_knowledge_reset",
+        entity_type="agent_knowledge_base",
+        request=request,
+        metadata={"active_document_count": response.active_count},
+    )
+    return response
 
 
 @router.get("/fine-tuning/examples", response_model=AgentFineTuningDatasetResponse)

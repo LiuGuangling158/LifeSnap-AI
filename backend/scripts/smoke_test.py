@@ -101,6 +101,7 @@ assert settings.llm_agent_api_key == 'sk-deepseek-smoke'
 assert settings.llm_agent_chat_api_key == 'sk-deepseek-smoke'
 assert settings.llm_agent_api_key_for_kind('chat_intent') == 'sk-deepseek-smoke'
 assert settings.llm_agent_api_key_for_kind('bill') == 'sk-deepseek-smoke'
+assert not settings.allow_admin_key_reveal
 assert not settings.real_ocr_enabled
 assert settings.real_llm_agent_enabled
 model_trace = agent_runtime_service.model_trace()
@@ -360,6 +361,9 @@ def _deepseek_config_env(**overrides: str) -> dict[str, str]:
         "LIFESNAP_DEEPSEEK_API_KEY",
         "LIFESNAP_DEEPSEEK_MODEL",
         "LIFESNAP_DEEPSEEK_BASE_URL",
+        "LIFESNAP_ADMIN_KEY",
+        "LIFESNAP_ADMIN_API_KEY",
+        "LIFESNAP_ALLOW_ADMIN_KEY_REVEAL",
         "LIFESNAP_DATA_DIR",
     ):
         test_env[name] = ""
@@ -449,6 +453,9 @@ def _run_isolated_smoke(data_dir: str) -> int:
     test_env["LIFESNAP_DEEPSEEK_API_KEY"] = ""
     test_env["LIFESNAP_DEEPSEEK_MODEL"] = ""
     test_env["LIFESNAP_DEEPSEEK_BASE_URL"] = ""
+    test_env["LIFESNAP_ADMIN_KEY"] = "smoke-admin-key"
+    test_env["LIFESNAP_ADMIN_API_KEY"] = ""
+    test_env["LIFESNAP_ALLOW_ADMIN_KEY_REVEAL"] = "true"
     port = _free_port()
     process = subprocess.Popen(
         [
@@ -493,6 +500,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_demo_data_seed(client)
     _check_app_bootstrap(client)
     _check_agent_runtime_profile(client)
+    _check_agent_knowledge_admin(client)
     _check_integration_diagnostics(client)
     _check_bill_statistics_overview(client)
     _check_bill_business_timezone_boundaries(client)
@@ -1006,6 +1014,87 @@ def _check_agent_runtime_profile(client: ApiClient) -> None:
         "Agent bill chat",
     )
     client.request("DELETE", f"/agent/bill-candidates/{bill_answer['candidate_id']}")
+
+
+def _check_agent_knowledge_admin(client: ApiClient) -> None:
+    status, knowledge = client.request("GET", "/agent/knowledge/documents")
+    _assert(status == 200, "Agent knowledge document list should return 200")
+    _assert(knowledge["builtin_count"] >= 9, "Knowledge document list should expose built-in documents")
+    _assert(knowledge["active_count"] >= knowledge["builtin_count"], "Knowledge active count should include built-ins")
+
+    status, reveal = client.request("GET", "/agent/admin-key")
+    _assert(status == 200, "Local admin key reveal should return 200 when explicitly enabled")
+    _assert(reveal["available"] and reveal["admin_key"] == "smoke-admin-key", "Local admin key reveal should return the configured admin key")
+
+    admin_document = {
+        "source_id": "smoke_admin_milk_tea_policy",
+        "title": "管理员奶茶分类规则",
+        "content": "管理员新增知识：奶茶、果茶和咖啡店饮品默认归类为餐饮。",
+        "tags": ["bill", "category", "admin"],
+        "keywords": ["奶茶", "果茶", "管理员新增知识"],
+        "enabled": True,
+    }
+    status, body = client.request(
+        "PUT",
+        "/agent/knowledge/documents",
+        {"documents": [admin_document]},
+    )
+    _assert(status == 403, "Knowledge update should require an admin key")
+    _assert(body["detail"] == "Invalid admin API key", "Knowledge update should reject missing admin key")
+
+    admin_headers = {"X-LifeSnap-Admin-Key": "smoke-admin-key"}
+    status, updated = client.request(
+        "PUT",
+        "/agent/knowledge/documents",
+        {"documents": [admin_document]},
+        headers=admin_headers,
+    )
+    _assert(status == 200, "Knowledge update with admin key should return 200")
+    _assert(updated["admin_count"] == 1, "Knowledge update should persist one admin document")
+    _assert(
+        any(document["source_id"] == "smoke_admin_milk_tea_policy" for document in updated["documents"]),
+        "Knowledge update response should include admin document",
+    )
+
+    status, hits = client.request("GET", "/agent/knowledge/search?q=%E5%A5%B6%E8%8C%B6%20%E7%AE%A1%E7%90%86%E5%91%98%E6%96%B0%E5%A2%9E%E7%9F%A5%E8%AF%86&limit=3")
+    _assert(status == 200, "Knowledge search after admin update should return 200")
+    _assert(
+        any(hit["source_id"] == "smoke_admin_milk_tea_policy" for hit in hits),
+        "Knowledge search should retrieve admin-added documents",
+    )
+
+    status, runtime = client.request("GET", "/agent/runtime")
+    _assert(status == 200, "Runtime after admin knowledge update should return 200")
+    source_count = sum(source["document_count"] for source in runtime["knowledge_sources"])
+    _assert(source_count >= updated["active_count"], "Runtime sources should include active admin knowledge")
+
+    status, body = client.request(
+        "POST",
+        "/agent/knowledge/reset",
+        {"confirm": False},
+        headers=admin_headers,
+    )
+    _assert(status == 400, "Knowledge reset should require explicit confirmation")
+    _assert(
+        body["detail"] == "Set confirm to true before resetting admin knowledge documents",
+        "Knowledge reset confirmation guard message changed",
+    )
+
+    status, reset = client.request(
+        "POST",
+        "/agent/knowledge/reset",
+        {"confirm": True},
+        headers=admin_headers,
+    )
+    _assert(status == 200, "Knowledge reset with admin key should return 200")
+    _assert(reset["admin_count"] == 0, "Knowledge reset should clear admin documents")
+
+    status, hits = client.request("GET", "/agent/knowledge/search?q=%E7%AE%A1%E7%90%86%E5%91%98%E6%96%B0%E5%A2%9E%E7%9F%A5%E8%AF%86&limit=3")
+    _assert(status == 200, "Knowledge search after reset should return 200")
+    _assert(
+        all(hit["source_id"] != "smoke_admin_milk_tea_policy" for hit in hits),
+        "Knowledge reset should remove admin-added documents from search",
+    )
 
 
 def _check_chat_bill_analysis(client: ApiClient) -> None:

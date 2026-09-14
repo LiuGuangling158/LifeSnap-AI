@@ -2,7 +2,7 @@
   "name": "lifesnap-frontend",
   "private": true,
   "scripts": {
-    "check": "node --check app.js",
+    "check": "node --check app.js && node --check i18n.js",
     "test": "node scripts/usability_smoke.cjs"
   },
   "devDependencies": {

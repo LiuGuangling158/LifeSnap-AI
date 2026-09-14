@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Iterable
 
-from app.schemas.agent_runtime import AgentKnowledgeHit, AgentKnowledgeSource
+from app.core.config import settings
+from app.schemas.agent_runtime import (
+    AgentKnowledgeBaseResponse,
+    AgentKnowledgeDocument,
+    AgentKnowledgeDocumentInput,
+    AgentKnowledgeHit,
+    AgentKnowledgeSource,
+)
 
 
 @dataclass(frozen=True)
@@ -13,10 +23,13 @@ class KnowledgeDocument:
     content: str
     tags: tuple[str, ...]
     keywords: tuple[str, ...]
+    source: str = "builtin"
+    enabled: bool = True
+    updated_at: datetime | None = None
 
 
 class AgentKnowledgeBase:
-    _documents = (
+    _builtin_documents = (
         KnowledgeDocument(
             source_id="bill_required_fields",
             title="账单必填规则",
@@ -132,6 +145,9 @@ class AgentKnowledgeBase:
         ),
     )
 
+    def __init__(self) -> None:
+        self._admin_documents = self._load_admin_documents()
+
     def search(self, query: str, limit: int = 3) -> list[AgentKnowledgeHit]:
         query_text = query.strip()
         if not query_text:
@@ -139,7 +155,7 @@ class AgentKnowledgeBase:
 
         query_terms = self._terms(query_text)
         scored: list[tuple[float, KnowledgeDocument, tuple[str, ...]]] = []
-        for document in self._documents:
+        for document in self._documents():
             score, matched = self._score_document(query_text, query_terms, document)
             if score <= 0:
                 continue
@@ -157,9 +173,41 @@ class AgentKnowledgeBase:
             for score, document, _ in scored[: max(0, limit)]
         ]
 
+    def response(self) -> AgentKnowledgeBaseResponse:
+        documents = [self._to_schema(document) for document in self._documents(include_disabled=True)]
+        return AgentKnowledgeBaseResponse(
+            generated_at=datetime.now(timezone.utc),
+            total=len(documents),
+            builtin_count=len(self._builtin_documents),
+            admin_count=len(self._admin_documents),
+            active_count=len(self._documents()),
+            documents=documents,
+        )
+
+    def replace_admin_documents(
+        self,
+        documents: Iterable[AgentKnowledgeDocumentInput],
+    ) -> AgentKnowledgeBaseResponse:
+        now = datetime.now(timezone.utc)
+        by_id: dict[str, KnowledgeDocument] = {}
+        order: list[str] = []
+        for document in documents:
+            normalized = self._normalize_input(document, updated_at=now)
+            if normalized.source_id not in by_id:
+                order.append(normalized.source_id)
+            by_id[normalized.source_id] = normalized
+        self._admin_documents = tuple(by_id[source_id] for source_id in order)
+        self._persist_admin_documents()
+        return self.response()
+
+    def reset_admin_documents(self) -> AgentKnowledgeBaseResponse:
+        self._admin_documents = ()
+        self._persist_admin_documents()
+        return self.response()
+
     def sources(self) -> list[AgentKnowledgeSource]:
         groups: dict[str, list[KnowledgeDocument]] = {}
-        for document in self._documents:
+        for document in self._documents():
             group = document.tags[0] if document.tags else "agent"
             groups.setdefault(group, []).append(document)
 
@@ -169,6 +217,7 @@ class AgentKnowledgeBase:
             "privacy": "隐私与外部服务知识",
             "task": "待办提醒知识",
             "diary": "日记整理知识",
+            "admin": "管理员知识",
         }
         return [
             AgentKnowledgeSource(
@@ -182,7 +231,24 @@ class AgentKnowledgeBase:
         ]
 
     def document_count(self) -> int:
-        return len(self._documents)
+        return len(self._documents())
+
+    def _documents(self, *, include_disabled: bool = False) -> list[KnowledgeDocument]:
+        by_id: dict[str, KnowledgeDocument] = {}
+        order: list[str] = []
+        for document in self._builtin_documents:
+            by_id[document.source_id] = document
+            order.append(document.source_id)
+
+        for document in self._admin_documents:
+            if document.source_id not in by_id:
+                order.append(document.source_id)
+            if include_disabled or document.enabled:
+                by_id[document.source_id] = document
+            else:
+                by_id.pop(document.source_id, None)
+
+        return [by_id[source_id] for source_id in order if source_id in by_id]
 
     def _score_document(
         self,
@@ -209,6 +275,114 @@ class AgentKnowledgeBase:
         ascii_terms = set(re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{1,}", query.casefold()))
         chinese_terms = {char for char in query if "\u4e00" <= char <= "\u9fff"}
         return ascii_terms | chinese_terms
+
+    def _load_admin_documents(self) -> tuple[KnowledgeDocument, ...]:
+        path = settings.local_agent_knowledge_path
+        if not path.exists():
+            return ()
+        try:
+            raw_payload = json.loads(path.read_text(encoding="utf-8"))
+            raw_documents = raw_payload.get("documents", raw_payload) if isinstance(raw_payload, dict) else raw_payload
+            if not isinstance(raw_documents, list):
+                return ()
+            loaded: list[KnowledgeDocument] = []
+            for raw_document in raw_documents:
+                if not isinstance(raw_document, dict):
+                    continue
+                payload = AgentKnowledgeDocumentInput.model_validate(raw_document)
+                loaded.append(
+                    self._normalize_input(
+                        payload,
+                        updated_at=self._parse_datetime(raw_document.get("updated_at")),
+                    )
+                )
+            return tuple(loaded)
+        except (OSError, ValueError, TypeError):
+            return ()
+
+    def _persist_admin_documents(self) -> None:
+        path = settings.local_agent_knowledge_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = path.with_suffix(".tmp")
+        temp_path.write_text(
+            json.dumps(
+                {
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "documents": [
+                        self._to_schema(document).model_dump(mode="json")
+                        for document in self._admin_documents
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(path)
+
+    def _normalize_input(
+        self,
+        payload: AgentKnowledgeDocumentInput,
+        *,
+        updated_at: datetime | None,
+    ) -> KnowledgeDocument:
+        title = payload.title.strip()
+        content = payload.content.strip()
+        tags = self._normalize_strings(payload.tags, limit=8, max_length=40) or ("admin",)
+        keywords = self._normalize_strings(payload.keywords, limit=24, max_length=60)
+        if not keywords:
+            keywords = self._fallback_keywords(title, tags)
+        return KnowledgeDocument(
+            source_id=payload.source_id.strip(),
+            title=title,
+            content=content,
+            tags=tags,
+            keywords=keywords,
+            source="admin",
+            enabled=payload.enabled,
+            updated_at=updated_at or datetime.now(timezone.utc),
+        )
+
+    def _normalize_strings(
+        self,
+        values: Iterable[str],
+        *,
+        limit: int,
+        max_length: int,
+    ) -> tuple[str, ...]:
+        normalized: list[str] = []
+        for value in values:
+            text = str(value or "").strip()
+            if not text or len(text) > max_length or text in normalized:
+                continue
+            normalized.append(text)
+            if len(normalized) >= limit:
+                break
+        return tuple(normalized)
+
+    def _fallback_keywords(self, title: str, tags: tuple[str, ...]) -> tuple[str, ...]:
+        keywords = [title, *tags]
+        return tuple(value for value in keywords if value)[:24]
+
+    def _parse_datetime(self, value: object) -> datetime | None:
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def _to_schema(self, document: KnowledgeDocument) -> AgentKnowledgeDocument:
+        return AgentKnowledgeDocument(
+            source_id=document.source_id,
+            title=document.title,
+            content=document.content,
+            tags=list(document.tags),
+            keywords=list(document.keywords),
+            source=document.source,
+            enabled=document.enabled,
+            updated_at=document.updated_at,
+        )
 
 
 agent_knowledge_base = AgentKnowledgeBase()

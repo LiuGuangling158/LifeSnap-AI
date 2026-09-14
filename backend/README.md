@@ -577,8 +577,25 @@ fine-tuning examples:
 ```text
 GET /agent/runtime
 GET /agent/knowledge/search?q=账单分类&limit=3
+GET /agent/knowledge/documents
+PUT /agent/knowledge/documents
+POST /agent/knowledge/reset
 GET /agent/fine-tuning/examples?limit=50
 ```
+
+`GET /agent/knowledge/documents` returns the built-in and admin-managed RAG
+documents. `PUT /agent/knowledge/documents` replaces the admin-managed document
+set, and `POST /agent/knowledge/reset` clears it back to the built-in knowledge
+base. Write calls require `X-LifeSnap-Admin-Key`, which must match
+`LIFESNAP_ADMIN_KEY` or `LIFESNAP_ADMIN_API_KEY`; when no admin key is configured,
+the write endpoints return 403. Admin documents are persisted to
+`backend/data/agent_knowledge.json` by default. A document with the same
+`source_id` as a built-in document overrides it; an overridden document with
+`enabled=false` disables that knowledge for search.
+
+For local development convenience, `GET /agent/admin-key` can fill the admin key
+in the Admin UI only when `LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true` and the request
+comes from localhost. Keep this disabled outside local preview environments.
 
 Direct LLM calls receive retrieved knowledge snippets in the user payload under
 `retrieved_knowledge`. Compatible chat-completions requests also include safe

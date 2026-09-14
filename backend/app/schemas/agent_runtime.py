@@ -52,6 +52,49 @@ class AgentKnowledgeSource(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class AgentKnowledgeDocument(BaseModel):
+    source_id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=80)
+    content: str = Field(min_length=1, max_length=2000)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    keywords: list[str] = Field(default_factory=list, max_length=24)
+    source: str = Field(default="builtin", max_length=40)
+    enabled: bool = True
+    updated_at: datetime | None = None
+
+
+class AgentKnowledgeDocumentInput(BaseModel):
+    source_id: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=80)
+    content: str = Field(min_length=1, max_length=2000)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    keywords: list[str] = Field(default_factory=list, max_length=24)
+    enabled: bool = True
+
+
+class AgentKnowledgeBaseResponse(BaseModel):
+    generated_at: datetime
+    total: int = Field(ge=0)
+    builtin_count: int = Field(ge=0)
+    admin_count: int = Field(ge=0)
+    active_count: int = Field(ge=0)
+    documents: list[AgentKnowledgeDocument]
+
+
+class AgentKnowledgeBaseUpdateRequest(BaseModel):
+    documents: list[AgentKnowledgeDocumentInput] = Field(default_factory=list, max_length=50)
+
+
+class AgentKnowledgeBaseResetRequest(BaseModel):
+    confirm: bool = False
+
+
+class AgentAdminKeyRevealResponse(BaseModel):
+    available: bool
+    admin_key: str | None = Field(default=None, max_length=240)
+    detail: str = Field(min_length=1, max_length=180)
+
+
 class AgentFunctionToolCapability(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     label: str = Field(min_length=1, max_length=80)
