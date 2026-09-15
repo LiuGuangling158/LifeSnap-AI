@@ -580,6 +580,7 @@ GET /agent/knowledge/search?q=账单分类&limit=3
 GET /agent/knowledge/documents
 PUT /agent/knowledge/documents
 POST /agent/knowledge/reset
+POST /agent/knowledge/rollback
 GET /agent/fine-tuning/examples?limit=50
 ```
 
@@ -592,6 +593,13 @@ the write endpoints return 403. Admin documents are persisted to
 `backend/data/agent_knowledge.json` by default. A document with the same
 `source_id` as a built-in document overrides it; an overridden document with
 `enabled=false` disables that knowledge for search.
+
+Each admin save, reset, and rollback creates a version snapshot in the same
+knowledge store. `GET /agent/knowledge/documents` includes recent version
+summaries, and `POST /agent/knowledge/rollback` accepts `version_id` to restore
+one of those snapshots. Rollback is also an admin write operation, requires
+`X-LifeSnap-Admin-Key`, writes an audit event, and creates a new rollback
+version so the history remains append-only.
 
 For local development convenience, `GET /agent/admin-key` can fill the admin key
 in the Admin UI only when `LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true` and the request

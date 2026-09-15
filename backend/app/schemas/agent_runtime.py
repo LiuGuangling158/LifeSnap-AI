@@ -72,6 +72,15 @@ class AgentKnowledgeDocumentInput(BaseModel):
     enabled: bool = True
 
 
+class AgentKnowledgeVersionSummary(BaseModel):
+    version_id: str = Field(min_length=1, max_length=80)
+    action: str = Field(min_length=1, max_length=40)
+    created_at: datetime
+    admin_count: int = Field(ge=0)
+    active_count: int = Field(ge=0)
+    document_titles: list[str] = Field(default_factory=list, max_length=8)
+
+
 class AgentKnowledgeBaseResponse(BaseModel):
     generated_at: datetime
     total: int = Field(ge=0)
@@ -79,6 +88,7 @@ class AgentKnowledgeBaseResponse(BaseModel):
     admin_count: int = Field(ge=0)
     active_count: int = Field(ge=0)
     documents: list[AgentKnowledgeDocument]
+    versions: list[AgentKnowledgeVersionSummary] = Field(default_factory=list)
 
 
 class AgentKnowledgeBaseUpdateRequest(BaseModel):
@@ -87,6 +97,10 @@ class AgentKnowledgeBaseUpdateRequest(BaseModel):
 
 class AgentKnowledgeBaseResetRequest(BaseModel):
     confirm: bool = False
+
+
+class AgentKnowledgeRollbackRequest(BaseModel):
+    version_id: str = Field(min_length=1, max_length=80)
 
 
 class AgentAdminKeyRevealResponse(BaseModel):

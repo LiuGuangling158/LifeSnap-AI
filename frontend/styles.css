@@ -29,6 +29,7 @@
 .admin-runtime-panel,
 .admin-knowledge-reader-panel,
 .admin-knowledge-search-panel,
+.admin-knowledge-version-panel,
 .admin-knowledge-editor-panel,
 .admin-knowledge-list-panel {
   display: grid;
@@ -86,6 +87,45 @@
   font-family: "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.admin-version-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-version-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #dfe9e2;
+  border-radius: var(--radius);
+  background: #fbfdfa;
+  padding: 12px;
+}
+
+.admin-version-card strong,
+.admin-version-card small,
+.admin-version-card p {
+  display: block;
+}
+
+.admin-version-card strong {
+  color: #24332b;
+  font-size: 14px;
+}
+
+.admin-version-card small,
+.admin-version-card p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-version-card p {
+  color: #33423b;
 }
 
 .admin-json-example {
@@ -206,6 +246,10 @@
 
   .admin-knowledge-card-head {
     display: grid;
+  }
+
+  .admin-version-card {
+    grid-template-columns: 1fr;
   }
 }
 

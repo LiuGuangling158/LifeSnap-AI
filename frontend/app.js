@@ -226,6 +226,7 @@ const state = {
   adminKeyRevealLoading: false,
   adminKnowledgeLoading: false,
   adminKnowledgeSearching: false,
+  adminKnowledgeRollingBack: "",
   bills: [],
   tasks: [],
   profile: loadProfileSettings(),
@@ -294,6 +295,12 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-admin-knowledge-download]")) {
     downloadAdminKnowledgeJson();
+    return;
+  }
+
+  const rollbackButton = event.target.closest("[data-admin-knowledge-rollback]");
+  if (rollbackButton) {
+    rollbackAdminKnowledge(rollbackButton.dataset.adminKnowledgeRollback);
     return;
   }
 
@@ -1195,6 +1202,7 @@ function setAdminKnowledge(knowledge) {
     admin_count: Number(knowledge?.admin_count ?? documents.filter((item) => item.source === "admin").length),
     active_count: Number(knowledge?.active_count ?? documents.filter((item) => item.enabled !== false).length),
     documents,
+    versions: Array.isArray(knowledge?.versions) ? knowledge.versions : [],
   };
   state.adminKnowledgeDraft = serializeAdminKnowledgeDocuments(documents);
 }
@@ -1334,6 +1342,41 @@ async function resetAdminKnowledge() {
   }
 }
 
+async function rollbackAdminKnowledge(versionId) {
+  if (state.saving || state.adminKnowledgeRollingBack) return;
+  const normalizedVersionId = String(versionId || "").trim();
+  if (!normalizedVersionId) return;
+  const adminKey = state.adminKnowledgeAdminKey.trim();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再回滚。需要与后端 LIFESNAP_ADMIN_KEY 一致。");
+    return;
+  }
+  if (!window.confirm("确认回滚到这个 RAG 知识库版本吗？当前管理员知识会被该版本覆盖。")) {
+    return;
+  }
+
+  state.adminKnowledgeRollingBack = normalizedVersionId;
+  state.saving = true;
+  render();
+  try {
+    const updated = await api("/agent/knowledge/rollback", {
+      method: "POST",
+      headers: adminKnowledgeHeaders(adminKey),
+      body: JSON.stringify({ version_id: normalizedVersionId }),
+    });
+    setAdminKnowledge(updated);
+    state.adminKnowledgeSearchResults = [];
+    await refreshAgentRuntimeProfile();
+    state.toast = "RAG 知识库已回滚，并生成新的版本记录。";
+  } catch (error) {
+    state.toast = adminKnowledgeErrorMessage(error);
+  } finally {
+    state.adminKnowledgeRollingBack = "";
+    state.saving = false;
+    render();
+  }
+}
+
 async function revealAdminKey() {
   if (state.adminKeyRevealLoading || state.saving) return;
   state.adminKeyRevealLoading = true;
@@ -1435,6 +1478,9 @@ function adminKnowledgeErrorMessage(error) {
   }
   if (message === "Invalid admin API key") {
     return "管理员密钥不正确，请检查 LIFESNAP_ADMIN_KEY。";
+  }
+  if (message === "Knowledge version not found") {
+    return "没有找到这个 RAG 知识库版本，请刷新后再试。";
   }
   return message;
 }
@@ -5763,6 +5809,7 @@ function renderAdminPage() {
   const documents = Array.isArray(knowledge.documents) ? knowledge.documents : [];
   const adminDocuments = documents.filter((document) => document.source === "admin");
   const knowledgeJson = serializeAllKnowledgeDocuments(documents);
+  const versions = Array.isArray(knowledge.versions) ? knowledge.versions : [];
   const searchResults = state.adminKnowledgeSearchResults ?? [];
   return `
     <div class="simple-admin">
@@ -5827,6 +5874,16 @@ function renderAdminPage() {
         ` : `<p class="form-hint">还没有检索结果。保存知识后，可以在这里验证 RAG 是否命中。</p>`}
       </section>
 
+      <section class="surface admin-knowledge-version-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>RAG 版本历史</h2>
+            <p>每次保存、重置或回滚都会生成快照，便于审计和恢复。</p>
+          </div>
+        </div>
+        ${renderAdminKnowledgeVersions(versions)}
+      </section>
+
       <section class="surface admin-knowledge-editor-panel">
         <div class="simple-section-heading">
           <div>
@@ -5876,6 +5933,49 @@ function renderAdminPage() {
       </section>
     </div>
   `;
+}
+
+function renderAdminKnowledgeVersions(versions) {
+  if (!versions.length) {
+    return `<p class="form-hint">还没有版本记录。保存或重置管理员知识后会自动生成快照。</p>`;
+  }
+  return `
+    <div class="admin-version-list">
+      ${versions.map(renderAdminKnowledgeVersion).join("")}
+    </div>
+  `;
+}
+
+function renderAdminKnowledgeVersion(version) {
+  const versionId = String(version.version_id || "");
+  const action = adminKnowledgeVersionActionLabel(version.action);
+  const titles = Array.isArray(version.document_titles) ? version.document_titles.filter(Boolean) : [];
+  const titleText = titles.length ? titles.join("、") : "空管理员知识库";
+  const isRollingBack = state.adminKnowledgeRollingBack === versionId;
+  return `
+    <article class="admin-version-card">
+      <div>
+        <strong>${escapeHtml(action)} · ${escapeHtml(formatDate(version.created_at))}</strong>
+        <small>${escapeHtml(versionId)}</small>
+        <p>${escapeHtml(titleText)}</p>
+        <div class="audit-detail-chips">
+          <span>管理员知识 ${Number(version.admin_count ?? 0)}</span>
+          <span>启用 ${Number(version.active_count ?? 0)}</span>
+        </div>
+      </div>
+      <button class="button ghost" type="button" data-admin-knowledge-rollback="${escapeHtml(versionId)}" ${state.saving ? "disabled" : ""}>
+        ${icon("reset")}${isRollingBack ? "回滚中..." : "回滚"}
+      </button>
+    </article>
+  `;
+}
+
+function adminKnowledgeVersionActionLabel(action) {
+  return {
+    replace: "保存",
+    reset: "重置",
+    rollback: "回滚",
+  }[action] ?? action ?? "版本";
 }
 
 function renderAdminKnowledgeDocuments(documents) {

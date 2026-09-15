@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable
+from uuid import uuid4
 
 from app.core.config import settings
 from app.schemas.agent_runtime import (
@@ -13,6 +14,7 @@ from app.schemas.agent_runtime import (
     AgentKnowledgeDocumentInput,
     AgentKnowledgeHit,
     AgentKnowledgeSource,
+    AgentKnowledgeVersionSummary,
 )
 
 
@@ -28,7 +30,16 @@ class KnowledgeDocument:
     updated_at: datetime | None = None
 
 
+@dataclass(frozen=True)
+class KnowledgeVersion:
+    version_id: str
+    action: str
+    created_at: datetime
+    documents: tuple[KnowledgeDocument, ...]
+
+
 class AgentKnowledgeBase:
+    _max_versions = 20
     _builtin_documents = (
         KnowledgeDocument(
             source_id="bill_required_fields",
@@ -147,6 +158,7 @@ class AgentKnowledgeBase:
 
     def __init__(self) -> None:
         self._admin_documents = self._load_admin_documents()
+        self._versions = self._load_versions()
 
     def search(self, query: str, limit: int = 3) -> list[AgentKnowledgeHit]:
         query_text = query.strip()
@@ -182,6 +194,7 @@ class AgentKnowledgeBase:
             admin_count=len(self._admin_documents),
             active_count=len(self._documents()),
             documents=documents,
+            versions=self._version_summaries(),
         )
 
     def replace_admin_documents(
@@ -197,13 +210,40 @@ class AgentKnowledgeBase:
                 order.append(normalized.source_id)
             by_id[normalized.source_id] = normalized
         self._admin_documents = tuple(by_id[source_id] for source_id in order)
+        self._record_version("replace")
         self._persist_admin_documents()
         return self.response()
 
     def reset_admin_documents(self) -> AgentKnowledgeBaseResponse:
         self._admin_documents = ()
+        self._record_version("reset")
         self._persist_admin_documents()
         return self.response()
+
+    def rollback_admin_documents(self, version_id: str) -> AgentKnowledgeBaseResponse:
+        version = next((item for item in self._versions if item.version_id == version_id), None)
+        if version is None:
+            raise ValueError("Knowledge version not found")
+        now = datetime.now(timezone.utc)
+        self._admin_documents = tuple(
+            KnowledgeDocument(
+                source_id=document.source_id,
+                title=document.title,
+                content=document.content,
+                tags=document.tags,
+                keywords=document.keywords,
+                source="admin",
+                enabled=document.enabled,
+                updated_at=now,
+            )
+            for document in version.documents
+        )
+        self._record_version("rollback")
+        self._persist_admin_documents()
+        return self.response()
+
+    def latest_version_id(self) -> str | None:
+        return self._versions[0].version_id if self._versions else None
 
     def sources(self) -> list[AgentKnowledgeSource]:
         groups: dict[str, list[KnowledgeDocument]] = {}
@@ -300,6 +340,50 @@ class AgentKnowledgeBase:
         except (OSError, ValueError, TypeError):
             return ()
 
+    def _load_versions(self) -> tuple[KnowledgeVersion, ...]:
+        path = settings.local_agent_knowledge_path
+        if not path.exists():
+            return ()
+        try:
+            raw_payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(raw_payload, dict):
+                return ()
+            raw_versions = raw_payload.get("versions", [])
+            if not isinstance(raw_versions, list):
+                return ()
+            versions: list[KnowledgeVersion] = []
+            for raw_version in raw_versions:
+                if not isinstance(raw_version, dict):
+                    continue
+                version_id = str(raw_version.get("version_id") or "").strip()
+                action = str(raw_version.get("action") or "replace").strip()[:40]
+                created_at = self._parse_datetime(raw_version.get("created_at"))
+                raw_documents = raw_version.get("documents", [])
+                if not version_id or not created_at or not isinstance(raw_documents, list):
+                    continue
+                documents: list[KnowledgeDocument] = []
+                for raw_document in raw_documents:
+                    if not isinstance(raw_document, dict):
+                        continue
+                    payload = AgentKnowledgeDocumentInput.model_validate(raw_document)
+                    documents.append(
+                        self._normalize_input(
+                            payload,
+                            updated_at=self._parse_datetime(raw_document.get("updated_at")),
+                        )
+                    )
+                versions.append(
+                    KnowledgeVersion(
+                        version_id=version_id,
+                        action=action or "replace",
+                        created_at=created_at,
+                        documents=tuple(documents),
+                    )
+                )
+            return tuple(versions[: self._max_versions])
+        except (OSError, ValueError, TypeError):
+            return ()
+
     def _persist_admin_documents(self) -> None:
         path = settings.local_agent_knowledge_path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -312,6 +396,7 @@ class AgentKnowledgeBase:
                         self._to_schema(document).model_dump(mode="json")
                         for document in self._admin_documents
                     ],
+                    "versions": [self._version_to_payload(version) for version in self._versions],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -319,6 +404,40 @@ class AgentKnowledgeBase:
             encoding="utf-8",
         )
         temp_path.replace(path)
+
+    def _record_version(self, action: str) -> None:
+        now = datetime.now(timezone.utc)
+        version = KnowledgeVersion(
+            version_id=f"rag-{now.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}",
+            action=action,
+            created_at=now,
+            documents=self._admin_documents,
+        )
+        self._versions = (version, *self._versions)[: self._max_versions]
+
+    def _version_summaries(self) -> list[AgentKnowledgeVersionSummary]:
+        return [
+            AgentKnowledgeVersionSummary(
+                version_id=version.version_id,
+                action=version.action,
+                created_at=version.created_at,
+                admin_count=len(version.documents),
+                active_count=sum(1 for document in version.documents if document.enabled),
+                document_titles=[document.title for document in version.documents[:8]],
+            )
+            for version in self._versions
+        ]
+
+    def _version_to_payload(self, version: KnowledgeVersion) -> dict[str, object]:
+        return {
+            "version_id": version.version_id,
+            "action": version.action,
+            "created_at": version.created_at.isoformat(),
+            "documents": [
+                self._to_schema(document).model_dump(mode="json")
+                for document in version.documents
+            ],
+        }
 
     def _normalize_input(
         self,

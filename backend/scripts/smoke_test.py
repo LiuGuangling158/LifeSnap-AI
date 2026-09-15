@@ -1051,6 +1051,8 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
     )
     _assert(status == 200, "Knowledge update with admin key should return 200")
     _assert(updated["admin_count"] == 1, "Knowledge update should persist one admin document")
+    _assert(updated["versions"][0]["action"] == "replace", "Knowledge update should create a replace version")
+    replace_version_id = updated["versions"][0]["version_id"]
     _assert(
         any(document["source_id"] == "smoke_admin_milk_tea_policy" for document in updated["documents"]),
         "Knowledge update response should include admin document",
@@ -1088,6 +1090,7 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
     )
     _assert(status == 200, "Knowledge reset with admin key should return 200")
     _assert(reset["admin_count"] == 0, "Knowledge reset should clear admin documents")
+    _assert(reset["versions"][0]["action"] == "reset", "Knowledge reset should create a reset version")
 
     status, hits = client.request("GET", "/agent/knowledge/search?q=%E7%AE%A1%E7%90%86%E5%91%98%E6%96%B0%E5%A2%9E%E7%9F%A5%E8%AF%86&limit=3")
     _assert(status == 200, "Knowledge search after reset should return 200")
@@ -1095,6 +1098,37 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
         all(hit["source_id"] != "smoke_admin_milk_tea_policy" for hit in hits),
         "Knowledge reset should remove admin-added documents from search",
     )
+
+    status, rolled_back = client.request(
+        "POST",
+        "/agent/knowledge/rollback",
+        {"version_id": replace_version_id},
+        headers=admin_headers,
+    )
+    _assert(status == 200, "Knowledge rollback with admin key should return 200")
+    _assert(rolled_back["admin_count"] == 1, "Knowledge rollback should restore admin documents")
+    _assert(rolled_back["versions"][0]["action"] == "rollback", "Knowledge rollback should create a rollback version")
+    _assert(
+        any(document["source_id"] == "smoke_admin_milk_tea_policy" for document in rolled_back["documents"]),
+        "Knowledge rollback response should include restored admin document",
+    )
+
+    status, body = client.request(
+        "POST",
+        "/agent/knowledge/rollback",
+        {"version_id": "missing-version"},
+        headers=admin_headers,
+    )
+    _assert(status == 404, "Knowledge rollback should reject missing versions")
+    _assert(body["detail"] == "Knowledge version not found", "Knowledge rollback missing-version message changed")
+
+    status, final_reset = client.request(
+        "POST",
+        "/agent/knowledge/reset",
+        {"confirm": True},
+        headers=admin_headers,
+    )
+    _assert(status == 200 and final_reset["admin_count"] == 0, "Knowledge final reset should restore built-in-only state")
 
 
 def _check_chat_bill_analysis(client: ApiClient) -> None:

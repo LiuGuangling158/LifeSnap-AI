@@ -9,6 +9,7 @@ from app.schemas.agent_runtime import (
     AgentAdminKeyRevealResponse,
     AgentKnowledgeBaseResetRequest,
     AgentKnowledgeBaseResponse,
+    AgentKnowledgeRollbackRequest,
     AgentKnowledgeBaseUpdateRequest,
     AgentFineTuningDatasetResponse,
     AgentKnowledgeHit,
@@ -131,6 +132,7 @@ def update_agent_knowledge_documents(
         metadata={
             "admin_document_count": response.admin_count,
             "active_document_count": response.active_count,
+            "version_id": agent_knowledge_base.latest_version_id(),
         },
     )
     return response
@@ -152,7 +154,34 @@ def reset_agent_knowledge_documents(
         action="agent_knowledge_reset",
         entity_type="agent_knowledge_base",
         request=request,
-        metadata={"active_document_count": response.active_count},
+        metadata={
+            "active_document_count": response.active_count,
+            "version_id": agent_knowledge_base.latest_version_id(),
+        },
+    )
+    return response
+
+
+@router.post("/knowledge/rollback", response_model=AgentKnowledgeBaseResponse)
+def rollback_agent_knowledge_documents(
+    payload: AgentKnowledgeRollbackRequest,
+    request: Request,
+    _: None = Depends(require_admin_api_key),
+) -> AgentKnowledgeBaseResponse:
+    try:
+        response = agent_knowledge_base.rollback_admin_documents(payload.version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="agent_knowledge_rollback",
+        entity_type="agent_knowledge_base",
+        request=request,
+        metadata={
+            "rolled_back_to": payload.version_id,
+            "version_id": agent_knowledge_base.latest_version_id(),
+            "admin_document_count": response.admin_count,
+            "active_document_count": response.active_count,
+        },
     )
     return response
 
