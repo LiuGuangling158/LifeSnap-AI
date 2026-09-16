@@ -204,7 +204,13 @@ GET /diagnostics/data-quality
 GET /diagnostics/data-quality?duplicate_time_window_minutes=10&issue_limit=50
 GET /diagnostics/integrations
 POST /diagnostics/integrations/probe
+GET /diagnostics/readiness
 ```
+
+`GET /diagnostics/readiness` returns an enterprise readiness report that groups
+storage, Agent runtime, AI/OCR integrations, privacy controls, audit logging and
+data quality into component statuses. It is intended for operational review and
+demo readiness checks; it does not expose provider API keys or raw user content.
 
 Data-quality diagnostics surface frontend-friendly issues such as possible
 duplicate bills, missing OCR text, pending candidates, overdue tasks,

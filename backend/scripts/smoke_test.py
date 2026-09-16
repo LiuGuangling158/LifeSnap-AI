@@ -1213,6 +1213,27 @@ def _check_chat_bill_analysis(client: ApiClient) -> None:
 
 
 def _check_integration_diagnostics(client: ApiClient) -> None:
+    status, readiness = client.request("GET", "/diagnostics/readiness")
+    _assert(status == 200, "GET /diagnostics/readiness should return 200")
+    _assert(
+        readiness["status"] in {"ready", "degraded", "action_required"},
+        "Readiness diagnostics should expose an enterprise status",
+    )
+    _assert(readiness["component_count"] >= 6, "Readiness diagnostics should include core components")
+    readiness_components = {component["name"]: component for component in readiness["components"]}
+    _assert(
+        {"storage", "agent", "integrations", "privacy", "audit", "data_quality"}.issubset(readiness_components),
+        "Readiness diagnostics should include storage, agent, integrations, privacy, audit and data quality",
+    )
+    _assert(
+        readiness_components["agent"]["metrics"]["function_calling_enabled"],
+        "Readiness diagnostics should expose Agent function-calling readiness",
+    )
+    _assert(
+        readiness_components["audit"]["metrics"]["redaction_enabled"],
+        "Readiness diagnostics should expose audit redaction readiness",
+    )
+
     status, diagnostics = client.request("GET", "/diagnostics/integrations")
     _assert(status == 200, "GET /diagnostics/integrations should return 200")
     _assert(

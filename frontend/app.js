@@ -146,6 +146,7 @@ const state = {
   diagnosticsLoading: false,
   integrationProbeLoading: false,
   diagnostics: null,
+  readinessDiagnostics: null,
   integrationDiagnostics: null,
   integrationProbe: null,
   auditLogOpen: false,
@@ -3342,10 +3343,12 @@ async function refreshDiagnostics() {
   state.diagnosticsLoading = true;
   render();
   try {
-    const [dataQuality, integrations] = await Promise.all([
+    const [readiness, dataQuality, integrations] = await Promise.all([
+      api("/diagnostics/readiness"),
       api("/diagnostics/data-quality?issue_limit=20"),
       api("/diagnostics/integrations"),
     ]);
+    state.readinessDiagnostics = readiness;
     state.diagnostics = dataQuality;
     state.integrationDiagnostics = integrations;
   } catch (error) {
@@ -8605,6 +8608,7 @@ function renderTagSettingsModal() {
 
 function renderDiagnosticsModal() {
   const diagnostics = state.diagnostics;
+  const readiness = state.readinessDiagnostics;
   const integrationDiagnostics = state.integrationDiagnostics;
   const issues = diagnostics?.issues ?? [];
   return `
@@ -8626,7 +8630,8 @@ function renderDiagnosticsModal() {
           </div>
         </div>
         <div class="diagnostics-body">
-          ${state.diagnosticsLoading && !diagnostics && !integrationDiagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
+          ${state.diagnosticsLoading && !readiness && !diagnostics && !integrationDiagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
+          ${readiness ? renderReadinessDiagnostics(readiness) : ""}
           ${integrationDiagnostics ? renderIntegrationDiagnostics(integrationDiagnostics) : ""}
           ${renderMockProviderGuide()}
           ${renderExternalProviderGuide()}
@@ -8654,6 +8659,74 @@ function renderDiagnosticsModal() {
       </section>
     </div>
   `;
+}
+
+function renderReadinessDiagnostics(readiness) {
+  const components = readiness.components ?? [];
+  return `
+    <section class="diagnostics-section readiness-section">
+      <div class="diagnostics-section-head">
+        <div>
+          <h3>企业级就绪度</h3>
+          <span>${escapeHtml(formatDate(readiness.generated_at))}</span>
+        </div>
+      </div>
+      <div class="diagnostics-summary readiness-summary">
+        ${diagnosticMetric("状态", readinessStatusLabel(readiness.status), readiness.status)}
+        ${diagnosticMetric("就绪", readiness.ready_count ?? 0, "ready")}
+        ${diagnosticMetric("降级", readiness.degraded_count ?? 0, "degraded")}
+        ${diagnosticMetric("需处理", readiness.action_required_count ?? 0, "action_required")}
+      </div>
+      ${components.length ? `
+        <div class="readiness-list">
+          ${components.map(renderReadinessComponent).join("")}
+        </div>
+      ` : `<p class="diagnostics-empty">暂无就绪度检查结果。</p>`}
+    </section>
+  `;
+}
+
+function renderReadinessComponent(component) {
+  const metrics = component.metrics ?? {};
+  const warnings = component.warnings ?? [];
+  return `
+    <article class="readiness-component ${escapeHtml(component.status || "ready")}">
+      <span>${icon(readinessComponentIcon(component.name))}</span>
+      <div class="integration-check-main">
+        <div class="integration-check-title">
+          <strong>${escapeHtml(component.title || component.name)}</strong>
+          <small>${escapeHtml(component.name || "readiness")}</small>
+        </div>
+        <p>${escapeHtml(component.summary || "")}</p>
+        ${component.next_action ? `<small>${escapeHtml(component.next_action)}</small>` : ""}
+        ${warnings.length ? `<div class="audit-detail-chips">${warnings.slice(0, 4).map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>` : ""}
+      </div>
+      <div class="integration-check-status">
+        <strong>${escapeHtml(readinessStatusLabel(component.status))}</strong>
+        <span>${escapeHtml(readinessMetricsPreview(metrics))}</span>
+      </div>
+    </article>
+  `;
+}
+
+function readinessComponentIcon(name) {
+  return {
+    storage: "database",
+    agent: "spark",
+    integrations: "cloud",
+    privacy: "shield",
+    audit: "file-text",
+    data_quality: "check-circle",
+  }[name] ?? "check-circle";
+}
+
+function readinessMetricsPreview(metrics) {
+  if (typeof metrics.pending_candidate_count === "number") return `候选 ${metrics.pending_candidate_count}`;
+  if (typeof metrics.knowledge_document_count === "number") return `知识 ${metrics.knowledge_document_count}`;
+  if (typeof metrics.ready_count === "number" && typeof metrics.check_count === "number") return `${metrics.ready_count}/${metrics.check_count} 可用`;
+  if (typeof metrics.event_count === "number") return `审计 ${metrics.event_count}`;
+  if (typeof metrics.issue_count === "number") return `问题 ${metrics.issue_count}`;
+  return "已检查";
 }
 
 function renderExternalProviderGuide() {
@@ -9230,6 +9303,14 @@ function chatIntentDisplay(intent) {
   }[intent] ?? "";
 }
 
+function readinessStatusLabel(status) {
+  return {
+    ready: "已就绪",
+    degraded: "可用但降级",
+    action_required: "需要处理",
+  }[status] ?? diagnosticsStatusLabel(status);
+}
+
 function chatActionDisplay(actionType) {
   return {
     bill_candidate: "账单候选",
@@ -9699,6 +9780,7 @@ function icon(name) {
     grid: '<rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><rect x="14" y="14" width="6" height="6" rx="1"></rect>',
     tag: '<path d="M20 13 13 20l-9-9V4h7l9 9z"></path><circle cx="8.5" cy="8.5" r="1"></circle>',
     cloud: '<path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6.2 8.8 4.5 4.5 0 0 0 7 18z"></path>',
+    shield: '<path d="M12 3l7 3v5c0 4.5-2.8 8.5-7 10-4.2-1.5-7-5.5-7-10V6l7-3z"></path><path d="M9 12l2 2 4-5"></path>',
     user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
     download: '<path d="M12 3v12"></path><path d="M7 10l5 5 5-5"></path><path d="M5 21h14"></path>',
     upload: '<path d="M12 21V9"></path><path d="M7 14l5-5 5 5"></path><path d="M5 3h14"></path>',

@@ -87,3 +87,23 @@ class IntegrationProbeResponse(BaseModel):
     failed_count: int
     skipped_count: int
     results: list[IntegrationProbeResult]
+
+
+class ReadinessComponent(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    title: str = Field(min_length=1, max_length=120)
+    status: str = Field(min_length=1, max_length=40)
+    summary: str = Field(min_length=1, max_length=240)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    next_action: str | None = Field(default=None, max_length=240)
+
+
+class ReadinessDiagnostics(BaseModel):
+    generated_at: datetime
+    status: str = Field(min_length=1, max_length=40)
+    component_count: int = Field(ge=0)
+    ready_count: int = Field(ge=0)
+    degraded_count: int = Field(ge=0)
+    action_required_count: int = Field(ge=0)
+    components: list[ReadinessComponent]

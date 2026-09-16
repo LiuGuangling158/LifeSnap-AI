@@ -7057,6 +7057,10 @@ button:focus-visible {
   color: #9a6815;
 }
 
+.diagnostic-metric.degraded strong {
+  color: #9a6815;
+}
+
 .diagnostic-metric.fallback strong {
   color: #6f7785;
 }
@@ -7085,7 +7089,13 @@ button:focus-visible {
   border-top: 1px solid var(--line);
 }
 
-.integration-check {
+.readiness-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.integration-check,
+.readiness-component {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) minmax(96px, auto);
   gap: 12px;
@@ -7097,12 +7107,14 @@ button:focus-visible {
     transform var(--motion);
 }
 
-.integration-check:hover {
+.integration-check:hover,
+.readiness-component:hover {
   background: #fbfdfa;
   transform: translateY(-1px);
 }
 
-.integration-check > span {
+.integration-check > span,
+.readiness-component > span {
   display: grid;
   width: 36px;
   height: 36px;
@@ -7117,7 +7129,13 @@ button:focus-visible {
   color: #d44848;
 }
 
-.integration-check.fallback > span {
+.readiness-component.action_required > span {
+  background: #fff0f0;
+  color: #d44848;
+}
+
+.integration-check.fallback > span,
+.readiness-component.degraded > span {
   background: #f3f5f2;
   color: #6f7785;
 }
@@ -7177,6 +7195,14 @@ button:focus-visible {
 
 .integration-check.fallback .integration-check-status strong {
   color: #6f7785;
+}
+
+.readiness-component.degraded .integration-check-status strong {
+  color: #9a6815;
+}
+
+.readiness-component.action_required .integration-check-status strong {
+  color: #d44848;
 }
 
 .integration-probe {

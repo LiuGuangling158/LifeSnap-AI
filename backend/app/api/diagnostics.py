@@ -5,6 +5,7 @@ from app.schemas.diagnostics import (
     IntegrationDiagnostics,
     IntegrationProbeRequest,
     IntegrationProbeResponse,
+    ReadinessDiagnostics,
 )
 from app.services.diagnostics_service import diagnostics_service
 
@@ -25,6 +26,11 @@ def get_data_quality_diagnostics(
 @router.get("/integrations", response_model=IntegrationDiagnostics)
 def get_integration_diagnostics() -> IntegrationDiagnostics:
     return diagnostics_service.integrations()
+
+
+@router.get("/readiness", response_model=ReadinessDiagnostics)
+def get_readiness_diagnostics() -> ReadinessDiagnostics:
+    return diagnostics_service.readiness()
 
 
 @router.post("/integrations/probe", response_model=IntegrationProbeResponse)

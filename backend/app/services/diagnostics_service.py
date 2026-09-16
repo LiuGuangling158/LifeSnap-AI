@@ -25,9 +25,14 @@ from app.schemas.diagnostics import (
     IntegrationDiagnostics,
     IntegrationProbeResponse,
     IntegrationProbeResult,
+    ReadinessComponent,
+    ReadinessDiagnostics,
 )
+from app.services.agent_knowledge_base import agent_knowledge_base
+from app.services.agent_runtime_service import agent_runtime_service
 from app.schemas.task import TaskRead, TaskSource, TaskStatus, TaskType
 from app.services.attachment_store import attachment_store
+from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_store import bill_store
 from app.services.data_management_service import data_management_service
@@ -40,6 +45,31 @@ from app.services.task_store import task_store
 
 
 class DiagnosticsService:
+    def readiness(self) -> ReadinessDiagnostics:
+        now = datetime.now(timezone.utc)
+        integrations = self.integrations()
+        data_quality = self.data_quality(issue_limit=20)
+        components = [
+            self._storage_readiness(),
+            self._agent_readiness(),
+            self._integration_readiness(integrations),
+            self._privacy_readiness(),
+            self._audit_readiness(),
+            self._data_quality_readiness(data_quality),
+        ]
+        ready_count = len([component for component in components if component.status == "ready"])
+        degraded_count = len([component for component in components if component.status == "degraded"])
+        action_required_count = len([component for component in components if component.status == "action_required"])
+        return ReadinessDiagnostics(
+            generated_at=now,
+            status=self._readiness_status(components),
+            component_count=len(components),
+            ready_count=ready_count,
+            degraded_count=degraded_count,
+            action_required_count=action_required_count,
+            components=components,
+        )
+
     def integrations(self) -> IntegrationDiagnostics:
         now = datetime.now(timezone.utc)
         checks = [
@@ -115,6 +145,196 @@ class DiagnosticsService:
             issue_limit=issue_limit,
             truncated=len(issues) > issue_limit,
             issues=limited_issues,
+        )
+
+    def _storage_readiness(self) -> ReadinessComponent:
+        data_dir = settings.local_bill_path.parent
+        managed_paths = [
+            settings.local_bill_path,
+            settings.local_task_path,
+            settings.local_diary_path,
+            settings.local_attachment_path,
+            settings.local_audit_path,
+            settings.local_idempotency_path,
+            settings.local_agent_knowledge_path,
+        ]
+        existing_files = sum(1 for path in managed_paths if path.exists())
+        writable = self._path_writable(data_dir)
+        summary = data_management_service.summary()
+        candidate_count = summary.bill_candidate_count + summary.task_candidate_count + summary.diary_candidate_count
+        warnings: list[str] = []
+        next_action: str | None = None
+        status = "ready"
+        if not writable:
+            status = "action_required"
+            warnings.append("data_directory_not_writable")
+            next_action = "Check LIFESNAP_DATA_DIR permissions before running writes or imports."
+        elif candidate_count:
+            status = "degraded"
+            warnings.append("pending_candidates_present")
+            next_action = "Review and confirm or discard pending AI candidates."
+
+        return ReadinessComponent(
+            name="storage",
+            title="Local storage",
+            status=status,
+            summary="Local JSON persistence is reachable." if writable else "Local JSON persistence cannot be written.",
+            metrics={
+                "backend": "local_json",
+                "data_dir": str(data_dir),
+                "managed_file_count": len(managed_paths),
+                "existing_file_count": existing_files,
+                "bill_count": summary.bill_count,
+                "task_count": summary.task_count,
+                "diary_count": summary.diary_count,
+                "attachment_count": summary.attachment_count,
+                "pending_candidate_count": candidate_count,
+            },
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _agent_readiness(self) -> ReadinessComponent:
+        runtime = agent_runtime_service.profile()
+        model = runtime.model_profile
+        knowledge_count = sum(source.document_count for source in runtime.knowledge_sources)
+        versions = agent_knowledge_base.response().versions
+        warnings: list[str] = []
+        next_action: str | None = None
+        status = "ready"
+        if not runtime.rag_enabled or knowledge_count == 0:
+            status = "action_required"
+            warnings.append("rag_knowledge_missing")
+            next_action = "Restore built-in knowledge or add admin knowledge before using the Agent."
+        elif model.local_fallback_active:
+            status = "degraded"
+            warnings.append("external_model_not_ready")
+            next_action = model.next_action or "Configure a ready external model or keep using local fallback."
+
+        return ReadinessComponent(
+            name="agent",
+            title="AI Agent runtime",
+            status=status,
+            summary=f"Agent strategy: {model.strategy}.",
+            metrics={
+                "rag_enabled": runtime.rag_enabled,
+                "function_calling_enabled": runtime.function_calling_enabled,
+                "fine_tuning_ready": runtime.fine_tuning_ready,
+                "knowledge_document_count": knowledge_count,
+                "knowledge_version_count": len(versions),
+                "function_tool_count": len(runtime.function_tools),
+                "model_provider": model.provider,
+                "model_strategy": model.strategy,
+                "external_model_ready": model.external_model_ready,
+                "local_fallback_active": model.local_fallback_active,
+            },
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _integration_readiness(self, integrations: IntegrationDiagnostics) -> ReadinessComponent:
+        status = "ready"
+        warnings: list[str] = []
+        next_action: str | None = None
+        if integrations.blocked_count:
+            status = "action_required"
+            warnings.append("configured_integrations_blocked")
+        elif integrations.fallback_count:
+            status = "degraded"
+            warnings.append("some_integrations_using_fallback")
+
+        for check in integrations.checks:
+            if check.next_action:
+                next_action = check.next_action
+                break
+
+        return ReadinessComponent(
+            name="integrations",
+            title="AI/OCR integrations",
+            status=status,
+            summary=f"{integrations.ready_count} of {integrations.check_count} integrations are ready.",
+            metrics={
+                "check_count": integrations.check_count,
+                "ready_count": integrations.ready_count,
+                "fallback_count": integrations.fallback_count,
+                "blocked_count": integrations.blocked_count,
+            },
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _privacy_readiness(self) -> ReadinessComponent:
+        privacy = settings_store.get_privacy_settings()
+        external_model_configured = agent_runtime_service.model_trace().external_model_configured or settings.real_ocr_enabled
+        warnings: list[str] = []
+        next_action: str | None = None
+        status = "ready"
+        if external_model_configured and privacy.local_only_mode:
+            status = "degraded"
+            warnings.append("external_ai_blocked_by_local_only_mode")
+            next_action = "Disable local-only mode only when the user explicitly allows external AI processing."
+        if privacy.save_original_attachments_by_default:
+            warnings.append("original_attachment_retention_enabled")
+            if status == "ready":
+                status = "degraded"
+            next_action = next_action or "Disable original attachment retention unless product policy requires it."
+
+        return ReadinessComponent(
+            name="privacy",
+            title="Privacy controls",
+            status=status,
+            summary="Privacy switches are loaded and enforce external AI boundaries.",
+            metrics={
+                "local_only_mode": privacy.local_only_mode,
+                "allow_ai_text_processing": privacy.allow_ai_text_processing,
+                "save_original_attachments_by_default": privacy.save_original_attachments_by_default,
+                "keep_ocr_text": privacy.keep_ocr_text,
+                "attachment_retention_policy": privacy.attachment_retention_policy,
+            },
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _audit_readiness(self) -> ReadinessComponent:
+        path = settings.local_audit_path
+        writable = self._path_writable(path.parent)
+        event_count = audit_log_store.list(page_size=1).total
+        status = "ready" if writable else "action_required"
+        warnings = [] if writable else ["audit_log_directory_not_writable"]
+        return ReadinessComponent(
+            name="audit",
+            title="Audit log",
+            status=status,
+            summary="Audit events are persisted locally." if writable else "Audit events cannot be persisted.",
+            metrics={
+                "event_count": event_count,
+                "path": str(path),
+                "redaction_enabled": True,
+            },
+            warnings=warnings,
+            next_action=None if writable else "Check audit log directory permissions.",
+        )
+
+    def _data_quality_readiness(self, diagnostics: DataQualityDiagnostics) -> ReadinessComponent:
+        if diagnostics.action_required_count:
+            status = "action_required"
+        elif diagnostics.warning_count:
+            status = "degraded"
+        else:
+            status = "ready"
+        return ReadinessComponent(
+            name="data_quality",
+            title="Data quality",
+            status=status,
+            summary=f"{diagnostics.issue_count} data quality findings detected.",
+            metrics={
+                "issue_count": diagnostics.issue_count,
+                "action_required_count": diagnostics.action_required_count,
+                "warning_count": diagnostics.warning_count,
+                "info_count": diagnostics.info_count,
+            },
+            warnings=[issue.code for issue in diagnostics.issues[:5]],
+            next_action="Resolve action-required diagnostics first." if diagnostics.action_required_count else None,
         )
 
     def _ocr_integration_check(self) -> IntegrationCheck:
@@ -629,6 +849,25 @@ class DiagnosticsService:
             if value and value not in deduped:
                 deduped.append(value)
         return deduped
+
+    def _readiness_status(self, components: list[ReadinessComponent]) -> str:
+        statuses = {component.status for component in components}
+        if "action_required" in statuses:
+            return "action_required"
+        if "degraded" in statuses:
+            return "degraded"
+        return "ready"
+
+    def _path_writable(self, path: object) -> bool:
+        try:
+            target = settings.local_bill_path.parent if path is None else path
+            target.mkdir(parents=True, exist_ok=True)  # type: ignore[attr-defined]
+            probe_path = target / ".lifesnap_write_probe"  # type: ignore[operator]
+            probe_path.write_text("ok", encoding="utf-8")
+            probe_path.unlink(missing_ok=True)
+            return True
+        except OSError:
+            return False
 
     def _privacy_issues(self) -> list[DiagnosticIssue]:
         privacy_settings = settings_store.get_privacy_settings()
