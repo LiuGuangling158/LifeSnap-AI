@@ -49,6 +49,16 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        return default
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     raw_value = os.getenv(name)
     if raw_value is None:
@@ -321,6 +331,9 @@ class Settings:
     )
     allow_admin_key_reveal: bool = field(
         default_factory=lambda: _env_bool("LIFESNAP_ALLOW_ADMIN_KEY_REVEAL", False)
+    )
+    admin_session_ttl_minutes: int = field(
+        default_factory=lambda: _env_int("LIFESNAP_ADMIN_SESSION_TTL_MINUTES", 30)
     )
     external_ocr_endpoint: str | None = field(default_factory=_default_ocr_endpoint)
     external_ocr_api_key: str | None = field(default_factory=_default_ocr_api_key)

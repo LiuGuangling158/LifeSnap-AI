@@ -109,6 +109,19 @@ class AgentAdminKeyRevealResponse(BaseModel):
     detail: str = Field(min_length=1, max_length=180)
 
 
+class AgentAdminSessionCreateRequest(BaseModel):
+    admin_key: str = Field(min_length=1, max_length=240)
+
+
+class AgentAdminSessionResponse(BaseModel):
+    authenticated: bool = True
+    token: str = Field(min_length=1)
+    token_type: str = Field(default="Bearer", max_length=20)
+    role: str = Field(default="admin", max_length=40)
+    expires_at: datetime
+    expires_in_seconds: int = Field(ge=1)
+
+
 class AgentFunctionToolCapability(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     label: str = Field(min_length=1, max_length=80)

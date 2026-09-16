@@ -1026,6 +1026,23 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
     _assert(status == 200, "Local admin key reveal should return 200 when explicitly enabled")
     _assert(reveal["available"] and reveal["admin_key"] == "smoke-admin-key", "Local admin key reveal should return the configured admin key")
 
+    status, body = client.request(
+        "POST",
+        "/agent/admin-session",
+        {"admin_key": "wrong-admin-key"},
+    )
+    _assert(status == 403, "Admin session should reject an invalid admin key")
+    _assert(body["detail"] == "Invalid admin API key", "Admin session invalid-key message changed")
+
+    status, session = client.request(
+        "POST",
+        "/agent/admin-session",
+        {"admin_key": "smoke-admin-key"},
+    )
+    _assert(status == 200, "Admin session should be created with a valid admin key")
+    _assert(session["authenticated"] and session["token_type"] == "Bearer", "Admin session should return a bearer token")
+    _assert(session["token"] and session["expires_in_seconds"] >= 60, "Admin session should include token and expiry")
+
     admin_document = {
         "source_id": "smoke_admin_milk_tea_policy",
         "title": "管理员奶茶分类规则",
@@ -1042,7 +1059,7 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
     _assert(status == 403, "Knowledge update should require an admin key")
     _assert(body["detail"] == "Invalid admin API key", "Knowledge update should reject missing admin key")
 
-    admin_headers = {"X-LifeSnap-Admin-Key": "smoke-admin-key"}
+    admin_headers = {"Authorization": f"Bearer {session['token']}"}
     status, updated = client.request(
         "PUT",
         "/agent/knowledge/documents",

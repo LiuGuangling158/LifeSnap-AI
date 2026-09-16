@@ -7,6 +7,8 @@ from app.core.config import settings
 from app.schemas.bill import BillRead, DuplicateBillCheckResponse
 from app.schemas.agent_runtime import (
     AgentAdminKeyRevealResponse,
+    AgentAdminSessionCreateRequest,
+    AgentAdminSessionResponse,
     AgentKnowledgeBaseResetRequest,
     AgentKnowledgeBaseResponse,
     AgentKnowledgeRollbackRequest,
@@ -30,6 +32,7 @@ from app.schemas.agent import (
     TaskCandidateListResponse,
 )
 from app.schemas.task import TaskRead
+from app.services.admin_auth_service import admin_auth_service
 from app.services.audit_log_store import audit_log_store
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_runtime_service import agent_runtime_service
@@ -50,12 +53,15 @@ _LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 def require_admin_api_key(
     admin_key: str | None = Header(default=None, alias="X-LifeSnap-Admin-Key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> None:
     if not settings.admin_api_key:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin API key is not configured",
         )
+    if admin_auth_service.validate_bearer(authorization):
+        return
     if not admin_key or not hmac.compare_digest(admin_key, settings.admin_api_key):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -115,6 +121,39 @@ def reveal_admin_key(
         available=True,
         admin_key=settings.admin_api_key,
         detail="Admin key loaded from local environment",
+    )
+
+
+@router.post("/admin-session", response_model=AgentAdminSessionResponse)
+def create_admin_session(
+    payload: AgentAdminSessionCreateRequest,
+    request: Request,
+) -> AgentAdminSessionResponse:
+    if not settings.admin_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin API key is not configured",
+        )
+    if not hmac.compare_digest(payload.admin_key, settings.admin_api_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin API key",
+        )
+    token, expires_at, ttl_seconds = admin_auth_service.create_session()
+    audit_log_store.record(
+        action="admin_session_created",
+        entity_type="admin_session",
+        request=request,
+        metadata={
+            "role": "admin",
+            "expires_at": expires_at,
+            "ttl_seconds": ttl_seconds,
+        },
+    )
+    return AgentAdminSessionResponse(
+        token=token,
+        expires_at=expires_at,
+        expires_in_seconds=ttl_seconds,
     )
 
 

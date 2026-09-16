@@ -584,6 +584,7 @@ fine-tuning examples:
 GET /agent/runtime
 GET /agent/knowledge/search?q=账单分类&limit=3
 GET /agent/knowledge/documents
+POST /agent/admin-session
 PUT /agent/knowledge/documents
 POST /agent/knowledge/reset
 POST /agent/knowledge/rollback
@@ -593,9 +594,10 @@ GET /agent/fine-tuning/examples?limit=50
 `GET /agent/knowledge/documents` returns the built-in and admin-managed RAG
 documents. `PUT /agent/knowledge/documents` replaces the admin-managed document
 set, and `POST /agent/knowledge/reset` clears it back to the built-in knowledge
-base. Write calls require `X-LifeSnap-Admin-Key`, which must match
-`LIFESNAP_ADMIN_KEY` or `LIFESNAP_ADMIN_API_KEY`; when no admin key is configured,
-the write endpoints return 403. Admin documents are persisted to
+base. Write calls accept either `Authorization: Bearer <admin-session-token>`
+from `POST /agent/admin-session`, or the legacy `X-LifeSnap-Admin-Key` header
+matching `LIFESNAP_ADMIN_KEY` or `LIFESNAP_ADMIN_API_KEY`; when no admin key is
+configured, the write endpoints return 403. Admin documents are persisted to
 `backend/data/agent_knowledge.json` by default. A document with the same
 `source_id` as a built-in document overrides it; an overridden document with
 `enabled=false` disables that knowledge for search.
@@ -604,8 +606,13 @@ Each admin save, reset, and rollback creates a version snapshot in the same
 knowledge store. `GET /agent/knowledge/documents` includes recent version
 summaries, and `POST /agent/knowledge/rollback` accepts `version_id` to restore
 one of those snapshots. Rollback is also an admin write operation, requires
-`X-LifeSnap-Admin-Key`, writes an audit event, and creates a new rollback
-version so the history remains append-only.
+admin authentication, writes an audit event, and creates a new rollback version
+so the history remains append-only.
+
+`POST /agent/admin-session` exchanges the local admin key for a short-lived HMAC
+signed admin token. The token is stateless, defaults to 30 minutes, and can be
+configured with `LIFESNAP_ADMIN_SESSION_TTL_MINUTES`. The response never returns
+the admin key, and session creation is audited without logging the submitted key.
 
 For local development convenience, `GET /agent/admin-key` can fill the admin key
 in the Admin UI only when `LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true` and the request

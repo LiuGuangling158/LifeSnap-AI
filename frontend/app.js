@@ -224,6 +224,9 @@ const state = {
   adminKnowledgeSearchQuery: "",
   adminKnowledgeSearchResults: [],
   adminKnowledgeAdminKey: "",
+  adminKnowledgeAdminToken: "",
+  adminKnowledgeAdminSessionExpiresAt: "",
+  adminSessionLoading: false,
   adminKeyRevealLoading: false,
   adminKnowledgeLoading: false,
   adminKnowledgeSearching: false,
@@ -286,6 +289,11 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-admin-key-reveal]")) {
     revealAdminKey();
+    return;
+  }
+
+  if (event.target.closest("[data-admin-session-create]")) {
+    establishAdminSession();
     return;
   }
 
@@ -1296,9 +1304,10 @@ async function submitAdminKnowledge(formData) {
   state.saving = true;
   render();
   try {
+    const headers = await adminKnowledgeHeaders(adminKey);
     const updated = await api("/agent/knowledge/documents", {
       method: "PUT",
-      headers: adminKnowledgeHeaders(adminKey),
+      headers,
       body: JSON.stringify({ documents }),
     });
     setAdminKnowledge(updated);
@@ -1326,9 +1335,10 @@ async function resetAdminKnowledge() {
   state.saving = true;
   render();
   try {
+    const headers = await adminKnowledgeHeaders(adminKey);
     const updated = await api("/agent/knowledge/reset", {
       method: "POST",
-      headers: adminKnowledgeHeaders(adminKey),
+      headers,
       body: JSON.stringify({ confirm: true }),
     });
     setAdminKnowledge(updated);
@@ -1360,9 +1370,10 @@ async function rollbackAdminKnowledge(versionId) {
   state.saving = true;
   render();
   try {
+    const headers = await adminKnowledgeHeaders(adminKey);
     const updated = await api("/agent/knowledge/rollback", {
       method: "POST",
-      headers: adminKnowledgeHeaders(adminKey),
+      headers,
       body: JSON.stringify({ version_id: normalizedVersionId }),
     });
     setAdminKnowledge(updated);
@@ -1389,6 +1400,7 @@ async function revealAdminKey() {
       throw new Error("未读取到管理员密钥。");
     }
     state.adminKnowledgeAdminKey = adminKey;
+    await createAdminSession(adminKey);
     state.toast = "已从本机环境填入管理员密钥。";
   } catch (error) {
     state.toast = adminKeyRevealErrorMessage(error);
@@ -1396,6 +1408,61 @@ async function revealAdminKey() {
     state.adminKeyRevealLoading = false;
     render();
   }
+}
+
+async function establishAdminSession() {
+  try {
+    const adminKey = state.adminKnowledgeAdminKey.trim();
+    if (!adminKey) {
+      showToast("请输入管理员密钥后再建立会话。");
+      return;
+    }
+    await createAdminSession(adminKey);
+    showToast("管理员会话已建立，后续管理操作会优先使用短期 token。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  }
+}
+
+async function createAdminSession(adminKey) {
+  const normalizedAdminKey = String(adminKey || "").trim();
+  if (!normalizedAdminKey) {
+    throw new Error("Admin key required");
+  }
+  if (state.adminSessionLoading) {
+    return state.adminKnowledgeAdminToken;
+  }
+  state.adminSessionLoading = true;
+  render();
+  try {
+    const session = await api("/agent/admin-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ admin_key: normalizedAdminKey }),
+    });
+    state.adminKnowledgeAdminToken = String(session?.token || "");
+    state.adminKnowledgeAdminSessionExpiresAt = String(session?.expires_at || "");
+    if (!state.adminKnowledgeAdminToken) {
+      throw new Error("未获取到管理员会话 token。");
+    }
+    return state.adminKnowledgeAdminToken;
+  } finally {
+    state.adminSessionLoading = false;
+    render();
+  }
+}
+
+function adminSessionValid() {
+  if (!state.adminKnowledgeAdminToken || !state.adminKnowledgeAdminSessionExpiresAt) return false;
+  const expiresAt = new Date(state.adminKnowledgeAdminSessionExpiresAt).getTime();
+  return Number.isFinite(expiresAt) && expiresAt > Date.now() + 30_000;
+}
+
+function adminSessionStatusText() {
+  if (adminSessionValid()) {
+    return `管理员会话有效至 ${formatDate(state.adminKnowledgeAdminSessionExpiresAt)}。`;
+  }
+  return "管理员会话未建立；保存时会用密钥自动建立短期会话。";
 }
 
 async function copyAdminKnowledgeJson() {
@@ -1465,10 +1532,17 @@ function normalizeAdminKnowledgeLabels(value, limit) {
   return parseLabelInput(value, limit);
 }
 
-function adminKnowledgeHeaders(adminKey) {
+async function adminKnowledgeHeaders(adminKey) {
+  if (adminSessionValid()) {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.adminKnowledgeAdminToken}`,
+    };
+  }
+  const token = await createAdminSession(adminKey);
   return {
     "Content-Type": "application/json",
-    "X-LifeSnap-Admin-Key": adminKey,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -1479,6 +1553,9 @@ function adminKnowledgeErrorMessage(error) {
   }
   if (message === "Invalid admin API key") {
     return "管理员密钥不正确，请检查 LIFESNAP_ADMIN_KEY。";
+  }
+  if (message === "Admin key required") {
+    return "请输入管理员密钥后再进行管理操作。";
   }
   if (message === "Knowledge version not found") {
     return "没有找到这个 RAG 知识库版本，请刷新后再试。";
@@ -5905,8 +5982,12 @@ function renderAdminPage() {
               <button class="button ghost" type="button" data-admin-key-reveal ${state.adminKeyRevealLoading ? "disabled" : ""}>
                 ${icon("key")}${state.adminKeyRevealLoading ? "读取中..." : "填入本机密钥"}
               </button>
+              <button class="button ghost" type="button" data-admin-session-create ${state.adminSessionLoading || adminSessionValid() ? "disabled" : ""}>
+                ${icon("shield")}${state.adminSessionLoading ? "建立中..." : adminSessionValid() ? "会话有效" : "建立会话"}
+              </button>
             </div>
             <small class="form-hint">仅当后端启用 LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true 且从本机访问时可用。</small>
+            <small class="form-hint">${escapeHtml(adminSessionStatusText())}</small>
           </div>
           <div class="field full">
             <label for="admin_knowledge_json">知识库 JSON <small>数组格式，最多 50 条</small></label>
