@@ -37,6 +37,11 @@ class LocalAttachmentStore:
         self._original_files: dict[UUID, bytes] = {}
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._attachments = {}
+        self._original_files = {}
+        self._load()
+
     def create(
         self,
         filename: str,

@@ -16,6 +16,10 @@ class LocalTaskCandidateStore:
         self._candidates: dict[UUID, ParseTaskResponse] = {}
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._candidates = {}
+        self._load()
+
     def save(self, candidate: ParseTaskResponse) -> ParseTaskResponse:
         self._candidates[candidate.candidate_id] = candidate
         self._persist()

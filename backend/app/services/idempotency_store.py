@@ -31,6 +31,10 @@ class LocalIdempotencyStore:
         self._records: dict[tuple[str, str], IdempotencyRecord] = {}
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._records = {}
+        self._load()
+
     def run(
         self,
         scope: str,

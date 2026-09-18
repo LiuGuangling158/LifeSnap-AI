@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from app.core.config import settings
+from app.core.user_context import LEGACY_OWNER_ID, current_owner_id
 
 
 class SQLiteStateStore:
@@ -19,7 +20,7 @@ class SQLiteStateStore:
     database. Legacy files are read only once, on first access to a namespace.
     """
 
-    _migration_version = 2
+    _migration_version = 4
     _collection_tables = {
         "bills": ("bills", "id"),
         "tasks": ("tasks", "id"),
@@ -67,7 +68,14 @@ class SQLiteStateStore:
                 self._local.depth = 0
                 connection.close()
 
-    def load_json(self, namespace: str, legacy_path: Path) -> Any | None:
+    def load_json(
+        self,
+        namespace: str,
+        legacy_path: Path,
+        *,
+        owner_id: str | None = None,
+    ) -> Any | None:
+        owner_id = owner_id or current_owner_id()
         with self._lock:
             connection = self._connect()
             try:
@@ -76,55 +84,65 @@ class SQLiteStateStore:
                     table_name, _ = collection
                     initialized = connection.execute(
                         "SELECT 1 FROM collection_state WHERE namespace = ?",
-                        (namespace,),
+                        (self._scope(namespace, owner_id),),
                     ).fetchone()
                     if initialized is not None:
                         rows = connection.execute(
-                            f"SELECT payload FROM {table_name} ORDER BY updated_at, record_id"
+                            f"SELECT payload FROM {table_name} WHERE owner_id = ? "
+                            "ORDER BY updated_at, record_id",
+                            (owner_id,),
                         ).fetchall()
                         return [json.loads(str(row["payload"])) for row in rows]
 
                 row = connection.execute(
-                    "SELECT payload FROM state_documents WHERE namespace = ?",
-                    (namespace,),
+                    "SELECT payload FROM state_documents WHERE namespace = ? AND owner_id = ?",
+                    (namespace, owner_id),
                 ).fetchone()
                 if row is not None:
                     return json.loads(str(row["payload"]))
 
-                legacy_value = self._read_legacy_json(legacy_path)
+                # Legacy files are an import source only.  Reading them for a
+                # newly created account would leak pre-auth local data.
+                legacy_value = (
+                    self._read_legacy_json(legacy_path)
+                    if owner_id == LEGACY_OWNER_ID
+                    else None
+                )
                 if legacy_value is not None:
-                    self._write_json(connection, namespace, legacy_value)
+                    self._write_json(connection, namespace, legacy_value, owner_id)
                     connection.commit()
                 return legacy_value
             finally:
                 connection.close()
 
-    def save_json(self, namespace: str, value: Any) -> None:
+    def save_json(self, namespace: str, value: Any, *, owner_id: str | None = None) -> None:
+        owner_id = owner_id or current_owner_id()
         connection = self._active_connection()
         if connection is not None:
-            self._write_json(connection, namespace, value)
+            self._write_json(connection, namespace, value, owner_id)
             return
 
         with self._lock:
             connection = self._connect()
             try:
-                self._write_json(connection, namespace, value)
+                self._write_json(connection, namespace, value, owner_id)
                 connection.commit()
             finally:
                 connection.close()
 
-    def namespace_exists(self, namespace: str) -> bool:
+    def namespace_exists(self, namespace: str, *, owner_id: str | None = None) -> bool:
+        owner_id = owner_id or current_owner_id()
         with self._lock:
             connection = self._connect()
             try:
                 if namespace in self._collection_tables:
                     return connection.execute(
                         "SELECT 1 FROM collection_state WHERE namespace = ?",
-                        (namespace,),
+                        (self._scope(namespace, owner_id),),
                     ).fetchone() is not None
                 return connection.execute(
-                    "SELECT 1 FROM state_documents WHERE namespace = ?",
-                    (namespace,),
+                    "SELECT 1 FROM state_documents WHERE namespace = ? AND owner_id = ?",
+                    (namespace, owner_id),
                 ).fetchone() is not None
             finally:
                 connection.close()
@@ -151,6 +169,29 @@ class SQLiteStateStore:
                 }
             finally:
                 connection.close()
+
+    def claim_legacy_owner(self, owner_id: str) -> None:
+        """Assign pre-auth local data to the first registered account."""
+        with self.transaction():
+            connection = self._active_connection()
+            if connection is None:
+                raise RuntimeError("SQLite transaction connection is unavailable")
+            for table_name, _ in self._collection_tables.values():
+                connection.execute(
+                    f"UPDATE {table_name} SET owner_id = ? WHERE owner_id = ?",
+                    (owner_id, LEGACY_OWNER_ID),
+                )
+            connection.execute(
+                "UPDATE state_documents SET owner_id = ? "
+                "WHERE owner_id = ? AND namespace != 'agent_knowledge'",
+                (owner_id, LEGACY_OWNER_ID),
+            )
+            for namespace in (*self._collection_tables.keys(),):
+                connection.execute(
+                    "UPDATE collection_state SET namespace = ? "
+                    "WHERE namespace = ?",
+                    (self._scope(namespace, owner_id), self._scope(namespace, LEGACY_OWNER_ID)),
+                )
 
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +227,8 @@ class SQLiteStateStore:
                     (1, self._now()),
                 )
                 self._apply_collection_migration(connection)
+                self._apply_owner_migration(connection)
+                self._apply_user_migration(connection)
                 connection.commit()
             finally:
                 connection.close()
@@ -207,10 +250,16 @@ class SQLiteStateStore:
     def _active_connection(self) -> sqlite3.Connection | None:
         return getattr(self._local, "connection", None)
 
-    def _write_json(self, connection: sqlite3.Connection, namespace: str, value: Any) -> None:
+    def _write_json(
+        self,
+        connection: sqlite3.Connection,
+        namespace: str,
+        value: Any,
+        owner_id: str,
+    ) -> None:
         collection = self._collection_tables.get(namespace)
         if collection is not None:
-            self._write_collection(connection, namespace, collection, value)
+            self._write_collection(connection, namespace, collection, value, owner_id)
             return
         payload = json.dumps(
             value,
@@ -220,19 +269,19 @@ class SQLiteStateStore:
         )
         connection.execute(
             """
-            INSERT INTO state_documents(namespace, payload, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(namespace) DO UPDATE SET
+            INSERT INTO state_documents(namespace, owner_id, payload, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(namespace, owner_id) DO UPDATE SET
                 payload = excluded.payload,
                 updated_at = excluded.updated_at
             """,
-            (namespace, payload, self._now()),
+            (namespace, owner_id, payload, self._now()),
         )
 
     def _apply_collection_migration(self, connection: sqlite3.Connection) -> None:
         applied = connection.execute(
             "SELECT 1 FROM schema_migrations WHERE version = ?",
-            (self._migration_version,),
+            (2,),
         ).fetchone()
         if applied is not None:
             return
@@ -271,7 +320,7 @@ class SQLiteStateStore:
                 legacy_value = json.loads(str(row["payload"]))
             except (TypeError, ValueError):
                 continue
-            self._write_collection(connection, namespace, collection, legacy_value)
+            self._write_collection(connection, namespace, collection, legacy_value, LEGACY_OWNER_ID)
             connection.execute(
                 "DELETE FROM state_documents WHERE namespace = ?",
                 (namespace,),
@@ -279,7 +328,108 @@ class SQLiteStateStore:
 
         connection.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-            (self._migration_version, self._now()),
+            (2, self._now()),
+        )
+
+    def _apply_owner_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (3,),
+        ).fetchone()
+        if applied is not None:
+            return
+
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(state_documents)").fetchall()
+        }
+        if "owner_id" not in columns:
+            connection.execute(
+                """
+                CREATE TABLE state_documents_v3 (
+                    namespace TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(namespace, owner_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO state_documents_v3(namespace, owner_id, payload, updated_at)
+                SELECT namespace, ?, payload, updated_at FROM state_documents
+                """,
+                (LEGACY_OWNER_ID,),
+            )
+            connection.execute("DROP TABLE state_documents")
+            connection.execute("ALTER TABLE state_documents_v3 RENAME TO state_documents")
+
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_state_documents_updated_at "
+            "ON state_documents(updated_at)"
+        )
+        for table_name, _ in self._collection_tables.values():
+            columns = {
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+            }
+            if "owner_id" not in columns:
+                connection.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN owner_id TEXT NOT NULL "
+                    f"DEFAULT '{LEGACY_OWNER_ID}'"
+                )
+            connection.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table_name}_owner_updated_at "
+                f"ON {table_name}(owner_id, updated_at)"
+            )
+        connection.execute(
+            """
+            UPDATE collection_state
+            SET namespace = ? || ':' || namespace
+            WHERE instr(namespace, ':') = 0
+            """,
+            (LEGACY_OWNER_ID,),
+        )
+        connection.execute(
+            """
+            UPDATE state_documents
+            SET owner_id = ?
+            WHERE namespace = 'agent_knowledge' AND owner_id = ?
+            """,
+            ("system", LEGACY_OWNER_ID),
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (3, self._now()),
+        )
+
+    def _apply_user_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (4,),
+        ).fetchone()
+        if applied is not None:
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user', 'admin')),
+                display_name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (4, self._now()),
         )
 
     def _write_collection(
@@ -288,12 +438,13 @@ class SQLiteStateStore:
         namespace: str,
         collection: tuple[str, str],
         value: Any,
+        owner_id: str,
     ) -> None:
         if not isinstance(value, list):
             raise ValueError(f"{namespace} must be persisted as a list")
         table_name, id_field = collection
         now = self._now()
-        connection.execute(f"DELETE FROM {table_name}")
+        connection.execute(f"DELETE FROM {table_name} WHERE owner_id = ?", (owner_id,))
         for index, item in enumerate(value):
             if not isinstance(item, dict):
                 raise ValueError(f"{namespace} contains a non-object record")
@@ -305,8 +456,8 @@ class SQLiteStateStore:
                 default=str,
             )
             connection.execute(
-                f"INSERT INTO {table_name}(record_id, payload, updated_at) VALUES (?, ?, ?)",
-                (record_id, payload, now),
+                f"INSERT INTO {table_name}(record_id, owner_id, payload, updated_at) VALUES (?, ?, ?, ?)",
+                (record_id, owner_id, payload, now),
             )
         connection.execute(
             """
@@ -314,8 +465,11 @@ class SQLiteStateStore:
             VALUES (?, ?)
             ON CONFLICT(namespace) DO UPDATE SET updated_at = excluded.updated_at
             """,
-            (namespace, now),
+            (self._scope(namespace, owner_id), now),
         )
+
+    def _scope(self, namespace: str, owner_id: str) -> str:
+        return f"{owner_id}:{namespace}"
 
     def _read_legacy_json(self, path: Path) -> Any | None:
         if not path.exists():

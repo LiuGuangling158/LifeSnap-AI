@@ -28,6 +28,10 @@ class LocalTaskStore:
         self._tasks: dict[UUID, TaskRead] = {}
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._tasks = {}
+        self._load()
+
     def create(self, payload: TaskCreate) -> TaskRead:
         now = datetime.now(timezone.utc)
         task = TaskRead(

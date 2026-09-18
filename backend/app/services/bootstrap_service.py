@@ -124,7 +124,9 @@ class BootstrapService:
                 "agent_fine_tuning_dataset": True,
                 "fine_tuned_llm_parser": settings.fine_tuned_llm_agent_enabled,
                 "persistent_database": True,
-                "user_accounts": False,
+                "user_accounts": True,
+                "role_based_access_control": True,
+                "owner_scoped_data": True,
             },
             known_limitations=[
                 "Application state is persisted to SQLite under backend/data by default.",
@@ -141,8 +143,7 @@ class BootstrapService:
                     "LIFESNAP_AI_PARSE_ENDPOINT is set; otherwise it falls back to rule-based parsing. "
                     "Chat intent routing uses the same provider with kind=chat_intent."
                 ),
-                "Local JSON storage is intended for single-user local use, not concurrent multi-user production traffic.",
-                "Authentication and multi-user accounts are not implemented yet.",
+                "SQLite is suitable for a local or single-node deployment; PostgreSQL is required for horizontal scale.",
             ],
         )
 

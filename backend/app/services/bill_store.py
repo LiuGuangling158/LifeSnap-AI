@@ -31,6 +31,10 @@ class LocalBillStore:
         self._bills: dict[UUID, BillRead] = {}
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._bills = {}
+        self._load()
+
     def create(self, payload: BillCreate) -> BillRead:
         now = datetime.now(timezone.utc)
         bill = BillRead(

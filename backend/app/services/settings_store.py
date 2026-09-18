@@ -28,6 +28,12 @@ class LocalSettingsStore:
         self._budget_settings = self._load_budget_settings()
         self._tag_settings = self._load_tag_settings()
 
+    def reload_for_current_owner(self) -> None:
+        self._privacy_settings = self._load_privacy_settings()
+        self._category_settings = self._load_category_settings()
+        self._budget_settings = self._load_budget_settings()
+        self._tag_settings = self._load_tag_settings()
+
     def get_privacy_settings(self) -> PrivacySettings:
         return self._privacy_settings
 

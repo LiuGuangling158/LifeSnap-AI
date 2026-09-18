@@ -27,6 +27,10 @@ class LocalDiaryStore:
         self._diaries: dict[UUID, DiaryRead] = {}
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._diaries = {}
+        self._load()
+
     def create(self, payload: DiaryCreate) -> DiaryRead:
         if self.get_by_date(payload.entry_date) is not None:
             raise DiaryDateConflictError("Diary entry already exists for this date")

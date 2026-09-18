@@ -15,6 +15,10 @@ class LocalBillCandidateStore:
         self._candidates: dict[UUID, ParseBillResponse] = {}
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._candidates = {}
+        self._load()
+
     def save(self, candidate: ParseBillResponse) -> ParseBillResponse:
         self._candidates[candidate.candidate_id] = candidate
         self._persist()

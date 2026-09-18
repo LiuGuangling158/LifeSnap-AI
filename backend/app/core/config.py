@@ -343,6 +343,12 @@ class Settings:
     allow_legacy_admin_key_header: bool = field(
         default_factory=lambda: _env_bool("LIFESNAP_ALLOW_LEGACY_ADMIN_KEY_HEADER", False)
     )
+    auth_session_secret: str | None = field(
+        default_factory=lambda: _env_optional_str("LIFESNAP_AUTH_SESSION_SECRET")
+    )
+    auth_session_ttl_minutes: int = field(
+        default_factory=lambda: _env_int("LIFESNAP_AUTH_SESSION_TTL_MINUTES", 480)
+    )
     external_ocr_endpoint: str | None = field(default_factory=_default_ocr_endpoint)
     external_ocr_api_key: str | None = field(default_factory=_default_ocr_api_key)
     external_ocr_provider: str = field(default_factory=_default_ocr_provider)

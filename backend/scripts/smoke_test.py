@@ -23,6 +23,7 @@ LOCAL_TZ = timezone(timedelta(hours=8))
 class ApiClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url
+        self.default_headers: dict[str, str] = {}
 
     def request(
         self,
@@ -32,7 +33,7 @@ class ApiClient:
         headers: dict[str, str] | None = None,
     ) -> tuple[int, Any]:
         data = None
-        request_headers = headers.copy() if headers else {}
+        request_headers = {**self.default_headers, **(headers or {})}
         if payload is not None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
@@ -65,7 +66,10 @@ class ApiClient:
         request = urllib.request.Request(
             f"{self.base_url}/attachments/upload",
             data=body,
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={
+                **self.default_headers,
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=5) as response:
@@ -496,6 +500,7 @@ def _run_isolated_smoke(data_dir: str) -> int:
 
 def _run_checks(client: ApiClient) -> None:
     _check_health(client)
+    _check_authentication_and_data_isolation(client)
     _check_standard_error_responses(client)
     _check_demo_data_seed(client)
     _check_app_bootstrap(client)
@@ -533,6 +538,88 @@ def _run_checks(client: ApiClient) -> None:
     _check_diary_csv_export(client)
 
 
+def _check_authentication_and_data_isolation(client: ApiClient) -> None:
+    status, body = client.request("GET", "/bills")
+    _assert(status == 401, "Protected business APIs must reject anonymous requests")
+    _assert(body["detail"] == "Authentication required", "Anonymous rejection message changed")
+
+    status, admin_session = client.request(
+        "POST",
+        "/auth/register",
+        {
+            "username": "smoke-admin",
+            "password": "smoke-admin-password",
+            "display_name": "Smoke Administrator",
+        },
+    )
+    _assert(status == 201, "First account registration should return 201")
+    _assert(admin_session["user"]["role"] == "admin", "First registered account should be an admin")
+    client.default_headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    status, current_user = client.request("GET", "/auth/me")
+    _assert(status == 200 and current_user["role"] == "admin", "Current session should identify the admin")
+
+    status, admin_bill = client.request(
+        "POST",
+        "/bills",
+        {
+            "amount": "42.00",
+            "merchant": "Owner A only",
+            "category": "其他",
+            "transaction_type": "expense",
+            "source": "manual",
+        },
+    )
+    _assert(status == 201, "Admin isolation fixture should be created")
+
+    second_client = ApiClient(client.base_url)
+    status, user_session = second_client.request(
+        "POST",
+        "/auth/register",
+        {
+            "username": "smoke-user",
+            "password": "smoke-user-password",
+            "display_name": "Smoke User",
+        },
+    )
+    _assert(status == 201, "Second account registration should return 201")
+    _assert(user_session["user"]["role"] == "user", "Later accounts should not receive the admin role")
+    second_client.default_headers = {"Authorization": f"Bearer {user_session['access_token']}"}
+
+    status, other_bills = second_client.request("GET", "/bills")
+    _assert(status == 200, "Second account should access its own bill list")
+    _assert(
+        all(bill["id"] != admin_bill["id"] for bill in other_bills["items"]),
+        "A user must not see another user's bills",
+    )
+    status, _ = second_client.request(
+        "PUT",
+        "/agent/knowledge/documents",
+        {"documents": []},
+    )
+    _assert(status == 403, "A non-admin user must not modify the RAG knowledge base")
+
+    status, user_bill = second_client.request(
+        "POST",
+        "/bills",
+        {
+            "amount": "17.00",
+            "merchant": "Owner B only",
+            "category": "其他",
+            "transaction_type": "expense",
+            "source": "manual",
+        },
+    )
+    _assert(status == 201, "User isolation fixture should be created")
+    status, admin_bills = client.request("GET", "/bills")
+    _assert(
+        all(bill["id"] != user_bill["id"] for bill in admin_bills["items"]),
+        "An admin must not see another user's personal bills",
+    )
+    second_client.request("DELETE", f"/bills/{user_bill['id']}")
+    client.request("DELETE", f"/bills/{admin_bill['id']}")
+
+
 def _check_diary_csv_export(client: ApiClient) -> None:
     payload = {
         "entry_date": "2001-02-03",
@@ -544,7 +631,12 @@ def _check_diary_csv_export(client: ApiClient) -> None:
     }
     status, diary = client.request("POST", "/diaries", payload)
     _assert(status == 201, "CSV fixture diary should be created")
-    with urllib.request.urlopen(f"{client.base_url}/data/export/diaries.csv", timeout=5) as response:
+    request = urllib.request.Request(
+        f"{client.base_url}/data/export/diaries.csv",
+        headers=client.default_headers,
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
         _assert(response.status == 200, "Diary CSV should return 200")
         _assert("text/csv" in response.headers["Content-Type"], "Diary export must be CSV")
         _assert("lifesnap-diaries.csv" in response.headers["Content-Disposition"], "CSV should be downloadable")
@@ -1059,31 +1151,14 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
         "keywords": ["奶茶", "果茶", "管理员新增知识"],
         "enabled": True,
     }
-    status, body = client.request(
-        "PUT",
-        "/agent/knowledge/documents",
-        {"documents": [admin_document]},
-    )
-    _assert(status == 403, "Knowledge update should require an admin key")
-    _assert(body["detail"] == "A valid admin session is required", "Knowledge update should reject missing admin session")
-
-    status, body = client.request(
-        "PUT",
-        "/agent/knowledge/documents",
-        {"documents": [admin_document]},
-        headers={"X-LifeSnap-Admin-Key": "smoke-admin-key"},
-    )
-    _assert(status == 403, "Knowledge update should reject the legacy admin key header by default")
-    _assert(body["detail"] == "A valid admin session is required", "Legacy admin header rejection message changed")
-
-    admin_headers = {"Authorization": f"Bearer {session['token']}"}
+    admin_headers: dict[str, str] = {}
     status, updated = client.request(
         "PUT",
         "/agent/knowledge/documents",
         {"documents": [admin_document]},
         headers=admin_headers,
     )
-    _assert(status == 200, "Knowledge update with admin key should return 200")
+    _assert(status == 200, "Knowledge update with an admin account should return 200")
     _assert(updated["admin_count"] == 1, "Knowledge update should persist one admin document")
     _assert(updated["versions"][0]["action"] == "replace", "Knowledge update should create a replace version")
     replace_version_id = updated["versions"][0]["version_id"]

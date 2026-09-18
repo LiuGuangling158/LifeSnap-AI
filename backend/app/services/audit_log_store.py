@@ -20,6 +20,10 @@ class LocalAuditLogStore:
         self._max_events = max_events
         self._load()
 
+    def reload_for_current_owner(self) -> None:
+        self._events = []
+        self._load()
+
     def record(
         self,
         *,

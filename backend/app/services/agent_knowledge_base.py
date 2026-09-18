@@ -8,6 +8,7 @@ from typing import Iterable
 from uuid import uuid4
 
 from app.core.config import settings
+from app.core.user_context import SYSTEM_OWNER_ID
 from app.schemas.agent_runtime import (
     AgentKnowledgeBaseResponse,
     AgentKnowledgeDocument,
@@ -321,6 +322,7 @@ class AgentKnowledgeBase:
         raw_payload = sqlite_state_store.load_json(
             "agent_knowledge",
             settings.local_agent_knowledge_path,
+            owner_id=SYSTEM_OWNER_ID,
         )
         if raw_payload is None:
             return ()
@@ -347,6 +349,7 @@ class AgentKnowledgeBase:
         raw_payload = sqlite_state_store.load_json(
             "agent_knowledge",
             settings.local_agent_knowledge_path,
+            owner_id=SYSTEM_OWNER_ID,
         )
         if raw_payload is None:
             return ()
@@ -400,6 +403,7 @@ class AgentKnowledgeBase:
                 ],
                 "versions": [self._version_to_payload(version) for version in self._versions],
             },
+            owner_id=SYSTEM_OWNER_ID,
         )
 
     def _record_version(self, action: str) -> None:
