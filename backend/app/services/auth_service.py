@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import settings
 from app.core.user_context import (
@@ -188,11 +188,13 @@ auth_service = AuthService()
 
 
 async def require_current_user(
+    request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
 ):
     user = auth_service.current_user(authorization)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    request.state.user_id = user.user_id
     token = set_current_owner_id(user.user_id)
     await user_state_lock.acquire()
     try:

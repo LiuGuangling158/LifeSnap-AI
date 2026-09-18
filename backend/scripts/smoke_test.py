@@ -477,8 +477,8 @@ def _run_isolated_smoke(data_dir: str) -> int:
         ],
         cwd=BACKEND_DIR,
         env=test_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
     client = ApiClient(f"http://127.0.0.1:{port}")
@@ -536,6 +536,27 @@ def _run_checks(client: ApiClient) -> None:
     _check_dashboard_summary(client)
     _check_data_export_and_clear(client)
     _check_diary_csv_export(client)
+    _check_observability(client)
+
+
+def _check_observability(client: ApiClient) -> None:
+    status, summary = client.request("GET", "/observability/summary")
+    _assert(status == 200, "GET /observability/summary should return 200")
+    _assert(summary["request_count"] > 0, "Monitoring summary should include HTTP requests")
+    _assert(summary["agent_trace_count"] > 0, "Monitoring summary should include persisted Agent traces")
+    _assert(summary["agent_p95_latency_ms"] >= 0, "Monitoring summary should expose Agent p95 latency")
+
+    status, traces = client.request("GET", "/observability/agent-traces?limit=5")
+    _assert(status == 200, "GET /observability/agent-traces should return 200")
+    _assert(traces["items"], "Agent trace endpoint should return recent traces")
+    trace = traces["items"][0]
+    _assert(trace["request_id"], "Persisted Agent traces should link to request IDs")
+    _assert("function_tools" in trace["payload"], "Agent traces should expose function tool names")
+
+    status, metrics = client.request("GET", "/metrics")
+    _assert(status == 200, "GET /metrics should return 200")
+    _assert("lifesnap_http_requests_total" in metrics, "Prometheus metrics should expose HTTP counters")
+    _assert("lifesnap_agent_executions_total" in metrics, "Prometheus metrics should expose Agent counters")
 
 
 def _check_authentication_and_data_isolation(client: ApiClient) -> None:
@@ -1328,11 +1349,11 @@ def _check_integration_diagnostics(client: ApiClient) -> None:
         readiness["status"] in {"ready", "degraded", "action_required"},
         "Readiness diagnostics should expose an enterprise status",
     )
-    _assert(readiness["component_count"] >= 7, "Readiness diagnostics should include core components")
+    _assert(readiness["component_count"] >= 8, "Readiness diagnostics should include core components")
     readiness_components = {component["name"]: component for component in readiness["components"]}
     _assert(
-        {"storage", "agent", "integrations", "privacy", "security", "audit", "data_quality"}.issubset(readiness_components),
-        "Readiness diagnostics should include storage, agent, integrations, privacy, security, audit and data quality",
+        {"storage", "agent", "integrations", "privacy", "security", "observability", "audit", "data_quality"}.issubset(readiness_components),
+        "Readiness diagnostics should include storage, agent, integrations, privacy, security, observability, audit and data quality",
     )
     _assert(
         readiness_components["agent"]["metrics"]["function_calling_enabled"],
@@ -1353,6 +1374,10 @@ def _check_integration_diagnostics(client: ApiClient) -> None:
     _assert(
         readiness_components["storage"]["metrics"]["schema_version"] >= 1,
         "Readiness diagnostics should expose an applied storage migration",
+    )
+    _assert(
+        "agent_p95_latency_ms" in readiness_components["observability"]["metrics"],
+        "Readiness diagnostics should expose Agent monitoring latency",
     )
 
     status, diagnostics = client.request("GET", "/diagnostics/integrations")

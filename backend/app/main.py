@@ -16,6 +16,7 @@ from app.api.diaries import router as diaries_router
 from app.api.diagnostics import router as diagnostics_router
 from app.api.health import router as health_router
 from app.api.ocr import router as ocr_router
+from app.api.observability import metrics_router, router as observability_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
 from app.core.error_handlers import register_exception_handlers
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     register_request_middleware(app)
     register_exception_handlers(app)
     app.include_router(health_router)
+    app.include_router(metrics_router)
     app.include_router(auth_router)
     authenticated = [Depends(require_current_user)]
     app.include_router(bootstrap_router, dependencies=authenticated)
@@ -43,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_router, dependencies=authenticated)
     app.include_router(data_router, dependencies=authenticated)
     app.include_router(diagnostics_router, dependencies=authenticated)
+    app.include_router(observability_router)
     app.include_router(ocr_router, dependencies=authenticated)
     frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
     if (frontend_dir / "index.html").exists():

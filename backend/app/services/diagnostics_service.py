@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from uuid import UUID
 
 from app.core.config import settings
+from app.core.user_context import current_owner_id
 from app.schemas.agent import (
     ParseBillRequest,
     ParseBillResponse,
@@ -39,6 +40,7 @@ from app.services.data_management_service import data_management_service
 from app.services.diary_candidate_store import diary_candidate_store
 from app.services.external_ai_parser import external_ai_parser
 from app.services.ocr_service import ocr_service
+from app.services.observability_service import observability_service
 from app.services.settings_store import settings_store
 from app.services.sqlite_state_store import sqlite_state_store
 from app.services.task_candidate_store import task_candidate_store
@@ -56,6 +58,7 @@ class DiagnosticsService:
             self._integration_readiness(integrations),
             self._privacy_readiness(),
             self._security_readiness(),
+            self._observability_readiness(),
             self._audit_readiness(),
             self._data_quality_readiness(data_quality),
         ]
@@ -326,6 +329,32 @@ class DiagnosticsService:
             },
             warnings=warnings,
             next_action=next_action,
+        )
+
+    def _observability_readiness(self) -> ReadinessComponent:
+        summary = observability_service.summary(owner_id=current_owner_id())
+        error_rate = summary.error_rate
+        status = "degraded" if error_rate >= 0.05 else "ready"
+        warnings = ["http_error_rate_elevated"] if status == "degraded" else []
+        return ReadinessComponent(
+            name="observability",
+            title="Production monitoring",
+            status=status,
+            summary="Structured logs, Prometheus metrics, and Agent traces are active.",
+            metrics={
+                "request_count": summary.request_count,
+                "error_count": summary.error_count,
+                "error_rate": summary.error_rate,
+                "average_request_latency_ms": summary.average_request_latency_ms,
+                "agent_trace_count": summary.agent_trace_count,
+                "agent_p95_latency_ms": summary.agent_p95_latency_ms,
+            },
+            warnings=warnings,
+            next_action=(
+                "Inspect /metrics and recent Agent traces before releasing."
+                if status == "degraded"
+                else None
+            ),
         )
 
     def _audit_readiness(self) -> ReadinessComponent:

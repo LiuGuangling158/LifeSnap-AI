@@ -20,7 +20,7 @@ class SQLiteStateStore:
     database. Legacy files are read only once, on first access to a namespace.
     """
 
-    _migration_version = 4
+    _migration_version = 5
     _collection_tables = {
         "bills": ("bills", "id"),
         "tasks": ("tasks", "id"),
@@ -193,6 +193,87 @@ class SQLiteStateStore:
                     (self._scope(namespace, owner_id), self._scope(namespace, LEGACY_OWNER_ID)),
                 )
 
+    def append_agent_trace(self, trace: dict[str, Any], *, owner_id: str | None = None) -> None:
+        owner_id = owner_id or current_owner_id()
+        payload = json.dumps(trace.get("payload", {}), ensure_ascii=False, separators=(",", ":"))
+        values = (
+            str(trace["trace_id"]),
+            owner_id,
+            str(trace["occurred_at"]),
+            trace.get("request_id"),
+            str(trace["message_id"]),
+            str(trace["intent"]),
+            str(trace["action_type"]),
+            str(trace["model_provider"]),
+            str(trace["model_strategy"]),
+            str(trace["outcome"]),
+            float(trace["latency_ms"]),
+            int(trace["function_call_count"]),
+            int(trace["knowledge_hit_count"]),
+            int(trace["warning_count"]),
+            payload,
+        )
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO agent_execution_traces(
+                        trace_id, owner_id, occurred_at, request_id, message_id,
+                        intent, action_type, model_provider, model_strategy, outcome,
+                        latency_ms, function_call_count, knowledge_hit_count,
+                        warning_count, payload
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    values,
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+    def list_agent_traces(self, *, owner_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT trace_id, occurred_at, request_id, message_id, intent,
+                           action_type, model_provider, model_strategy, outcome,
+                           latency_ms, function_call_count, knowledge_hit_count,
+                           warning_count, payload
+                    FROM agent_execution_traces
+                    WHERE owner_id = ?
+                    ORDER BY occurred_at DESC
+                    LIMIT ?
+                    """,
+                    (owner_id, max(1, min(limit, 200))),
+                ).fetchall()
+                return [
+                    {
+                        **dict(row),
+                        "payload": json.loads(str(row["payload"])),
+                    }
+                    for row in rows
+                ]
+            finally:
+                connection.close()
+
+    def agent_trace_summary(self, *, owner_id: str | None = None) -> dict[str, Any]:
+        traces = self.list_agent_traces(owner_id=owner_id, limit=200)
+        latencies = sorted(float(trace["latency_ms"]) for trace in traces)
+        outcomes: dict[str, int] = {}
+        for trace in traces:
+            outcome = str(trace["outcome"])
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+        percentile_index = max(0, round((len(latencies) - 1) * 0.95))
+        return {
+            "trace_count": len(traces),
+            "outcomes": outcomes,
+            "average_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else 0.0,
+            "p95_latency_ms": round(latencies[percentile_index], 2) if latencies else 0.0,
+        }
+
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
@@ -229,6 +310,7 @@ class SQLiteStateStore:
                 self._apply_collection_migration(connection)
                 self._apply_owner_migration(connection)
                 self._apply_user_migration(connection)
+                self._apply_observability_migration(connection)
                 connection.commit()
             finally:
                 connection.close()
@@ -430,6 +512,47 @@ class SQLiteStateStore:
         connection.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
             (4, self._now()),
+        )
+
+    def _apply_observability_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (5,),
+        ).fetchone()
+        if applied is not None:
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_execution_traces (
+                trace_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                request_id TEXT,
+                message_id TEXT NOT NULL,
+                intent TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                model_provider TEXT NOT NULL,
+                model_strategy TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                latency_ms REAL NOT NULL,
+                function_call_count INTEGER NOT NULL,
+                knowledge_hit_count INTEGER NOT NULL,
+                warning_count INTEGER NOT NULL,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_traces_owner_occurred "
+            "ON agent_execution_traces(owner_id, occurred_at DESC)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_traces_request "
+            "ON agent_execution_traces(request_id)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (5, self._now()),
         )
 
     def _write_collection(

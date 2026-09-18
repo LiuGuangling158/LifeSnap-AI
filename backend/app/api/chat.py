@@ -1,3 +1,4 @@
+from time import perf_counter
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -19,6 +20,7 @@ from app.services.bill_candidate_store import bill_candidate_store
 from app.services.chat_service import chat_service
 from app.services.diary_candidate_store import diary_candidate_store
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
+from app.services.observability_service import observability_service
 from app.services.task_candidate_store import task_candidate_store
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -26,7 +28,14 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 @router.post("/messages", response_model=ChatMessageResponse)
 def send_message(payload: ChatMessageRequest, request: Request) -> ChatMessageResponse:
+    started = perf_counter()
     response = chat_service.handle_message(payload)
+    observability_service.record_agent_response(
+        response,
+        request_id=getattr(request.state, "request_id", None),
+        owner_id=getattr(request.state, "user_id", "legacy-local"),
+        duration_ms=(perf_counter() - started) * 1000,
+    )
     audit_log_store.record(
         action="chat_message_processed",
         entity_type="chat",

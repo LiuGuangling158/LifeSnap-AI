@@ -73,6 +73,23 @@ managed files rather than database blobs.
 The smoke test starts a temporary backend server, verifies the core API flow, and
 then shuts the temporary server down. It does not use the existing `8000` server.
 
+## Observability
+
+The service emits one JSON log event per HTTP request and per completed Agent
+execution. Log payloads include request ID, route, status, latency, model
+strategy, tool count, and knowledge-hit count; they intentionally exclude user
+messages, OCR text, attachment bytes, and credentials.
+
+Prometheus-compatible process metrics are available at GET /metrics. They
+include HTTP request counts, request duration summaries, Agent execution counts,
+and process uptime. The endpoint exposes only operational labels and should be
+restricted at the network boundary in production.
+
+Authenticated users can inspect their own Agent traces through
+GET /observability/agent-traces and the per-user monitoring summary through
+GET /observability/summary. Trace records store tool names, knowledge source
+IDs, step statuses, model strategy, and latency without persisting chat text.
+
 ## Error Responses
 
 HTTP errors keep FastAPI's familiar `detail` field and add a stable `error`
