@@ -62,10 +62,14 @@ def require_admin_api_key(
         )
     if admin_auth_service.validate_bearer(authorization):
         return
-    if not admin_key or not hmac.compare_digest(admin_key, settings.admin_api_key):
+    if (
+        not settings.allow_legacy_admin_key_header
+        or not admin_key
+        or not hmac.compare_digest(admin_key, settings.admin_api_key)
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid admin API key",
+            detail="A valid admin session is required",
         )
 
 

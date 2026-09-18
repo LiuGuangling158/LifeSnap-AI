@@ -239,6 +239,7 @@ const state = {
 const app = document.querySelector("#app");
 let toastDismissTimer;
 let timedToast = "";
+let adminSessionExpiryTimer;
 
 window.addEventListener("hashchange", () => {
   state.route = getRoute();
@@ -1445,6 +1446,7 @@ async function createAdminSession(adminKey) {
     if (!state.adminKnowledgeAdminToken) {
       throw new Error("未获取到管理员会话 token。");
     }
+    scheduleAdminSessionExpiry();
     return state.adminKnowledgeAdminToken;
   } finally {
     state.adminSessionLoading = false;
@@ -1456,6 +1458,27 @@ function adminSessionValid() {
   if (!state.adminKnowledgeAdminToken || !state.adminKnowledgeAdminSessionExpiresAt) return false;
   const expiresAt = new Date(state.adminKnowledgeAdminSessionExpiresAt).getTime();
   return Number.isFinite(expiresAt) && expiresAt > Date.now() + 30_000;
+}
+
+function scheduleAdminSessionExpiry() {
+  window.clearTimeout(adminSessionExpiryTimer);
+  const expiresAt = new Date(state.adminKnowledgeAdminSessionExpiresAt).getTime();
+  if (!Number.isFinite(expiresAt)) return;
+  const delay = Math.max(0, expiresAt - Date.now() - 30_000);
+  adminSessionExpiryTimer = window.setTimeout(() => {
+    if (!adminSessionValid()) {
+      clearAdminSession({ notify: true });
+    }
+  }, delay);
+}
+
+function clearAdminSession({ notify = false } = {}) {
+  window.clearTimeout(adminSessionExpiryTimer);
+  state.adminKnowledgeAdminToken = "";
+  state.adminKnowledgeAdminSessionExpiresAt = "";
+  if (notify) {
+    showToast("\u7BA1\u7406\u5458\u4F1A\u8BDD\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u5EFA\u7ACB\u4F1A\u8BDD\u3002");
+  }
 }
 
 function adminSessionStatusText() {
@@ -8796,6 +8819,7 @@ function readinessComponentIcon(name) {
     agent: "spark",
     integrations: "cloud",
     privacy: "shield",
+    security: "shield",
     audit: "file-text",
     data_quality: "check-circle",
   }[name] ?? "check-circle";
@@ -9298,6 +9322,11 @@ function auditEventIcon(event) {
 
 function auditActionLabel(action) {
   return {
+    admin_session_created: "\u7BA1\u7406\u5458\u4F1A\u8BDD\u5DF2\u5EFA\u7ACB",
+    admin_key_revealed: "\u8BFB\u53D6\u672C\u673A\u7BA1\u7406\u5458\u5BC6\u94A5",
+    agent_knowledge_updated: "\u66F4\u65B0 RAG \u77E5\u8BC6\u5E93",
+    agent_knowledge_reset: "\u91CD\u7F6E RAG \u77E5\u8BC6\u5E93",
+    agent_knowledge_rollback: "\u56DE\u6EDA RAG \u77E5\u8BC6\u5E93\u7248\u672C",
     bill_created: "创建账单",
     bill_updated: "更新账单",
     bill_deleted: "删除账单",

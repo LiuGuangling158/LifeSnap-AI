@@ -594,10 +594,9 @@ GET /agent/fine-tuning/examples?limit=50
 `GET /agent/knowledge/documents` returns the built-in and admin-managed RAG
 documents. `PUT /agent/knowledge/documents` replaces the admin-managed document
 set, and `POST /agent/knowledge/reset` clears it back to the built-in knowledge
-base. Write calls accept either `Authorization: Bearer <admin-session-token>`
-from `POST /agent/admin-session`, or the legacy `X-LifeSnap-Admin-Key` header
-matching `LIFESNAP_ADMIN_KEY` or `LIFESNAP_ADMIN_API_KEY`; when no admin key is
-configured, the write endpoints return 403. Admin documents are persisted to
+base. Write calls require an `Authorization: Bearer <admin-session-token>` issued by
+`POST /agent/admin-session`. When no admin key is configured, the write endpoints
+return 403. Admin documents are persisted to
 `backend/data/agent_knowledge.json` by default. A document with the same
 `source_id` as a built-in document overrides it; an overridden document with
 `enabled=false` disables that knowledge for search.
@@ -617,6 +616,12 @@ the admin key, and session creation is audited without logging the submitted key
 For local development convenience, `GET /agent/admin-key` can fill the admin key
 in the Admin UI only when `LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true` and the request
 comes from localhost. Keep this disabled outside local preview environments.
+
+New deployments require short-lived bearer sessions for RAG write operations.
+The legacy admin-key header is rejected by default; set
+LIFESNAP_ALLOW_LEGACY_ADMIN_KEY_HEADER=true only while migrating a trusted
+older API client. The readiness diagnostic surfaces this compatibility mode,
+local-key reveal, missing credentials, and session lifetimes longer than 60 minutes.
 
 Direct LLM calls receive retrieved knowledge snippets in the user payload under
 `retrieved_knowledge`. Compatible chat-completions requests also include safe

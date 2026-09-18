@@ -17,6 +17,12 @@
   };
 
   const en = {
+    "\u7BA1\u7406\u5458\u4F1A\u8BDD\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u5EFA\u7ACB\u4F1A\u8BDD\u3002": "The admin session has expired. Create a new session.",
+    "\u7BA1\u7406\u5458\u4F1A\u8BDD\u5DF2\u5EFA\u7ACB": "Admin session created",
+    "\u8BFB\u53D6\u672C\u673A\u7BA1\u7406\u5458\u5BC6\u94A5": "Read local admin key",
+    "\u66F4\u65B0 RAG \u77E5\u8BC6\u5E93": "Updated RAG knowledge base",
+    "\u91CD\u7F6E RAG \u77E5\u8BC6\u5E93": "Reset RAG knowledge base",
+    "\u56DE\u6EDA RAG \u77E5\u8BC6\u5E93\u7248\u672C": "Rolled back RAG knowledge base version",
     "首页": "Home",
     "账单": "Bills",
     "待办": "Tasks",

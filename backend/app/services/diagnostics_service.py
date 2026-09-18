@@ -54,6 +54,7 @@ class DiagnosticsService:
             self._agent_readiness(),
             self._integration_readiness(integrations),
             self._privacy_readiness(),
+            self._security_readiness(),
             self._audit_readiness(),
             self._data_quality_readiness(data_quality),
         ]
@@ -290,6 +291,48 @@ class DiagnosticsService:
                 "save_original_attachments_by_default": privacy.save_original_attachments_by_default,
                 "keep_ocr_text": privacy.keep_ocr_text,
                 "attachment_retention_policy": privacy.attachment_retention_policy,
+            },
+            warnings=warnings,
+            next_action=next_action,
+        )
+
+    def _security_readiness(self) -> ReadinessComponent:
+        session_ttl = max(1, settings.admin_session_ttl_minutes)
+        warnings: list[str] = []
+        next_action: str | None = None
+        status = "ready"
+
+        if not settings.admin_api_key:
+            status = "action_required"
+            warnings.append("admin_api_key_not_configured")
+            next_action = "Configure LIFESNAP_ADMIN_KEY before enabling RAG administration."
+        if settings.allow_admin_key_reveal:
+            if status == "ready":
+                status = "degraded"
+            warnings.append("local_admin_key_reveal_enabled")
+            next_action = next_action or "Disable LIFESNAP_ALLOW_ADMIN_KEY_REVEAL outside local development."
+        if settings.allow_legacy_admin_key_header:
+            if status == "ready":
+                status = "degraded"
+            warnings.append("legacy_admin_key_header_enabled")
+            next_action = next_action or "Disable legacy admin-key headers after API clients migrate to short-lived sessions."
+        if session_ttl > 60:
+            if status == "ready":
+                status = "degraded"
+            warnings.append("admin_session_ttl_exceeds_recommendation")
+            next_action = next_action or "Use an admin session TTL of 60 minutes or less."
+
+        return ReadinessComponent(
+            name="security",
+            title="Administrative access",
+            status=status,
+            summary="Admin access uses signed, short-lived bearer sessions.",
+            metrics={
+                "admin_key_configured": bool(settings.admin_api_key),
+                "admin_session_ttl_minutes": session_ttl,
+                "signed_bearer_sessions": bool(settings.admin_api_key),
+                "local_key_reveal_enabled": settings.allow_admin_key_reveal,
+                "legacy_admin_key_header_enabled": settings.allow_legacy_admin_key_header,
             },
             warnings=warnings,
             next_action=next_action,

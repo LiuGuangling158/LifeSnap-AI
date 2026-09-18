@@ -1057,7 +1057,16 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
         {"documents": [admin_document]},
     )
     _assert(status == 403, "Knowledge update should require an admin key")
-    _assert(body["detail"] == "Invalid admin API key", "Knowledge update should reject missing admin key")
+    _assert(body["detail"] == "A valid admin session is required", "Knowledge update should reject missing admin session")
+
+    status, body = client.request(
+        "PUT",
+        "/agent/knowledge/documents",
+        {"documents": [admin_document]},
+        headers={"X-LifeSnap-Admin-Key": "smoke-admin-key"},
+    )
+    _assert(status == 403, "Knowledge update should reject the legacy admin key header by default")
+    _assert(body["detail"] == "A valid admin session is required", "Legacy admin header rejection message changed")
 
     admin_headers = {"Authorization": f"Bearer {session['token']}"}
     status, updated = client.request(
@@ -1236,11 +1245,11 @@ def _check_integration_diagnostics(client: ApiClient) -> None:
         readiness["status"] in {"ready", "degraded", "action_required"},
         "Readiness diagnostics should expose an enterprise status",
     )
-    _assert(readiness["component_count"] >= 6, "Readiness diagnostics should include core components")
+    _assert(readiness["component_count"] >= 7, "Readiness diagnostics should include core components")
     readiness_components = {component["name"]: component for component in readiness["components"]}
     _assert(
-        {"storage", "agent", "integrations", "privacy", "audit", "data_quality"}.issubset(readiness_components),
-        "Readiness diagnostics should include storage, agent, integrations, privacy, audit and data quality",
+        {"storage", "agent", "integrations", "privacy", "security", "audit", "data_quality"}.issubset(readiness_components),
+        "Readiness diagnostics should include storage, agent, integrations, privacy, security, audit and data quality",
     )
     _assert(
         readiness_components["agent"]["metrics"]["function_calling_enabled"],
@@ -1249,6 +1258,10 @@ def _check_integration_diagnostics(client: ApiClient) -> None:
     _assert(
         readiness_components["audit"]["metrics"]["redaction_enabled"],
         "Readiness diagnostics should expose audit redaction readiness",
+    )
+    _assert(
+        "admin_session_ttl_minutes" in readiness_components["security"]["metrics"],
+        "Readiness diagnostics should expose admin session security readiness",
     )
 
     status, diagnostics = client.request("GET", "/diagnostics/integrations")
