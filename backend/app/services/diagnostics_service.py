@@ -40,6 +40,7 @@ from app.services.diary_candidate_store import diary_candidate_store
 from app.services.external_ai_parser import external_ai_parser
 from app.services.ocr_service import ocr_service
 from app.services.settings_store import settings_store
+from app.services.sqlite_state_store import sqlite_state_store
 from app.services.task_candidate_store import task_candidate_store
 from app.services.task_store import task_store
 
@@ -149,17 +150,8 @@ class DiagnosticsService:
         )
 
     def _storage_readiness(self) -> ReadinessComponent:
-        data_dir = settings.local_bill_path.parent
-        managed_paths = [
-            settings.local_bill_path,
-            settings.local_task_path,
-            settings.local_diary_path,
-            settings.local_attachment_path,
-            settings.local_audit_path,
-            settings.local_idempotency_path,
-            settings.local_agent_knowledge_path,
-        ]
-        existing_files = sum(1 for path in managed_paths if path.exists())
+        database = sqlite_state_store.diagnostics()
+        data_dir = settings.local_database_path.parent
         writable = self._path_writable(data_dir)
         summary = data_management_service.summary()
         candidate_count = summary.bill_candidate_count + summary.task_candidate_count + summary.diary_candidate_count
@@ -179,12 +171,10 @@ class DiagnosticsService:
             name="storage",
             title="Local storage",
             status=status,
-            summary="Local JSON persistence is reachable." if writable else "Local JSON persistence cannot be written.",
+            summary="SQLite persistence is reachable." if writable else "SQLite persistence cannot be written.",
             metrics={
-                "backend": "local_json",
+                **database,
                 "data_dir": str(data_dir),
-                "managed_file_count": len(managed_paths),
-                "existing_file_count": existing_files,
                 "bill_count": summary.bill_count,
                 "task_count": summary.task_count,
                 "diary_count": summary.diary_count,

@@ -326,6 +326,11 @@ class Settings:
     local_audit_path: Path = DATA_DIR / "audit_events.json"
     local_idempotency_path: Path = DATA_DIR / "idempotency.json"
     local_agent_knowledge_path: Path = DATA_DIR / "agent_knowledge.json"
+    local_database_path: Path = field(
+        default_factory=lambda: Path(
+            os.getenv("LIFESNAP_SQLITE_PATH", str(DATA_DIR / "lifesnap.sqlite3"))
+        ).resolve()
+    )
     admin_api_key: str | None = field(
         default_factory=lambda: _env_first_optional_str("LIFESNAP_ADMIN_KEY", "LIFESNAP_ADMIN_API_KEY")
     )

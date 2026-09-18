@@ -885,6 +885,14 @@ def _check_app_bootstrap(client: ApiClient) -> None:
     _assert(status == 200, "GET /app/capabilities should return 200")
     _assert(capabilities["api_status"] == "ok", "App capabilities should report ok")
     _assert(
+        capabilities["storage_backend"] == "sqlite_for_app_state",
+        "App capabilities should report SQLite persistence",
+    )
+    _assert(
+        capabilities["feature_flags"]["persistent_database"],
+        "App capabilities should expose persistent database support",
+    )
+    _assert(
         "image/png" in capabilities["supported_attachment_content_types"],
         "App capabilities should expose supported attachment types",
     )
@@ -1262,6 +1270,14 @@ def _check_integration_diagnostics(client: ApiClient) -> None:
     _assert(
         "admin_session_ttl_minutes" in readiness_components["security"]["metrics"],
         "Readiness diagnostics should expose admin session security readiness",
+    )
+    _assert(
+        readiness_components["storage"]["metrics"]["backend"] == "sqlite",
+        "Readiness diagnostics should expose SQLite storage",
+    )
+    _assert(
+        readiness_components["storage"]["metrics"]["schema_version"] >= 1,
+        "Readiness diagnostics should expose an applied storage migration",
     )
 
     status, diagnostics = client.request("GET", "/diagnostics/integrations")

@@ -6,6 +6,7 @@ from math import ceil
 from uuid import UUID, uuid4
 
 from app.core.config import settings
+from app.services.sqlite_state_store import sqlite_state_store
 from app.schemas.task import (
     TaskCategoryBreakdown,
     TaskCreate,
@@ -379,32 +380,23 @@ class LocalTaskStore:
         return value_utc.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _load(self) -> None:
-        path = settings.local_task_path
-        if not path.exists():
+        raw_items = sqlite_state_store.load_json("tasks", settings.local_task_path)
+        if raw_items is None:
             return
         try:
-            raw_items = json.loads(path.read_text(encoding="utf-8"))
             tasks = [TaskRead.model_validate(item) for item in raw_items]
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return
         self._tasks = {task.id: task for task in tasks}
 
     def _persist(self) -> None:
-        path = settings.local_task_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            json.dumps(
-                [
-                    task.model_dump(mode="json")
-                    for task in sorted(self._tasks.values(), key=self._sort_key)
-                ],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "tasks",
+            [
+                task.model_dump(mode="json")
+                for task in sorted(self._tasks.values(), key=self._sort_key)
+            ],
         )
-        temp_path.replace(path)
 
 
 task_store = LocalTaskStore()

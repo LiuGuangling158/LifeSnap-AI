@@ -11,6 +11,7 @@ from fastapi import Request
 
 from app.core.config import settings
 from app.schemas.audit import AuditEvent, AuditEventListResponse
+from app.services.sqlite_state_store import sqlite_state_store
 
 
 class LocalAuditLogStore:
@@ -112,32 +113,23 @@ class LocalAuditLogStore:
         return str(value)[:120]
 
     def _load(self) -> None:
-        path = settings.local_audit_path
-        if not path.exists():
+        raw_items = sqlite_state_store.load_json("audit_events", settings.local_audit_path)
+        if raw_items is None:
             return
         try:
-            raw_items = json.loads(path.read_text(encoding="utf-8"))
             events = [AuditEvent.model_validate(item) for item in raw_items]
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return
         self._events = sorted(events, key=lambda event: event.occurred_at)[-self._max_events :]
 
     def _persist(self) -> None:
-        path = settings.local_audit_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            json.dumps(
-                [
-                    event.model_dump(mode="json")
-                    for event in sorted(self._events, key=lambda item: item.occurred_at)
-                ],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "audit_events",
+            [
+                event.model_dump(mode="json")
+                for event in sorted(self._events, key=lambda item: item.occurred_at)
+            ],
         )
-        temp_path.replace(path)
 
 
 _SENSITIVE_METADATA_KEYS = {

@@ -12,6 +12,7 @@ from app.schemas.chat import ChatConfirmActionResponse, ChatDiscardActionRespons
 from app.schemas.diary import DiaryRead
 from app.schemas.settings import DemoDataSeedResponse
 from app.schemas.task import TaskRead
+from app.services.sqlite_state_store import sqlite_state_store
 
 
 class IdempotencyConflictError(ValueError):
@@ -37,25 +38,26 @@ class LocalIdempotencyStore:
         fingerprint: object,
         factory: Callable[[], Any],
     ) -> Any:
-        if key is None:
-            return factory()
+        with sqlite_state_store.transaction():
+            if key is None:
+                return factory()
 
-        normalized_fingerprint = self._normalize_fingerprint(fingerprint)
-        record_key = (scope, key)
-        existing = self._records.get(record_key)
-        if existing is not None:
-            if existing.fingerprint != normalized_fingerprint:
-                raise IdempotencyConflictError("Idempotency-Key conflicts with another request")
-            return existing.response
+            normalized_fingerprint = self._normalize_fingerprint(fingerprint)
+            record_key = (scope, key)
+            existing = self._records.get(record_key)
+            if existing is not None:
+                if existing.fingerprint != normalized_fingerprint:
+                    raise IdempotencyConflictError("Idempotency-Key conflicts with another request")
+                return existing.response
 
-        response = factory()
-        self._records[record_key] = IdempotencyRecord(
-            fingerprint=normalized_fingerprint,
-            response=response,
-            response_type=self._response_type(response),
-        )
-        self._persist()
-        return response
+            response = factory()
+            self._records[record_key] = IdempotencyRecord(
+                fingerprint=normalized_fingerprint,
+                response=response,
+                response_type=self._response_type(response),
+            )
+            self._persist()
+            return response
 
     def clear(self) -> int:
         count = len(self._records)
@@ -73,11 +75,10 @@ class LocalIdempotencyStore:
         )
 
     def _load(self) -> None:
-        path = settings.local_idempotency_path
-        if not path.exists():
+        raw_items = sqlite_state_store.load_json("idempotency_records", settings.local_idempotency_path)
+        if raw_items is None:
             return
         try:
-            raw_items = json.loads(path.read_text(encoding="utf-8"))
             records: dict[tuple[str, str], IdempotencyRecord] = {}
             for item in raw_items:
                 scope = str(item["scope"])
@@ -91,33 +92,25 @@ class LocalIdempotencyStore:
                     ),
                     response_type=response_type,
                 )
-        except (OSError, ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError):
             return
         self._records = records
 
     def _persist(self) -> None:
-        path = settings.local_idempotency_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            json.dumps(
-                [
-                    {
-                        "scope": scope,
-                        "key": key,
-                        "fingerprint": record.fingerprint,
-                        "response_type": record.response_type
-                        or self._response_type(record.response),
-                        "response": self._serialize_response(record.response),
-                    }
-                    for (scope, key), record in sorted(self._records.items())
-                ],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "idempotency_records",
+            [
+                {
+                    "scope": scope,
+                    "key": key,
+                    "fingerprint": record.fingerprint,
+                    "response_type": record.response_type
+                    or self._response_type(record.response),
+                    "response": self._serialize_response(record.response),
+                }
+                for (scope, key), record in sorted(self._records.items())
+            ],
         )
-        temp_path.replace(path)
 
     def _serialize_response(self, response: Any) -> Any:
         if isinstance(response, BaseModel):

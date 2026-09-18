@@ -10,6 +10,7 @@ from app.services.agent_runtime_service import agent_runtime_service
 from app.services.dashboard_service import dashboard_service
 from app.services.data_management_service import data_management_service
 from app.services.settings_store import settings_store
+from app.services.sqlite_state_store import sqlite_state_store
 
 
 class BootstrapService:
@@ -19,7 +20,7 @@ class BootstrapService:
             app_version=settings.app_version,
             api_status="ok",
             generated_at=datetime.now(timezone.utc),
-            storage_backend="local_json_for_app_state",
+            storage_backend="sqlite_for_app_state",
             ocr_provider=settings.ocr_provider_name,
             ai_text_parser=settings.ai_parser_provider_name,
             max_attachment_file_size_bytes=attachment_store.max_file_size,
@@ -107,30 +108,29 @@ class BootstrapService:
                 "diaries": True,
                 "demo_data_seed": True,
                 "local_snapshot_persistence": True,
-                "bill_json_persistence": True,
-                "task_json_persistence": True,
-                "diary_json_persistence": True,
-                "settings_json_persistence": True,
-                "candidate_json_persistence": True,
-                "attachment_json_persistence": True,
+                "bill_sqlite_persistence": True,
+                "task_sqlite_persistence": True,
+                "diary_sqlite_persistence": True,
+                "settings_sqlite_persistence": True,
+                "candidate_sqlite_persistence": True,
+                "attachment_sqlite_persistence": True,
                 "original_attachment_file_persistence": True,
-                "audit_json_persistence": True,
-                "idempotency_json_persistence": True,
+                "audit_sqlite_persistence": True,
+                "idempotency_sqlite_persistence": True,
                 "real_ocr_engine": settings.real_ocr_enabled,
                 "real_llm_parser": settings.real_ai_parser_enabled,
                 "agent_rag_knowledge_base": True,
                 "agent_function_calling": True,
                 "agent_fine_tuning_dataset": True,
                 "fine_tuned_llm_parser": settings.fine_tuned_llm_agent_enabled,
-                "persistent_database": False,
+                "persistent_database": True,
                 "user_accounts": False,
             },
             known_limitations=[
-                "Bills, tasks and diary entries are persisted to local JSON files under backend/data.",
-                "Privacy settings are persisted to a local JSON file under backend/data.",
-                "Bill, task and diary candidates are persisted to local JSON files under backend/data.",
+                "Application state is persisted to SQLite under backend/data by default.",
+                "Legacy JSON files are imported on first access and remain useful for backup/import.",
                 "Attachment metadata and retained original files are persisted under backend/data.",
-                "Idempotency keys are persisted to local JSON for retry protection across restarts.",
+                "SQLite is a single-node deployment profile; use PostgreSQL before multi-node deployment.",
                 "Snapshot export includes attachment metadata but not retained original file bytes.",
                 (
                     "OCR uses the configured external HTTP provider when LIFESNAP_OCR_ENDPOINT is set; "

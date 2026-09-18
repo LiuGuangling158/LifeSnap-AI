@@ -6,6 +6,7 @@ from hashlib import sha256
 from uuid import UUID, uuid4
 
 from app.core.config import settings
+from app.services.sqlite_state_store import sqlite_state_store
 from app.schemas.attachment import (
     AttachmentDuplicateResponse,
     AttachmentRead,
@@ -187,13 +188,12 @@ class LocalAttachmentStore:
         return sorted(matches, key=lambda attachment: attachment.created_at)
 
     def _load(self) -> None:
-        path = settings.local_attachment_path
-        if not path.exists():
+        raw_items = sqlite_state_store.load_json("attachments", settings.local_attachment_path)
+        if raw_items is None:
             return
         try:
-            raw_items = json.loads(path.read_text(encoding="utf-8"))
             attachments = [AttachmentRead.model_validate(item) for item in raw_items]
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return
 
         self._attachments = {attachment.id: attachment for attachment in attachments}
@@ -208,25 +208,17 @@ class LocalAttachmentStore:
                         continue
 
     def _persist(self) -> None:
-        path = settings.local_attachment_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            json.dumps(
-                [
-                    attachment.model_dump(mode="json")
-                    for attachment in sorted(
-                        self._attachments.values(),
-                        key=lambda item: item.created_at,
-                        reverse=True,
-                    )
-                ],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "attachments",
+            [
+                attachment.model_dump(mode="json")
+                for attachment in sorted(
+                    self._attachments.values(),
+                    key=lambda item: item.created_at,
+                    reverse=True,
+                )
+            ],
         )
-        temp_path.replace(path)
 
     def _normalized_import_attachment(self, attachment: AttachmentRead) -> AttachmentRead:
         original_file = self._original_file_path(attachment.id)

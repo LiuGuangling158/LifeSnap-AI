@@ -4,6 +4,7 @@ import json
 from uuid import UUID
 
 from app.core.config import settings
+from app.services.sqlite_state_store import sqlite_state_store
 from app.schemas.agent import ParseTaskResponse, TaskCandidateData, TaskCandidateUpdate
 from app.schemas.task import TaskCreate, TaskRead, TaskType
 from app.services.task_parser import task_parser
@@ -105,35 +106,26 @@ class LocalTaskCandidateStore:
         return len(candidates)
 
     def _load(self) -> None:
-        path = settings.local_task_candidate_path
-        if not path.exists():
+        raw_items = sqlite_state_store.load_json("task_candidates", settings.local_task_candidate_path)
+        if raw_items is None:
             return
         try:
-            raw_items = json.loads(path.read_text(encoding="utf-8"))
             candidates = [ParseTaskResponse.model_validate(item) for item in raw_items]
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return
         self._candidates = {candidate.candidate_id: candidate for candidate in candidates}
 
     def _persist(self) -> None:
-        path = settings.local_task_candidate_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            json.dumps(
-                [
-                    candidate.model_dump(mode="json")
-                    for candidate in sorted(
-                        self._candidates.values(),
-                        key=lambda item: str(item.candidate_id),
-                    )
-                ],
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "task_candidates",
+            [
+                candidate.model_dump(mode="json")
+                for candidate in sorted(
+                    self._candidates.values(),
+                    key=lambda item: str(item.candidate_id),
+                )
+            ],
         )
-        temp_path.replace(path)
 
 
 task_candidate_store = LocalTaskCandidateStore()

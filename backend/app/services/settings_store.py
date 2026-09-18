@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 
 from app.core.config import settings
+from app.services.sqlite_state_store import sqlite_state_store
 from app.schemas.attachment import RetentionPolicy
 from app.schemas.settings import (
     BudgetSettings,
@@ -171,24 +172,19 @@ class LocalSettingsStore:
         )
 
     def _load_privacy_settings(self) -> PrivacySettings:
-        path = settings.local_settings_path
-        if not path.exists():
+        raw_settings = sqlite_state_store.load_json("privacy_settings", settings.local_settings_path)
+        if raw_settings is None:
             return self._default_privacy_settings()
         try:
-            raw_settings = json.loads(path.read_text(encoding="utf-8"))
             return PrivacySettings.model_validate(raw_settings)
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return self._default_privacy_settings()
 
     def _persist(self) -> None:
-        path = settings.local_settings_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            self._privacy_settings.model_dump_json(indent=2),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "privacy_settings",
+            self._privacy_settings.model_dump(mode="json"),
         )
-        temp_path.replace(path)
 
     def _default_category_settings(self) -> CategorySettings:
         return CategorySettings(
@@ -207,11 +203,10 @@ class LocalSettingsStore:
         )
 
     def _load_category_settings(self) -> CategorySettings:
-        path = settings.local_category_settings_path
-        if not path.exists():
+        raw_settings = sqlite_state_store.load_json("category_settings", settings.local_category_settings_path)
+        if raw_settings is None:
             return self._default_category_settings()
         try:
-            raw_settings = json.loads(path.read_text(encoding="utf-8"))
             loaded = CategorySettings.model_validate(raw_settings)
             return CategorySettings(
                 bill_categories=self._normalize_labels(
@@ -224,15 +219,14 @@ class LocalSettingsStore:
                 ),
                 updated_at=loaded.updated_at,
             )
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return self._default_category_settings()
 
     def _load_budget_settings(self) -> BudgetSettings:
-        path = settings.local_budget_settings_path
-        if not path.exists():
+        raw_settings = sqlite_state_store.load_json("budget_settings", settings.local_budget_settings_path)
+        if raw_settings is None:
             return self._default_budget_settings()
         try:
-            raw_settings = json.loads(path.read_text(encoding="utf-8"))
             loaded = BudgetSettings.model_validate(raw_settings)
             return BudgetSettings(
                 monthly_budget=loaded.monthly_budget,
@@ -240,52 +234,39 @@ class LocalSettingsStore:
                 warning_threshold_percent=loaded.warning_threshold_percent,
                 updated_at=loaded.updated_at,
             )
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return self._default_budget_settings()
 
     def _load_tag_settings(self) -> TagSettings:
-        path = settings.local_tag_settings_path
-        if not path.exists():
+        raw_settings = sqlite_state_store.load_json("tag_settings", settings.local_tag_settings_path)
+        if raw_settings is None:
             return self._default_tag_settings()
         try:
-            raw_settings = json.loads(path.read_text(encoding="utf-8"))
             loaded = TagSettings.model_validate(raw_settings)
             return TagSettings(
                 tags=self._normalize_labels(loaded.tags, DEFAULT_TAGS),
                 updated_at=loaded.updated_at,
             )
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return self._default_tag_settings()
 
     def _persist_category_settings(self) -> None:
-        path = settings.local_category_settings_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            self._category_settings.model_dump_json(indent=2),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "category_settings",
+            self._category_settings.model_dump(mode="json"),
         )
-        temp_path.replace(path)
 
     def _persist_budget_settings(self) -> None:
-        path = settings.local_budget_settings_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            self._budget_settings.model_dump_json(indent=2),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "budget_settings",
+            self._budget_settings.model_dump(mode="json"),
         )
-        temp_path.replace(path)
 
     def _persist_tag_settings(self) -> None:
-        path = settings.local_tag_settings_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            self._tag_settings.model_dump_json(indent=2),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "tag_settings",
+            self._tag_settings.model_dump(mode="json"),
         )
-        temp_path.replace(path)
 
     def _normalize_labels(
         self,

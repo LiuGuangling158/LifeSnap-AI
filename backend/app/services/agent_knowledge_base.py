@@ -16,6 +16,7 @@ from app.schemas.agent_runtime import (
     AgentKnowledgeSource,
     AgentKnowledgeVersionSummary,
 )
+from app.services.sqlite_state_store import sqlite_state_store
 
 
 @dataclass(frozen=True)
@@ -317,11 +318,13 @@ class AgentKnowledgeBase:
         return ascii_terms | chinese_terms
 
     def _load_admin_documents(self) -> tuple[KnowledgeDocument, ...]:
-        path = settings.local_agent_knowledge_path
-        if not path.exists():
+        raw_payload = sqlite_state_store.load_json(
+            "agent_knowledge",
+            settings.local_agent_knowledge_path,
+        )
+        if raw_payload is None:
             return ()
         try:
-            raw_payload = json.loads(path.read_text(encoding="utf-8"))
             raw_documents = raw_payload.get("documents", raw_payload) if isinstance(raw_payload, dict) else raw_payload
             if not isinstance(raw_documents, list):
                 return ()
@@ -337,15 +340,17 @@ class AgentKnowledgeBase:
                     )
                 )
             return tuple(loaded)
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return ()
 
     def _load_versions(self) -> tuple[KnowledgeVersion, ...]:
-        path = settings.local_agent_knowledge_path
-        if not path.exists():
+        raw_payload = sqlite_state_store.load_json(
+            "agent_knowledge",
+            settings.local_agent_knowledge_path,
+        )
+        if raw_payload is None:
             return ()
         try:
-            raw_payload = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(raw_payload, dict):
                 return ()
             raw_versions = raw_payload.get("versions", [])
@@ -381,29 +386,21 @@ class AgentKnowledgeBase:
                     )
                 )
             return tuple(versions[: self._max_versions])
-        except (OSError, ValueError, TypeError):
+        except (ValueError, TypeError):
             return ()
 
     def _persist_admin_documents(self) -> None:
-        path = settings.local_agent_knowledge_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_suffix(".tmp")
-        temp_path.write_text(
-            json.dumps(
-                {
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "documents": [
-                        self._to_schema(document).model_dump(mode="json")
-                        for document in self._admin_documents
-                    ],
-                    "versions": [self._version_to_payload(version) for version in self._versions],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+        sqlite_state_store.save_json(
+            "agent_knowledge",
+            {
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "documents": [
+                    self._to_schema(document).model_dump(mode="json")
+                    for document in self._admin_documents
+                ],
+                "versions": [self._version_to_payload(version) for version in self._versions],
+            },
         )
-        temp_path.replace(path)
 
     def _record_version(self, action: str) -> None:
         now = datetime.now(timezone.utc)

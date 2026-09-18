@@ -58,6 +58,18 @@ cd ..
 .\backend\.venv\Scripts\python.exe backend\scripts\smoke_test.py
 ```
 
+## SQLite Persistence
+
+Runtime application state is stored in SQLite at LIFESNAP_SQLITE_PATH, which
+defaults to backend/data/lifesnap.sqlite3. The database uses WAL mode, full
+synchronous writes, schema migration metadata, and an immediate transaction for
+candidate confirmation plus idempotency recording.
+
+On first access, each state namespace imports its legacy JSON file when present.
+The old files remain useful as migration input and JSON export/import remains the
+portable backup format. Original attachment bytes continue to be stored as
+managed files rather than database blobs.
+
 The smoke test starts a temporary backend server, verifies the core API flow, and
 then shuts the temporary server down. It does not use the existing `8000` server.
 
