@@ -28,3 +28,8 @@ class AuthSessionResponse(BaseModel):
     expires_at: datetime
     expires_in_seconds: int = Field(ge=60)
     user: AuthUser
+
+
+class AuthBootstrapResponse(BaseModel):
+    setup_required: bool
+    password_min_length: int = Field(default=10, ge=1)

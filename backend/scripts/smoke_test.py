@@ -564,6 +564,9 @@ def _check_authentication_and_data_isolation(client: ApiClient) -> None:
     _assert(status == 401, "Protected business APIs must reject anonymous requests")
     _assert(body["detail"] == "Authentication required", "Anonymous rejection message changed")
 
+    status, auth_bootstrap = client.request("GET", "/auth/bootstrap")
+    _assert(status == 200 and auth_bootstrap["setup_required"], "Fresh installations should require account setup")
+
     status, admin_session = client.request(
         "POST",
         "/auth/register",
@@ -576,6 +579,9 @@ def _check_authentication_and_data_isolation(client: ApiClient) -> None:
     _assert(status == 201, "First account registration should return 201")
     _assert(admin_session["user"]["role"] == "admin", "First registered account should be an admin")
     client.default_headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
+
+    status, auth_bootstrap = client.request("GET", "/auth/bootstrap")
+    _assert(status == 200 and not auth_bootstrap["setup_required"], "Account setup should complete after first registration")
 
     status, current_user = client.request("GET", "/auth/me")
     _assert(status == 200 and current_user["role"] == "admin", "Current session should identify the admin")

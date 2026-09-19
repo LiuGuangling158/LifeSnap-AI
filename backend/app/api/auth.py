@@ -1,10 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.schemas.auth import AuthLoginRequest, AuthRegisterRequest, AuthSessionResponse, AuthUser
+from app.schemas.auth import (
+    AuthBootstrapResponse,
+    AuthLoginRequest,
+    AuthRegisterRequest,
+    AuthSessionResponse,
+    AuthUser,
+)
 from app.services.auth_service import auth_service, require_current_user
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/bootstrap", response_model=AuthBootstrapResponse)
+def bootstrap_auth() -> AuthBootstrapResponse:
+    return AuthBootstrapResponse(setup_required=auth_service.setup_required())
 
 
 @router.post("/register", response_model=AuthSessionResponse, status_code=status.HTTP_201_CREATED)

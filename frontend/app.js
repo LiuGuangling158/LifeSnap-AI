@@ -117,6 +117,7 @@ const state = {
   loading: Boolean(initialAuthSession.accessToken),
   auth: initialAuthSession,
   authMode: "login",
+  authBootstrap: null,
   authSubmitting: false,
   saving: false,
   error: "",
@@ -1019,6 +1020,13 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-auth-mode]")) {
+    state.authMode = event.target.value === "register" ? "register" : "login";
+    state.error = "";
+    render();
+    return;
+  }
+
   if (event.target.matches("[data-chat-image-input]")) {
     await addChatImages(event.target.files);
     event.target.value = "";
@@ -1146,7 +1154,7 @@ document.addEventListener("submit", async (event) => {
 if (state.auth.accessToken) {
   loadData();
 } else {
-  render();
+  loadAuthBootstrap();
 }
 
 async function loadData() {
@@ -4321,7 +4329,12 @@ async function api(path, options = {}) {
   }
   const response = await fetch(path, { ...options, headers });
   const text = await response.text();
-  const body = text ? JSON.parse(text) : null;
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text;
+  }
   if (!response.ok) {
     if (response.status === 401 && !path.startsWith("/auth/")) {
       clearAuthSession({ render: false });
@@ -4329,6 +4342,21 @@ async function api(path, options = {}) {
     throw new Error(body?.detail || body?.error?.message || `请求失败：${response.status}`);
   }
   return body;
+}
+
+async function loadAuthBootstrap() {
+  state.loading = true;
+  state.error = "";
+  try {
+    const bootstrap = await api("/auth/bootstrap");
+    state.authBootstrap = bootstrap && typeof bootstrap === "object" ? bootstrap : null;
+    state.authMode = state.authBootstrap?.setup_required ? "register" : "login";
+  } catch (error) {
+    state.error = error.message || "Authentication service is unavailable";
+  } finally {
+    state.loading = false;
+    render();
+  }
 }
 
 function loadAuthSession() {
@@ -6004,21 +6032,37 @@ function renderDiaryPage() {
 function renderAuthPage() {
   const message = state.error ? '<p class="error">' + escapeHtml(state.error) + "</p>" : "";
   const disabled = state.authSubmitting ? "disabled" : "";
+  const setupRequired = state.authBootstrap?.setup_required === true;
+  const mode = setupRequired ? "register" : state.authMode;
+  const passwordMinLength = mode === "register" ? Number(state.authBootstrap?.password_min_length || 10) : 1;
+  const modeField = setupRequired
+    ? '<input type="hidden" name="mode" value="register">'
+    : '<div class="field full"><label for="auth_mode">Account action</label><select id="auth_mode" name="mode" data-auth-mode><option value="login"' + (mode === "login" ? " selected" : "") + '>Sign in</option><option value="register"' + (mode === "register" ? " selected" : "") + '>Create account</option></select></div>';
+  const displayNameField = mode === "register"
+    ? '<div class="field full"><label for="auth_display_name">Display name (optional)</label><input id="auth_display_name" name="display_name" maxlength="80" autocomplete="name"></div>'
+    : "";
+  const title = setupRequired ? "Create administrator account" : mode === "register" ? "Create account" : "Sign in";
+  const subtitle = setupRequired
+    ? "This is the first use. The first account becomes an administrator and takes ownership of existing local records."
+    : "Bills, tasks, and diaries are visible only in the signed-in account.";
+  const hint = mode === "register"
+    ? "Usernames may use letters, numbers, dots, underscores, and hyphens. Passwords need at least " + passwordMinLength + " characters."
+    : "Use an account that has already been created.";
   return [
     '<main class="main mobile-main" id="main-content">',
     '<section class="surface" style="max-width:480px;margin:48px auto;">',
     "<h1>LifeSnap</h1>",
-    "<p>Sign in to keep your records private to your account.</p>",
+    "<h2>" + title + "</h2>",
+    "<p>" + subtitle + "</p>",
     message,
     '<form data-auth-form class="settings-form">',
-    '<div class="field full"><label for="auth_mode">Account action</label>',
-    '<select id="auth_mode" name="mode"><option value="login">Sign in</option><option value="register">Create account</option></select></div>',
+    modeField,
     '<div class="field full"><label for="auth_username">Username</label><input id="auth_username" name="username" autocomplete="username" minlength="3" maxlength="40" required></div>',
-    '<div class="field full"><label for="auth_password">Password</label><input id="auth_password" name="password" type="password" autocomplete="current-password" minlength="10" required></div>',
-    '<div class="field full"><label for="auth_display_name">Display name</label><input id="auth_display_name" name="display_name" maxlength="80"></div>',
-    '<div class="form-actions"><button class="button primary" type="submit" ' + disabled + ">" + (state.authSubmitting ? "Please wait..." : "Continue") + "</button></div>",
+    '<div class="field full"><label for="auth_password">Password</label><input id="auth_password" name="password" type="password" autocomplete="' + (mode === "register" ? "new-password" : "current-password") + '" minlength="' + passwordMinLength + '" maxlength="200" required></div>',
+    displayNameField,
+    '<div class="form-actions"><button class="button primary" type="submit" ' + disabled + ">" + (state.authSubmitting ? "Please wait..." : mode === "register" ? "Create and continue" : "Sign in") + "</button></div>",
     "</form>",
-    "<p class=\"form-hint\">The first account created on this device is an administrator. Later accounts are standard users.</p>",
+    '<p class="form-hint">' + hint + "</p>",
     "</section></main>",
   ].join("");
 }

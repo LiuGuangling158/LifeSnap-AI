@@ -36,7 +36,11 @@ class AuthService:
         display_name = (payload.display_name or username).strip()[:80] or username
         with user_registration_lock:
             connection = self._connect()
+            first_user = False
             try:
+                # This lock is database-wide, so separate application processes
+                # cannot both observe an empty user table and create two admins.
+                connection.execute("BEGIN IMMEDIATE")
                 first_user = int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]) == 0
                 role = "admin" if first_user else "user"
                 connection.execute(
@@ -55,12 +59,16 @@ class AuthService:
                     ),
                 )
                 connection.commit()
-                if first_user:
-                    sqlite_state_store.claim_legacy_owner(user_id)
             except sqlite3.IntegrityError as exc:
+                connection.rollback()
                 raise ValueError("Username is already in use") from exc
+            except Exception:
+                connection.rollback()
+                raise
             finally:
                 connection.close()
+            if first_user:
+                sqlite_state_store.claim_legacy_owner(user_id)
         return self._session_for(self.get_user(user_id))
 
     def login(self, payload: AuthLoginRequest) -> AuthSessionResponse:
@@ -80,6 +88,13 @@ class AuthService:
         if user is None or user.role != payload.get("role"):
             return None
         return user
+
+    def setup_required(self) -> bool:
+        connection = self._connect()
+        try:
+            return int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]) == 0
+        finally:
+            connection.close()
 
     def get_user(self, user_id: str) -> AuthUser | None:
         connection = self._connect()
