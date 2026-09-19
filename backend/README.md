@@ -85,6 +85,12 @@ include HTTP request counts, request duration summaries, Agent execution counts,
 and process uptime. The endpoint exposes only operational labels and should be
 restricted at the network boundary in production.
 
+The repository includes a starter Prometheus scrape configuration at
+monitoring/prometheus.yml and alert rules at monitoring/alerts.yml. The rules
+alert on a five-minute HTTP 5xx rate above five percent and an Agent P95 latency
+above eight seconds. Update the scrape target and route alerts to the production
+on-call destination before deployment.
+
 The local single-user workspace can inspect Agent traces through
 GET /observability/agent-traces and the monitoring summary through
 GET /observability/summary. Trace records store tool names, knowledge source

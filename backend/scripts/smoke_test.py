@@ -558,6 +558,7 @@ def _check_observability(client: ApiClient) -> None:
     _assert(status == 200, "GET /metrics should return 200")
     _assert("lifesnap_http_requests_total" in metrics, "Prometheus metrics should expose HTTP counters")
     _assert("lifesnap_agent_executions_total" in metrics, "Prometheus metrics should expose Agent counters")
+    _assert("lifesnap_agent_execution_p95_seconds" in metrics, "Prometheus metrics should expose Agent P95 latency")
 
 
 def _check_single_user_access(client: ApiClient) -> None:

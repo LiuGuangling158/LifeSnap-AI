@@ -184,6 +184,10 @@ class ObservabilityService:
                 labels = f'method="{method}",path="{path}"'
                 lines.append(f"lifesnap_http_request_duration_seconds_count{{{labels}}} {len(latencies)}")
                 lines.append(f"lifesnap_http_request_duration_seconds_sum{{{labels}}} {total:.6f}")
+                lines.append(
+                    f"lifesnap_http_request_p95_seconds{{{labels}}} "
+                    f"{self._percentile(latencies, 0.95) / 1000:.6f}"
+                )
             lines.extend(
                 [
                     "# HELP lifesnap_agent_executions_total Agent executions by outcome.",
@@ -194,6 +198,14 @@ class ObservabilityService:
                 lines.append(
                     "lifesnap_agent_executions_total"
                     f'{{intent="{intent}",outcome="{outcome}",strategy="{strategy}"}} {count}'
+                )
+            if self._agent_latency:
+                lines.extend(
+                    [
+                        "# HELP lifesnap_agent_execution_p95_seconds Agent execution P95 latency.",
+                        "# TYPE lifesnap_agent_execution_p95_seconds gauge",
+                        f"lifesnap_agent_execution_p95_seconds {self._percentile(self._agent_latency, 0.95) / 1000:.6f}",
+                    ]
                 )
         return "\n".join(lines) + "\n"
 
@@ -207,6 +219,11 @@ class ObservabilityService:
 
     def _normalize_path(self, path: str) -> str:
         return _ID_PATH_SEGMENT.sub("/{id}", path)
+
+    def _percentile(self, values: list[float], percentile: float) -> float:
+        ordered = sorted(values)
+        index = max(0, round((len(ordered) - 1) * percentile))
+        return ordered[index]
 
     def _emit(self, payload: dict[str, Any]) -> None:
         payload["timestamp"] = datetime.now(timezone.utc).isoformat()

@@ -1,0 +1,20 @@
+groups:
+  - name: lifesnap-ai
+    rules:
+      - alert: LifeSnapHighHttp5xxRate
+        expr: |
+          sum(rate(lifesnap_http_requests_total{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(lifesnap_http_requests_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: LifeSnap HTTP 5xx error rate is above 5 percent.
+      - alert: LifeSnapHighAgentP95Latency
+        expr: lifesnap_agent_execution_p95_seconds > 8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: LifeSnap Agent P95 latency is above 8 seconds.
