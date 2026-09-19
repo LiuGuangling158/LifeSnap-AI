@@ -298,6 +298,11 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-admin-quality-run]")) {
+    runAgentQualityEvaluation();
+    return;
+  }
+
   if (event.target.closest("[data-admin-knowledge-copy]")) {
     copyAdminKnowledgeJson();
     return;
@@ -398,6 +403,15 @@ document.addEventListener("click", (event) => {
   const chatDiscardButton = event.target.closest("[data-chat-discard]");
   if (chatDiscardButton) {
     discardChatAction(chatDiscardButton.dataset.actionType, chatDiscardButton.dataset.candidateId);
+    return;
+  }
+
+  const qualityFeedbackButton = event.target.closest("[data-chat-quality-feedback]");
+  if (qualityFeedbackButton) {
+    submitChatQualityFeedback(
+      qualityFeedbackButton.dataset.messageId,
+      qualityFeedbackButton.dataset.chatQualityFeedback,
+    );
     return;
   }
 
@@ -1422,6 +1436,27 @@ async function establishAdminSession() {
     showToast("管理员会话已建立，后续管理操作会优先使用短期 token。");
   } catch (error) {
     showToast(adminKnowledgeErrorMessage(error));
+  }
+}
+
+async function runAgentQualityEvaluation() {
+  if (state.saving) return;
+  const adminKey = state.adminKnowledgeAdminKey.trim();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再运行质量评测。");
+    return;
+  }
+  state.saving = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    const run = await api("/quality/evaluations/run", { method: "POST", headers });
+    showToast("质量评测完成：" + run.passed_cases + "/" + run.total_cases + " 通过。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    render();
   }
 }
 
@@ -4094,6 +4129,7 @@ function normalizeStoredChatResponse(response) {
     return null;
   }
   return {
+    message_id: response.message_id ? String(response.message_id) : null,
     reply: String(response.reply ?? "").slice(0, 5000),
     intent: String(response.intent ?? "unsupported"),
     confidence: Number.isFinite(Number(response.confidence)) ? Number(response.confidence) : 0,
@@ -4304,6 +4340,20 @@ async function api(path, options = {}) {
     throw new Error(body?.detail || body?.error?.message || `请求失败：${response.status}`);
   }
   return body;
+}
+
+async function submitChatQualityFeedback(messageId, verdict) {
+  if (!messageId || !["accepted", "corrected", "rejected"].includes(verdict)) return;
+  try {
+    await api("/quality/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId, verdict }),
+    });
+    showToast("已记录本次 AI 反馈。");
+  } catch (error) {
+    showToast(error.message || "反馈暂未保存。");
+  }
 }
 
 function showToast(message) {
@@ -6016,6 +6066,9 @@ function renderAdminPage() {
               <button class="button ghost" type="button" data-admin-session-create ${state.adminSessionLoading || adminSessionValid() ? "disabled" : ""}>
                 ${icon("shield")}${state.adminSessionLoading ? "建立中..." : adminSessionValid() ? "会话有效" : "建立会话"}
               </button>
+              <button class="button ghost" type="button" data-admin-quality-run ${state.saving ? "disabled" : ""}>
+                ${icon("activity")}${state.saving ? "评测中..." : "运行 AI 质量评测"}
+              </button>
             </div>
             <small class="form-hint">仅当后端启用 LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true 且从本机访问时可用。</small>
             <small class="form-hint">${escapeHtml(adminSessionStatusText())}</small>
@@ -7525,11 +7578,26 @@ function renderChatMessage(message, index) {
         ${role === "assistant" ? renderChatAgentSteps(message.response?.agent_steps) : ""}
         ${role === "assistant" ? renderChatAnalysis(message.response) : ""}
         ${role === "assistant" ? renderChatRuntimeTrace(message.response) : ""}
+        ${role === "assistant" ? renderChatQualityFeedback(message.response) : ""}
         ${renderChatCandidate(message)}
         ${renderChatResult(message)}
       </div>
     </article>
   `;
+}
+
+function renderChatQualityFeedback(response) {
+  const messageId = String(response?.message_id || "");
+  if (!messageId) return "";
+  const escapedMessageId = escapeHtml(messageId);
+  return [
+    '<div class="chat-selected-tool" aria-label="AI quality feedback">',
+    "<small>Was this result accurate?</small>",
+    '<button class="icon-button" type="button" data-chat-quality-feedback="accepted" data-message-id="' + escapedMessageId + '" title="Accurate">' + icon("check-circle") + "</button>",
+    '<button class="icon-button" type="button" data-chat-quality-feedback="corrected" data-message-id="' + escapedMessageId + '" title="Needs correction">' + icon("edit") + "</button>",
+    '<button class="icon-button" type="button" data-chat-quality-feedback="rejected" data-message-id="' + escapedMessageId + '" title="Incorrect">' + icon("x-circle") + "</button>",
+    "</div>",
+  ].join("");
 }
 
 function renderChatSelectedTool(response) {

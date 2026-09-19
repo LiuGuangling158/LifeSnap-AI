@@ -20,7 +20,7 @@ class SQLiteStateStore:
     database. Legacy files are read only once, on first access to a namespace.
     """
 
-    _migration_version = 5
+    _migration_version = 6
     _collection_tables = {
         "bills": ("bills", "id"),
         "tasks": ("tasks", "id"),
@@ -274,6 +274,95 @@ class SQLiteStateStore:
             "p95_latency_ms": round(latencies[percentile_index], 2) if latencies else 0.0,
         }
 
+    def append_agent_quality_feedback(self, feedback: dict[str, Any], *, owner_id: str | None = None) -> None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO agent_quality_feedback(
+                        feedback_id, owner_id, message_id, verdict, expected_intent,
+                        expected_category, note, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(feedback["feedback_id"]),
+                        owner_id,
+                        str(feedback["message_id"]),
+                        str(feedback["verdict"]),
+                        feedback.get("expected_intent"),
+                        feedback.get("expected_category"),
+                        feedback.get("note"),
+                        str(feedback["created_at"]),
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+    def list_agent_quality_feedback(self, *, owner_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT feedback_id, message_id, verdict, expected_intent,
+                           expected_category, note, created_at
+                    FROM agent_quality_feedback
+                    WHERE owner_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (owner_id, max(1, min(limit, 1000))),
+                ).fetchall()
+                return [dict(row) for row in rows]
+            finally:
+                connection.close()
+
+    def append_agent_quality_evaluation(self, run: dict[str, Any], *, owner_id: str | None = None) -> None:
+        owner_id = owner_id or current_owner_id()
+        payload = json.dumps(run, ensure_ascii=False, separators=(",", ":"), default=str)
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO agent_quality_evaluation_runs(
+                        run_id, owner_id, created_at, pass_rate, payload
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(run["run_id"]),
+                        owner_id,
+                        str(run["created_at"]),
+                        float(run["pass_rate"]),
+                        payload,
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+    def latest_agent_quality_evaluation(self, *, owner_id: str | None = None) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    """
+                    SELECT payload FROM agent_quality_evaluation_runs
+                    WHERE owner_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (owner_id,),
+                ).fetchone()
+                return json.loads(str(row["payload"])) if row else None
+            finally:
+                connection.close()
+
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
@@ -311,6 +400,7 @@ class SQLiteStateStore:
                 self._apply_owner_migration(connection)
                 self._apply_user_migration(connection)
                 self._apply_observability_migration(connection)
+                self._apply_agent_quality_migration(connection)
                 connection.commit()
             finally:
                 connection.close()
@@ -553,6 +643,51 @@ class SQLiteStateStore:
         connection.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
             (5, self._now()),
+        )
+
+    def _apply_agent_quality_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (6,),
+        ).fetchone()
+        if applied is not None:
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_quality_feedback (
+                feedback_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                expected_intent TEXT,
+                expected_category TEXT,
+                note TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_quality_feedback_owner_created "
+            "ON agent_quality_feedback(owner_id, created_at DESC)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_quality_evaluation_runs (
+                run_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                pass_rate REAL NOT NULL,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_quality_evaluations_owner_created "
+            "ON agent_quality_evaluation_runs(owner_id, created_at DESC)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (6, self._now()),
         )
 
     def _write_collection(

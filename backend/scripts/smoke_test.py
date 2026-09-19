@@ -506,6 +506,7 @@ def _run_checks(client: ApiClient) -> None:
     _check_app_bootstrap(client)
     _check_agent_runtime_profile(client)
     _check_agent_knowledge_admin(client)
+    _check_agent_quality_governance(client)
     _check_integration_diagnostics(client)
     _check_bill_statistics_overview(client)
     _check_bill_business_timezone_boundaries(client)
@@ -1209,6 +1210,45 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
         headers=admin_headers,
     )
     _assert(status == 200 and final_reset["admin_count"] == 0, "Knowledge final reset should restore built-in-only state")
+
+
+def _check_agent_quality_governance(client: ApiClient) -> None:
+    status, initial_summary = client.request("GET", "/quality/summary")
+    _assert(status == 200, "Quality summary should be available in local single-user mode")
+
+    status, feedback = client.request(
+        "POST",
+        "/quality/feedback",
+        {
+            "message_id": "00000000-0000-0000-0000-000000000001",
+            "verdict": "corrected",
+            "expected_intent": "create_bill",
+            "expected_category": "dining",
+            "note": "Smoke feedback fixture",
+        },
+    )
+    _assert(status == 201, "Quality feedback should be persisted")
+    _assert(feedback["verdict"] == "corrected", "Quality feedback verdict should round-trip")
+
+    status, session = client.request(
+        "POST",
+        "/agent/admin-session",
+        {"admin_key": "smoke-admin-key"},
+    )
+    _assert(status == 200, "Quality evaluation should obtain an admin session")
+    status, run = client.request(
+        "POST",
+        "/quality/evaluations/run",
+        headers={"Authorization": f"Bearer {session['token']}"},
+    )
+    _assert(status == 200, "Quality evaluation should run with an admin session")
+    _assert(run["total_cases"] >= 4, "Quality evaluation should include standard cases")
+    _assert(run["passed_cases"] == run["total_cases"], "Standard Agent evaluation should pass")
+
+    status, summary = client.request("GET", "/quality/summary")
+    _assert(status == 200, "Quality summary should refresh after feedback and evaluation")
+    _assert(summary["feedback_count"] == initial_summary["feedback_count"] + 1, "Quality feedback count should increase")
+    _assert(summary["latest_evaluation"]["run_id"] == run["run_id"], "Latest quality evaluation should be persisted")
 
 
 def _check_chat_bill_analysis(client: ApiClient) -> None:

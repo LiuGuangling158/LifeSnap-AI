@@ -31,6 +31,7 @@ from app.schemas.diagnostics import (
 )
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_runtime_service import agent_runtime_service
+from app.services.agent_quality_service import agent_quality_service
 from app.schemas.task import TaskRead, TaskSource, TaskStatus, TaskType
 from app.services.attachment_store import attachment_store
 from app.services.audit_log_store import audit_log_store
@@ -59,6 +60,7 @@ class DiagnosticsService:
             self._privacy_readiness(),
             self._security_readiness(),
             self._observability_readiness(),
+            self._agent_quality_readiness(),
             self._audit_readiness(),
             self._data_quality_readiness(data_quality),
         ]
@@ -355,6 +357,37 @@ class DiagnosticsService:
                 if status == "degraded"
                 else None
             ),
+        )
+
+    def _agent_quality_readiness(self) -> ReadinessComponent:
+        summary = agent_quality_service.summary()
+        evaluation = summary.latest_evaluation
+        if evaluation is None:
+            status = "degraded"
+            warnings = ["quality_evaluation_not_run"]
+            next_action = "Run the standard Agent quality evaluation before release."
+        elif evaluation.pass_rate < 0.9:
+            status = "action_required"
+            warnings = ["quality_gate_failed"]
+            next_action = "Fix failed evaluation cases before release."
+        else:
+            status = "ready"
+            warnings = []
+            next_action = None
+        return ReadinessComponent(
+            name="agent_quality",
+            title="AI quality governance",
+            status=status,
+            summary="Feedback and deterministic regression evaluation are persisted.",
+            metrics={
+                "feedback_count": summary.feedback_count,
+                "acceptance_rate": summary.acceptance_rate,
+                "correction_rate": summary.correction_rate,
+                "latest_evaluation_pass_rate": evaluation.pass_rate if evaluation else None,
+                "latest_evaluation_case_count": evaluation.total_cases if evaluation else 0,
+            },
+            warnings=warnings,
+            next_action=next_action,
         )
 
     def _audit_readiness(self) -> ReadinessComponent:
