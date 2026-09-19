@@ -85,8 +85,8 @@ include HTTP request counts, request duration summaries, Agent execution counts,
 and process uptime. The endpoint exposes only operational labels and should be
 restricted at the network boundary in production.
 
-Authenticated users can inspect their own Agent traces through
-GET /observability/agent-traces and the per-user monitoring summary through
+The local single-user workspace can inspect Agent traces through
+GET /observability/agent-traces and the monitoring summary through
 GET /observability/summary. Trace records store tool names, knowledge source
 IDs, step statuses, model strategy, and latency without persisting chat text.
 
@@ -641,6 +641,11 @@ so the history remains append-only.
 signed admin token. The token is stateless, defaults to 30 minutes, and can be
 configured with `LIFESNAP_ADMIN_SESSION_TTL_MINUTES`. The response never returns
 the admin key, and session creation is audited without logging the submitted key.
+
+The application is currently a local single-user profile: business APIs do not
+require registration, login, or user bearer tokens. Do not expose this profile
+to an untrusted network. A future multi-user deployment needs its own identity,
+authorization, and data-isolation architecture.
 
 For local development convenience, `GET /agent/admin-key` can fill the admin key
 in the Admin UI only when `LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true` and the request

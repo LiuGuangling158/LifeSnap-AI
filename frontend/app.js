@@ -91,7 +91,6 @@ const defaultTagSettings = {
 const profileStorageKey = "lifesnap_profile_settings";
 const assistantSessionStorageKey = "lifesnap_assistant_session";
 const languageStorageKey = "lifesnap_language";
-const authSessionStorageKey = "lifesnap_auth_session";
 const knownAssistantToolIds = [
   "knowledge_search",
   "bill_candidate",
@@ -109,16 +108,11 @@ const defaultProfileSettings = {
 };
 
 const initialAssistantSession = loadAssistantSession();
-const initialAuthSession = loadAuthSession();
 
 const state = {
   route: getRoute(),
   language: loadLanguage(),
-  loading: Boolean(initialAuthSession.accessToken),
-  auth: initialAuthSession,
-  authMode: "login",
-  authBootstrap: null,
-  authSubmitting: false,
+  loading: true,
   saving: false,
   error: "",
   toast: "",
@@ -254,10 +248,6 @@ window.addEventListener("hashchange", () => {
 });
 
 document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-auth-logout]")) {
-    clearAuthSession();
-    return;
-  }
   const pageButton = event.target.closest("[data-bill-page]");
   if (pageButton) {
     state.billListMeta.page = Number(pageButton.dataset.billPage);
@@ -1020,13 +1010,6 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", async (event) => {
-  if (event.target.matches("[data-auth-mode]")) {
-    state.authMode = event.target.value === "register" ? "register" : "login";
-    state.error = "";
-    render();
-    return;
-  }
-
   if (event.target.matches("[data-chat-image-input]")) {
     await addChatImages(event.target.files);
     event.target.value = "";
@@ -1049,11 +1032,6 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
-  if (event.target.matches("[data-auth-form]")) {
-    event.preventDefault();
-    await submitAuth(new FormData(event.target));
-    return;
-  }
   if (event.target.matches("[data-bill-search-form]")) {
     event.preventDefault();
     state.billFilters.q = String(new FormData(event.target).get("q") || "").trim();
@@ -1151,18 +1129,9 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-if (state.auth.accessToken) {
-  loadData();
-} else {
-  loadAuthBootstrap();
-}
+loadData();
 
 async function loadData() {
-  if (!state.auth.accessToken) {
-    state.loading = false;
-    render();
-    return;
-  }
   state.loading = true;
   state.error = "";
   render();
@@ -1587,7 +1556,6 @@ function normalizeAdminKnowledgeLabels(value, limit) {
 }
 
 async function adminKnowledgeHeaders(adminKey) {
-  return { "Content-Type": "application/json" };
   if (adminSessionValid()) {
     return {
       "Content-Type": "application/json",
@@ -4324,9 +4292,6 @@ function normalizeProfileSettings(value) {
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  if (state.auth.accessToken && !headers.has("Authorization") && !path.startsWith("/auth/")) {
-    headers.set("Authorization", "Bearer " + state.auth.accessToken);
-  }
   const response = await fetch(path, { ...options, headers });
   const text = await response.text();
   let body = null;
@@ -4336,86 +4301,9 @@ async function api(path, options = {}) {
     body = text;
   }
   if (!response.ok) {
-    if (response.status === 401 && !path.startsWith("/auth/")) {
-      clearAuthSession({ render: false });
-    }
     throw new Error(body?.detail || body?.error?.message || `请求失败：${response.status}`);
   }
   return body;
-}
-
-async function loadAuthBootstrap() {
-  state.loading = true;
-  state.error = "";
-  try {
-    const bootstrap = await api("/auth/bootstrap");
-    state.authBootstrap = bootstrap && typeof bootstrap === "object" ? bootstrap : null;
-    state.authMode = state.authBootstrap?.setup_required ? "register" : "login";
-  } catch (error) {
-    state.error = error.message || "Authentication service is unavailable";
-  } finally {
-    state.loading = false;
-    render();
-  }
-}
-
-function loadAuthSession() {
-  try {
-    const value = JSON.parse(window.localStorage?.getItem(authSessionStorageKey) || "{}");
-    return {
-      accessToken: String(value.accessToken || ""),
-      user: value.user && typeof value.user === "object" ? value.user : null,
-      expiresAt: String(value.expiresAt || ""),
-    };
-  } catch {
-    return { accessToken: "", user: null, expiresAt: "" };
-  }
-}
-
-function saveAuthSession(session) {
-  state.auth = {
-    accessToken: String(session?.access_token || ""),
-    user: session?.user ?? null,
-    expiresAt: String(session?.expires_at || ""),
-  };
-  window.localStorage?.setItem(authSessionStorageKey, JSON.stringify(state.auth));
-}
-
-function clearAuthSession({ render: shouldRender = true } = {}) {
-  state.auth = { accessToken: "", user: null, expiresAt: "" };
-  state.loading = false;
-  state.error = "";
-  window.localStorage?.removeItem(authSessionStorageKey);
-  if (shouldRender) render();
-}
-
-async function submitAuth(formData) {
-  if (state.authSubmitting) return;
-  const mode = String(formData.get("mode") || "login");
-  const username = String(formData.get("username") || "").trim();
-  const password = String(formData.get("password") || "");
-  const displayName = String(formData.get("display_name") || "").trim();
-  state.authSubmitting = true;
-  render();
-  try {
-    const session = await api(mode === "register" ? "/auth/register" : "/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        mode === "register"
-          ? { username, password, display_name: displayName || undefined }
-          : { username, password },
-      ),
-    });
-    saveAuthSession(session);
-    state.loading = true;
-    await loadData();
-  } catch (error) {
-    state.error = error.message || "Sign-in failed";
-  } finally {
-    state.authSubmitting = false;
-    if (!state.auth.accessToken) render();
-  }
 }
 
 function showToast(message) {
@@ -4481,11 +4369,6 @@ function applyCurrentLanguage() {
 }
 
 function render() {
-  if (!state.auth.accessToken) {
-    app.innerHTML = renderAuthPage();
-    applyCurrentLanguage();
-    return;
-  }
   const route = routes.find((item) => item.id === state.route) ?? routes[0];
   const primaryAction = getPrimaryAction();
   const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "assistant", "admin", "settings"].includes(state.route);
@@ -4655,7 +4538,6 @@ function renderSidebar() {
       <p class="nav-group-label">生活小事</p>${item("tasks", "待办", "check")}${item("diary", "日记", "book")}
       <p class="nav-group-label">管理</p>${item("admin", "管理员", "database")}${item("settings", "设置", "settings")}
     </nav><div class="simple-sidebar-note">${icon("check-circle")}每笔收支，由你确认。</div>
-    <button class="button ghost" type="button" data-auth-logout>${icon("log-out")}Sign out</button>
   </aside>`;
 }
 
@@ -4677,9 +4559,7 @@ function renderPage() {
   if (state.route === "diary") return renderDiaryMobilePage();
   if (state.route === "assistant") return renderAssistantPage();
   if (state.route === "admin") {
-    return state.auth.user?.role === "admin"
-      ? renderAdminPage()
-      : renderSimpleEmpty("Access denied", "This account does not have RAG administration permission.");
+    return renderAdminPage();
   }
   if (state.route === "settings") return renderProfilePage();
   return renderDashboard();
@@ -6027,44 +5907,6 @@ function renderDiaryPage() {
       </section>
     </div>
   `;
-}
-
-function renderAuthPage() {
-  const message = state.error ? '<p class="error">' + escapeHtml(state.error) + "</p>" : "";
-  const disabled = state.authSubmitting ? "disabled" : "";
-  const setupRequired = state.authBootstrap?.setup_required === true;
-  const mode = setupRequired ? "register" : state.authMode;
-  const passwordMinLength = mode === "register" ? Number(state.authBootstrap?.password_min_length || 10) : 1;
-  const modeField = setupRequired
-    ? '<input type="hidden" name="mode" value="register">'
-    : '<div class="field full"><label for="auth_mode">Account action</label><select id="auth_mode" name="mode" data-auth-mode><option value="login"' + (mode === "login" ? " selected" : "") + '>Sign in</option><option value="register"' + (mode === "register" ? " selected" : "") + '>Create account</option></select></div>';
-  const displayNameField = mode === "register"
-    ? '<div class="field full"><label for="auth_display_name">Display name (optional)</label><input id="auth_display_name" name="display_name" maxlength="80" autocomplete="name"></div>'
-    : "";
-  const title = setupRequired ? "Create administrator account" : mode === "register" ? "Create account" : "Sign in";
-  const subtitle = setupRequired
-    ? "This is the first use. The first account becomes an administrator and takes ownership of existing local records."
-    : "Bills, tasks, and diaries are visible only in the signed-in account.";
-  const hint = mode === "register"
-    ? "Usernames may use letters, numbers, dots, underscores, and hyphens. Passwords need at least " + passwordMinLength + " characters."
-    : "Use an account that has already been created.";
-  return [
-    '<main class="main mobile-main" id="main-content">',
-    '<section class="surface" style="max-width:480px;margin:48px auto;">',
-    "<h1>LifeSnap</h1>",
-    "<h2>" + title + "</h2>",
-    "<p>" + subtitle + "</p>",
-    message,
-    '<form data-auth-form class="settings-form">',
-    modeField,
-    '<div class="field full"><label for="auth_username">Username</label><input id="auth_username" name="username" autocomplete="username" minlength="3" maxlength="40" required></div>',
-    '<div class="field full"><label for="auth_password">Password</label><input id="auth_password" name="password" type="password" autocomplete="' + (mode === "register" ? "new-password" : "current-password") + '" minlength="' + passwordMinLength + '" maxlength="200" required></div>',
-    displayNameField,
-    '<div class="form-actions"><button class="button primary" type="submit" ' + disabled + ">" + (state.authSubmitting ? "Please wait..." : mode === "register" ? "Create and continue" : "Sign in") + "</button></div>",
-    "</form>",
-    '<p class="form-hint">' + hint + "</p>",
-    "</section></main>",
-  ].join("");
 }
 
 function renderAdminPage() {

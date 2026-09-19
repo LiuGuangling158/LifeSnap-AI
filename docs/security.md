@@ -1,37 +1,31 @@
 # Security And Access Control
 
-## Authentication
+## Local Single-user Mode
 
-LifeSnap uses username and password accounts. Passwords are salted and derived
-with scrypt; the database never stores a plaintext password. Successful login
-and registration return an HMAC-signed bearer session. Set
-LIFESNAP_AUTH_SESSION_SECRET to a long, unique secret in every deployed
-environment and rotate it to invalidate existing sessions when needed.
+LifeSnap currently runs as a local single-user application. It does not expose
+registration, login, or user bearer-session endpoints, and its business APIs
+operate on the device's shared local workspace.
 
-The first account in a new local database is assigned the admin role so an
-operator can initialize the RAG knowledge base. Later self-registered accounts
-receive the user role. Public deployments should place registration behind an
-approved onboarding flow before exposing the service.
+Do not expose this profile directly to an untrusted network. A future
+multi-user deployment needs a separate authentication, authorization, and data
+isolation design before it can safely serve more than one person.
 
-## Authorization And Isolation
+## RAG Administration
 
-All business APIs except /health and /auth/* require a bearer session. Bills,
-tasks, diaries, attachments, pending Agent candidates, settings, idempotency
-records, audit events and data exports are scoped to the authenticated account.
-The migration assigns pre-auth local data to the first account that is
-registered.
+RAG knowledge reads are available in the local workspace. Updating, resetting,
+or rolling back the shared RAG knowledge base requires a short-lived
+administrator session. `POST /agent/admin-session` exchanges the configured
+`LIFESNAP_ADMIN_KEY` for that session; write requests send it as an
+`Authorization: Bearer <admin-session-token>` header.
 
-Only admin accounts may update, reset or roll back the shared RAG knowledge
-base. Normal users can retrieve knowledge used by their own Agent sessions, but
-cannot change it. The optional historic admin key endpoint does not bypass
-application login or the admin role.
+The optional local admin-key reveal endpoint remains disabled by default. It
+requires `LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true` and a localhost request.
 
 ## Operational Notes
 
-SQLite is a local/single-node persistence profile. Its ownership migration is
-transactional and the application serializes user-scoped store reloads to avoid
-cross-account state in the local runtime. Use PostgreSQL plus a database-backed
-session/revocation strategy before horizontally scaling the API.
+SQLite is a local/single-node persistence profile. Use PostgreSQL, an identity
+provider, authorization policies, and database-backed session/revocation
+strategy before horizontally scaling or enabling multi-user access.
 
-Automated smoke tests cover anonymous rejection, first-admin bootstrap,
-ordinary-user RAG denial and bidirectional bill isolation between two accounts.
+Automated smoke tests cover unauthenticated single-user access, administrator
+session enforcement for RAG writes, and core data workflows.

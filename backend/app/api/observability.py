@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Query, Response
 
-from app.schemas.auth import AuthUser
+from app.core.user_context import current_owner_id
 from app.schemas.observability import (
     AgentExecutionTraceListResponse,
     MonitoringSummary,
 )
-from app.services.auth_service import require_current_user
 from app.services.observability_service import observability_service
 
 
@@ -15,17 +14,15 @@ metrics_router = APIRouter(tags=["observability"])
 
 @router.get("/summary", response_model=MonitoringSummary)
 def get_monitoring_summary(
-    user: AuthUser = Depends(require_current_user),
 ) -> MonitoringSummary:
-    return observability_service.summary(owner_id=user.user_id)
+    return observability_service.summary(owner_id=current_owner_id())
 
 
 @router.get("/agent-traces", response_model=AgentExecutionTraceListResponse)
 def list_agent_traces(
     limit: int = Query(default=20, ge=1, le=200),
-    user: AuthUser = Depends(require_current_user),
 ) -> AgentExecutionTraceListResponse:
-    return observability_service.list_agent_traces(owner_id=user.user_id, limit=limit)
+    return observability_service.list_agent_traces(owner_id=current_owner_id(), limit=limit)
 
 
 @metrics_router.get("/metrics", include_in_schema=False)

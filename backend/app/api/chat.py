@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
+from app.core.user_context import current_owner_id
 from app.schemas.bill import BillRead
 from app.schemas.diary import DiaryRead
 from app.schemas.chat import (
@@ -33,7 +34,7 @@ def send_message(payload: ChatMessageRequest, request: Request) -> ChatMessageRe
     observability_service.record_agent_response(
         response,
         request_id=getattr(request.state, "request_id", None),
-        owner_id=getattr(request.state, "user_id", "legacy-local"),
+        owner_id=current_owner_id(),
         duration_ms=(perf_counter() - started) * 1000,
     )
     audit_log_store.record(

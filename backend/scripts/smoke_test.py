@@ -500,7 +500,7 @@ def _run_isolated_smoke(data_dir: str) -> int:
 
 def _run_checks(client: ApiClient) -> None:
     _check_health(client)
-    _check_authentication_and_data_isolation(client)
+    _check_single_user_access(client)
     _check_standard_error_responses(client)
     _check_demo_data_seed(client)
     _check_app_bootstrap(client)
@@ -559,92 +559,36 @@ def _check_observability(client: ApiClient) -> None:
     _assert("lifesnap_agent_executions_total" in metrics, "Prometheus metrics should expose Agent counters")
 
 
-def _check_authentication_and_data_isolation(client: ApiClient) -> None:
-    status, body = client.request("GET", "/bills")
-    _assert(status == 401, "Protected business APIs must reject anonymous requests")
-    _assert(body["detail"] == "Authentication required", "Anonymous rejection message changed")
+def _check_single_user_access(client: ApiClient) -> None:
+    status, bills = client.request("GET", "/bills")
+    _assert(status == 200, "Single-user business APIs must not require a login token")
+    _assert("items" in bills, "Bill list should be available without user authentication")
 
-    status, auth_bootstrap = client.request("GET", "/auth/bootstrap")
-    _assert(status == 200 and auth_bootstrap["setup_required"], "Fresh installations should require account setup")
-
-    status, admin_session = client.request(
-        "POST",
-        "/auth/register",
-        {
-            "username": "smoke-admin",
-            "password": "smoke-admin-password",
-            "display_name": "Smoke Administrator",
-        },
-    )
-    _assert(status == 201, "First account registration should return 201")
-    _assert(admin_session["user"]["role"] == "admin", "First registered account should be an admin")
-    client.default_headers = {"Authorization": f"Bearer {admin_session['access_token']}"}
-
-    status, auth_bootstrap = client.request("GET", "/auth/bootstrap")
-    _assert(status == 200 and not auth_bootstrap["setup_required"], "Account setup should complete after first registration")
-
-    status, current_user = client.request("GET", "/auth/me")
-    _assert(status == 200 and current_user["role"] == "admin", "Current session should identify the admin")
-
-    status, admin_bill = client.request(
-        "POST",
-        "/bills",
-        {
-            "amount": "42.00",
-            "merchant": "Owner A only",
-            "category": "其他",
-            "transaction_type": "expense",
-            "source": "manual",
-        },
-    )
-    _assert(status == 201, "Admin isolation fixture should be created")
-
-    second_client = ApiClient(client.base_url)
-    status, user_session = second_client.request(
-        "POST",
-        "/auth/register",
-        {
-            "username": "smoke-user",
-            "password": "smoke-user-password",
-            "display_name": "Smoke User",
-        },
-    )
-    _assert(status == 201, "Second account registration should return 201")
-    _assert(user_session["user"]["role"] == "user", "Later accounts should not receive the admin role")
-    second_client.default_headers = {"Authorization": f"Bearer {user_session['access_token']}"}
-
-    status, other_bills = second_client.request("GET", "/bills")
-    _assert(status == 200, "Second account should access its own bill list")
-    _assert(
-        all(bill["id"] != admin_bill["id"] for bill in other_bills["items"]),
-        "A user must not see another user's bills",
-    )
-    status, _ = second_client.request(
+    status, _ = client.request(
         "PUT",
         "/agent/knowledge/documents",
         {"documents": []},
     )
-    _assert(status == 403, "A non-admin user must not modify the RAG knowledge base")
+    _assert(status == 403, "RAG knowledge writes must still require an administrator session")
 
-    status, user_bill = second_client.request(
+    status, bill = client.request(
         "POST",
         "/bills",
         {
-            "amount": "17.00",
-            "merchant": "Owner B only",
+            "amount": "42.00",
+            "merchant": "Single-user access fixture",
             "category": "其他",
             "transaction_type": "expense",
             "source": "manual",
         },
     )
-    _assert(status == 201, "User isolation fixture should be created")
-    status, admin_bills = client.request("GET", "/bills")
+    _assert(status == 201, "Single-user bill fixture should be created")
+    status, visible_bills = client.request("GET", "/bills")
     _assert(
-        all(bill["id"] != user_bill["id"] for bill in admin_bills["items"]),
-        "An admin must not see another user's personal bills",
+        any(item["id"] == bill["id"] for item in visible_bills["items"]),
+        "Created bills should remain visible in the single-user workspace",
     )
-    second_client.request("DELETE", f"/bills/{user_bill['id']}")
-    client.request("DELETE", f"/bills/{admin_bill['id']}")
+    client.request("DELETE", f"/bills/{bill['id']}")
 
 
 def _check_diary_csv_export(client: ApiClient) -> None:
@@ -1178,7 +1122,7 @@ def _check_agent_knowledge_admin(client: ApiClient) -> None:
         "keywords": ["奶茶", "果茶", "管理员新增知识"],
         "enabled": True,
     }
-    admin_headers: dict[str, str] = {}
+    admin_headers = {"Authorization": f"Bearer {session['token']}"}
     status, updated = client.request(
         "PUT",
         "/agent/knowledge/documents",

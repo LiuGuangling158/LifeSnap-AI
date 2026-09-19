@@ -33,7 +33,6 @@ from app.schemas.agent import (
 )
 from app.schemas.task import TaskRead
 from app.services.admin_auth_service import admin_auth_service
-from app.services.auth_service import require_admin_user
 from app.services.audit_log_store import audit_log_store
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_runtime_service import agent_runtime_service
@@ -53,12 +52,14 @@ _LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def require_admin_api_key(
-    _: object = Depends(require_admin_user),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> None:
-    # RAG writes are authorized by the authenticated application account.
-    # The historic local key can create a short session for compatibility, but
-    # cannot bypass normal user authentication or the admin role.
-    return None
+    if admin_auth_service.validate_bearer(authorization):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Administrator session required",
+    )
 
 
 def require_local_key_reveal(request: Request) -> None:
@@ -101,7 +102,6 @@ def list_agent_knowledge_documents() -> AgentKnowledgeBaseResponse:
 @router.get("/admin-key", response_model=AgentAdminKeyRevealResponse)
 def reveal_admin_key(
     request: Request,
-    admin: object = Depends(require_admin_user),
     local_guard: None = Depends(require_local_key_reveal),
 ) -> AgentAdminKeyRevealResponse:
     audit_log_store.record(
@@ -121,7 +121,6 @@ def reveal_admin_key(
 def create_admin_session(
     payload: AgentAdminSessionCreateRequest,
     request: Request,
-    admin: object = Depends(require_admin_user),
 ) -> AgentAdminSessionResponse:
     if not settings.admin_api_key:
         raise HTTPException(
