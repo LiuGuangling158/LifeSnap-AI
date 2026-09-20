@@ -231,6 +231,7 @@ const state = {
   tagSettings: null,
   adminKnowledge: null,
   adminKnowledgeDraft: "[]",
+  adminKnowledgeEditorDocuments: [],
   adminKnowledgeSearchQuery: "",
   adminKnowledgeSearchResults: [],
   adminKnowledgeAdminKey: "",
@@ -313,13 +314,21 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  if (event.target.closest("[data-admin-knowledge-copy]")) {
-    copyAdminKnowledgeJson();
+  const knowledgeTemplateButton = event.target.closest("[data-admin-knowledge-add]");
+  if (knowledgeTemplateButton) {
+    addAdminKnowledgeDocument(knowledgeTemplateButton.dataset.adminKnowledgeAdd);
     return;
   }
 
-  if (event.target.closest("[data-admin-knowledge-download]")) {
-    downloadAdminKnowledgeJson();
+  const knowledgeRemoveButton = event.target.closest("[data-admin-knowledge-remove]");
+  if (knowledgeRemoveButton) {
+    removeAdminKnowledgeDocument(Number(knowledgeRemoveButton.dataset.adminKnowledgeRemove));
+    return;
+  }
+
+  const knowledgeDuplicateButton = event.target.closest("[data-admin-knowledge-duplicate]");
+  if (knowledgeDuplicateButton) {
+    duplicateAdminKnowledgeDocument(Number(knowledgeDuplicateButton.dataset.adminKnowledgeDuplicate));
     return;
   }
 
@@ -1241,7 +1250,27 @@ function setAdminKnowledge(knowledge) {
     documents,
     versions: Array.isArray(knowledge?.versions) ? knowledge.versions : [],
   };
+  state.adminKnowledgeEditorDocuments = documents
+    .filter((document) => document.source === "admin")
+    .map(toAdminKnowledgeEditorDocument);
   state.adminKnowledgeDraft = serializeAdminKnowledgeDocuments(documents);
+}
+
+function toAdminKnowledgeEditorDocument(document = {}) {
+  const tags = Array.isArray(document.tags) ? document.tags : [];
+  return {
+    source_id: String(document.source_id || createAdminKnowledgeSourceId()),
+    title: String(document.title || ""),
+    content: String(document.content || ""),
+    primary_tag: String(tags[0] || "bill"),
+    extra_tags: tags.slice(1),
+    keywords: Array.isArray(document.keywords) ? document.keywords : [],
+    enabled: document.enabled !== false,
+  };
+}
+
+function createAdminKnowledgeSourceId() {
+  return `admin-${crypto.randomUUID()}`;
 }
 
 function serializeAdminKnowledgeDocuments(documents = []) {
@@ -1313,9 +1342,7 @@ async function searchAdminKnowledge(formData) {
 async function submitAdminKnowledge(formData) {
   if (state.saving) return;
   const adminKey = String(formData.get("admin_key") || state.adminKnowledgeAdminKey || "").trim();
-  const draft = String(formData.get("documents_json") || "").trim() || "[]";
   state.adminKnowledgeAdminKey = adminKey;
-  state.adminKnowledgeDraft = draft;
   if (!adminKey) {
     showToast("请输入管理员密钥。需要与后端 LIFESNAP_ADMIN_KEY 一致。");
     return;
@@ -1323,9 +1350,9 @@ async function submitAdminKnowledge(formData) {
 
   let documents;
   try {
-    documents = parseAdminKnowledgeDraft(draft);
+    documents = collectAdminKnowledgeEditorDocuments();
   } catch (error) {
-    showToast(error.message || "知识库 JSON 格式不正确");
+    showToast(error.message || "请补全每条知识规则的标题和正文。");
     return;
   }
 
@@ -1347,6 +1374,110 @@ async function submitAdminKnowledge(formData) {
     state.saving = false;
     render();
   }
+}
+
+function collectAdminKnowledgeEditorDocuments() {
+  const form = document.querySelector("[data-admin-knowledge-form]");
+  const entries = Array.from(form?.querySelectorAll("[data-admin-knowledge-entry]") || []);
+  const editorDocuments = entries.map((entry, index) => {
+    const value = (name) => String(entry.querySelector(`[name="${name}"]`)?.value || "").trim();
+    const primaryTag = value("primary_tag") || "admin";
+    return {
+      source_id: String(entry.dataset.sourceId || createAdminKnowledgeSourceId()),
+      title: value("title"),
+      content: value("content"),
+      tags: [primaryTag, ...parseLabelInput(value("extra_tags"), 7)],
+      keywords: parseLabelInput(value("keywords"), 24),
+      enabled: Boolean(entry.querySelector('[name="enabled"]')?.checked),
+    };
+  });
+  const documents = editorDocuments.map(normalizeAdminKnowledgeDocumentInput);
+  state.adminKnowledgeEditorDocuments = editorDocuments.map((document) => ({
+    ...document,
+    primary_tag: document.tags[0] || "admin",
+    extra_tags: document.tags.slice(1),
+  }));
+  state.adminKnowledgeDraft = JSON.stringify(documents);
+  return documents;
+}
+
+function syncAdminKnowledgeEditorDocuments() {
+  const form = document.querySelector("[data-admin-knowledge-form]");
+  if (!form) return;
+  const entries = Array.from(form.querySelectorAll("[data-admin-knowledge-entry]"));
+  state.adminKnowledgeEditorDocuments = entries.map((entry) => ({
+    source_id: String(entry.dataset.sourceId || createAdminKnowledgeSourceId()),
+    title: String(entry.querySelector('[name="title"]')?.value || ""),
+    content: String(entry.querySelector('[name="content"]')?.value || ""),
+    primary_tag: String(entry.querySelector('[name="primary_tag"]')?.value || "admin"),
+    extra_tags: parseLabelInput(entry.querySelector('[name="extra_tags"]')?.value || "", 7),
+    keywords: parseLabelInput(entry.querySelector('[name="keywords"]')?.value || "", 24),
+    enabled: Boolean(entry.querySelector('[name="enabled"]')?.checked),
+  }));
+}
+
+function addAdminKnowledgeDocument(template = "bill") {
+  syncAdminKnowledgeEditorDocuments();
+  if (state.adminKnowledgeEditorDocuments.length >= 50) {
+    showToast("管理员规则最多保存 50 条。");
+    return;
+  }
+  state.adminKnowledgeEditorDocuments.push(createAdminKnowledgeEditorDocument(template));
+  render();
+}
+
+function duplicateAdminKnowledgeDocument(index) {
+  syncAdminKnowledgeEditorDocuments();
+  const source = state.adminKnowledgeEditorDocuments[index];
+  if (!source) return;
+  state.adminKnowledgeEditorDocuments.splice(index + 1, 0, {
+    ...source,
+    source_id: createAdminKnowledgeSourceId(),
+    title: source.title ? `${source.title}（副本）` : "",
+  });
+  render();
+}
+
+function removeAdminKnowledgeDocument(index) {
+  syncAdminKnowledgeEditorDocuments();
+  if (!state.adminKnowledgeEditorDocuments[index]) return;
+  state.adminKnowledgeEditorDocuments.splice(index, 1);
+  render();
+}
+
+function createAdminKnowledgeEditorDocument(template = "bill") {
+  const presets = {
+    bill: {
+      title: "",
+      content: "",
+      primary_tag: "bill",
+      keywords: [],
+    },
+    task: {
+      title: "",
+      content: "",
+      primary_tag: "task",
+      keywords: [],
+    },
+    diary: {
+      title: "",
+      content: "",
+      primary_tag: "diary",
+      keywords: [],
+    },
+    policy: {
+      title: "",
+      content: "",
+      primary_tag: "privacy",
+      keywords: [],
+    },
+  };
+  return {
+    source_id: createAdminKnowledgeSourceId(),
+    extra_tags: [],
+    enabled: true,
+    ...(presets[template] || presets.bill),
+  };
 }
 
 async function resetAdminKnowledge() {
@@ -6104,7 +6235,6 @@ function renderAdminPage() {
   };
   const documents = Array.isArray(knowledge.documents) ? knowledge.documents : [];
   const adminDocuments = documents.filter((document) => document.source === "admin");
-  const knowledgeJson = serializeAllKnowledgeDocuments(documents);
   const versions = Array.isArray(knowledge.versions) ? knowledge.versions : [];
   const searchResults = state.adminKnowledgeSearchResults ?? [];
   return `
@@ -6130,22 +6260,7 @@ function renderAdminPage() {
           ${diagnosticMetric("管理员知识", knowledge.admin_count ?? 0, adminDocuments.length ? "warning" : "fallback")}
           ${diagnosticMetric("最近刷新", formatDate(knowledge.generated_at), "info")}
         </div>
-        <p class="admin-note">管理员知识写入 <code>backend/data/agent_knowledge.json</code>；同名 source_id 会覆盖内置知识，enabled=false 会禁用该知识。</p>
-      </section>
-
-      <section class="surface admin-knowledge-reader-panel">
-        <div class="simple-section-heading">
-          <div>
-            <h2>现有知识库内容</h2>
-            <p>这里是当前实际参与 RAG 检索的完整内容（内置 + 管理员覆盖），只读查看。</p>
-          </div>
-          <div class="action-row">
-            <button class="button ghost" type="button" data-admin-knowledge-copy ${documents.length ? "" : "disabled"}>${icon("copy")}复制 JSON</button>
-            <button class="button ghost" type="button" data-admin-knowledge-download ${documents.length ? "" : "disabled"}>${icon("download")}下载 JSON</button>
-          </div>
-        </div>
-        <textarea class="admin-knowledge-readonly" readonly rows="12" spellcheck="false">${escapeHtml(knowledgeJson)}</textarea>
-        <p class="form-hint">如果这里有内容而下方编辑框是 []，说明当前只有内置知识，还没有管理员自定义条目。</p>
+        <p class="admin-note">知识规则会安全保存在应用数据库中，并在下一次 Agent 对话时参与 RAG 检索。保存前可以随时测试检索结果。</p>
       </section>
 
       <section class="surface admin-knowledge-search-panel">
@@ -6183,8 +6298,8 @@ function renderAdminPage() {
       <section class="surface admin-knowledge-editor-panel">
         <div class="simple-section-heading">
           <div>
-            <h2>编辑管理员知识</h2>
-            <p>这里不是现有知识库全文，只编辑管理员自定义条目；内置知识保留在代码里，必要时可用相同 source_id 覆盖。</p>
+            <h2>知识规则编辑器</h2>
+            <p>按规则逐条填写即可。标题、适用场景、正文和关键词都会用于 RAG 检索，不需要编辑 JSON 或文件。</p>
           </div>
           <button class="button ghost" type="button" data-admin-knowledge-reset ${state.saving ? "disabled" : ""}>
             ${icon("reset")}恢复内置知识
@@ -6209,15 +6324,20 @@ function renderAdminPage() {
             <small class="form-hint">${escapeHtml(adminSessionStatusText())}</small>
           </div>
           <div class="field full">
-            <label for="admin_knowledge_json">知识库 JSON <small>数组格式，最多 50 条</small></label>
-            <textarea id="admin_knowledge_json" name="documents_json" class="admin-knowledge-editor" spellcheck="false" rows="14" placeholder="[]">${escapeHtml(state.adminKnowledgeDraft || "[]")}</textarea>
-          </div>
-          <details class="simple-details admin-json-example">
-            <summary><span>${icon("file-text")}JSON 示例</span><small>source_id、title、content 必填 ${icon("chevron-right")}</small></summary>
-            <div class="simple-details-content">
-              <pre><code>${escapeHtml(adminKnowledgeExampleJson())}</code></pre>
+            <div class="admin-rule-toolbar">
+              <div>
+                <strong>管理员规则</strong>
+                <small>每条规则可独立启用、复制或移除。内置规则始终保留在下方目录中。</small>
+              </div>
+              <div class="action-row">
+                <button class="button ghost" type="button" data-admin-knowledge-add="bill">${icon("plus")}账单规则</button>
+                <button class="button ghost" type="button" data-admin-knowledge-add="task">${icon("plus")}待办规则</button>
+                <button class="button ghost" type="button" data-admin-knowledge-add="diary">${icon("plus")}日记规则</button>
+                <button class="button ghost" type="button" data-admin-knowledge-add="policy">${icon("plus")}通用规则</button>
+              </div>
             </div>
-          </details>
+            ${renderAdminKnowledgeEditorDocuments(state.adminKnowledgeEditorDocuments)}
+          </div>
           <div class="form-actions">
             <button class="button ghost" type="button" data-admin-knowledge-refresh ${state.adminKnowledgeLoading ? "disabled" : ""}>重新读取</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>${icon("save")}${state.saving ? "保存中..." : "保存知识库"}</button>
@@ -6279,6 +6399,81 @@ function adminKnowledgeVersionActionLabel(action) {
     reset: "重置",
     rollback: "回滚",
   }[action] ?? action ?? "版本";
+}
+
+function renderAdminKnowledgeEditorDocuments(documents) {
+  if (!documents.length) {
+    return `
+      <div class="admin-rule-empty">
+        <strong>还没有自定义规则</strong>
+        <p>从上方选择一种规则类型开始。保存后，Agent 会在下一次对话中参考它。</p>
+      </div>
+    `;
+  }
+  return `
+    <div class="admin-rule-editor-list">
+      ${documents.map(renderAdminKnowledgeEditorDocument).join("")}
+    </div>
+  `;
+}
+
+function renderAdminKnowledgeEditorDocument(document, index) {
+  const primaryTag = String(document.primary_tag || "admin");
+  const extraTags = Array.isArray(document.extra_tags) ? document.extra_tags.join("、") : "";
+  const keywords = Array.isArray(document.keywords) ? document.keywords.join("、") : "";
+  const tagOptions = [
+    ["bill", "账单与消费"],
+    ["task", "待办与提醒"],
+    ["diary", "日记与生活"],
+    ["privacy", "隐私与数据"],
+    ["agent", "Agent 工作流"],
+    ["admin", "通用业务规则"],
+  ];
+  return `
+    <article class="admin-rule-editor" data-admin-knowledge-entry data-source-id="${escapeHtml(document.source_id)}">
+      <div class="admin-rule-editor-head">
+        <div>
+          <strong>规则 ${index + 1}</strong>
+          <small>保存前可继续修改，编号由系统维护。</small>
+        </div>
+        <div class="action-row">
+          <button class="icon-button" type="button" title="复制规则" aria-label="复制规则" data-admin-knowledge-duplicate="${index}">${icon("copy")}</button>
+          <button class="icon-button danger" type="button" title="移除规则" aria-label="移除规则" data-admin-knowledge-remove="${index}">${icon("trash")}</button>
+        </div>
+      </div>
+      <div class="admin-rule-field-grid">
+        <label class="field">
+          <span>规则标题</span>
+          <input name="title" maxlength="80" required placeholder="例如：奶茶消费分类" value="${escapeHtml(document.title)}" />
+        </label>
+        <label class="field">
+          <span>适用场景</span>
+          <select name="primary_tag">
+            ${tagOptions.map(([value, label]) => `<option value="${value}" ${primaryTag === value ? "selected" : ""}>${label}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field">
+          <span>检索关键词</span>
+          <input name="keywords" maxlength="360" placeholder="例如：奶茶、果茶、咖啡" value="${escapeHtml(keywords)}" />
+          <small>用顿号、逗号或换行分隔。</small>
+        </label>
+        <label class="field">
+          <span>补充标签</span>
+          <input name="extra_tags" maxlength="320" placeholder="例如：分类、饮品" value="${escapeHtml(extraTags)}" />
+          <small>可选，用于补充检索范围。</small>
+        </label>
+      </div>
+      <label class="field full">
+        <span>规则正文</span>
+        <textarea name="content" rows="5" maxlength="2000" required placeholder="用自然语言写清楚：遇到什么情况，Agent 应该如何判断或回答。">${escapeHtml(document.content)}</textarea>
+        <small>建议写成完整规则，包含判断条件和处理方式。</small>
+      </label>
+      <div class="admin-rule-switch">
+        <label><input type="checkbox" name="enabled" ${document.enabled !== false ? "checked" : ""} /> 此规则启用</label>
+        <small>停用后会保留在版本历史中，但不会参与 RAG 检索。</small>
+      </div>
+    </article>
+  `;
 }
 
 function renderAdminKnowledgeDocuments(documents) {

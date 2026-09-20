@@ -14,7 +14,11 @@ let server, browser, serverLog = "";
 async function main() {
   const port = await new Promise(resolve => { const listener = net.createServer(); listener.listen(0, "127.0.0.1", () => { const port = listener.address().port; listener.close(() => resolve(port)); }); });
   const base = `http://127.0.0.1:${port}`;
-  const env = { ...process.env, LIFESNAP_DATA_DIR: path.join(runDir, "data") };
+  const env = {
+    ...process.env,
+    LIFESNAP_DATA_DIR: path.join(runDir, "data"),
+    LIFESNAP_ADMIN_KEY: "ui-admin-key",
+  };
   for (const key of Object.keys(env)) if (/^LIFESNAP_(OCR|AI_PARSE|LLM)_/.test(key)) delete env[key];
   server = spawn(python, ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(port)], { cwd: path.join(root, "backend"), env, windowsHide: true });
   server.stdout.on("data", data => { serverLog += data; });
@@ -101,6 +105,19 @@ async function main() {
   await route("reports");
   assert(await page.getByRole("heading", { name: "月度报告", exact: true }).isVisible());
   await page.locator(".report-summary").waitFor();
+
+  await route("admin");
+  assert(await page.getByRole("heading", { name: "管理员页面", exact: true }).isVisible());
+  await page.locator("#admin_key").fill("ui-admin-key");
+  await page.getByRole("button", { name: "建立会话", exact: true }).click();
+  await page.getByRole("button", { name: "会话有效", exact: true }).waitFor();
+  await page.getByRole("button", { name: "账单规则", exact: true }).click();
+  await page.locator("[data-admin-knowledge-entry]").waitFor();
+  await page.locator('[data-admin-knowledge-entry] [name="title"]').fill("饮品消费分类");
+  await page.locator('[data-admin-knowledge-entry] [name="content"]').fill("奶茶和咖啡店饮品默认归类为餐饮。");
+  await page.getByRole("button", { name: "保存知识库", exact: true }).click();
+  await page.getByText("饮品消费分类", { exact: true }).last().waitFor();
+  assert.equal(await page.locator(".admin-knowledge-editor").count(), 0);
 
   await route("tasks");
   await page.getByRole("button", { name: "添加事项", exact: true }).click();
