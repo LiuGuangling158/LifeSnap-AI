@@ -109,8 +109,6 @@ async function main() {
   await route("admin");
   assert(await page.getByRole("heading", { name: "管理员页面", exact: true }).isVisible());
   await page.locator("#admin_key").fill("ui-admin-key");
-  await page.getByRole("button", { name: "建立会话", exact: true }).click();
-  await page.getByRole("button", { name: "会话有效", exact: true }).waitFor();
   await page.getByRole("button", { name: "账单规则", exact: true }).click();
   await page.locator("[data-admin-knowledge-entry]").waitFor();
   await page.locator('[data-admin-knowledge-entry] [name="title"]').fill("饮品消费分类");
