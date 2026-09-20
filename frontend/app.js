@@ -32,6 +32,14 @@ const routes = [
     subtitle: "查找、核对和修改每一笔收支。",
   },
   {
+    id: "reports",
+    label: "报告",
+    icon: "pie-chart",
+    eyebrow: "财务洞察",
+    title: "月度报告",
+    subtitle: "用确定性统计查看预算、趋势和异常消费。",
+  },
+  {
     id: "tasks",
     label: "待办",
     icon: "check",
@@ -82,6 +90,7 @@ const defaultBudgetSettings = {
   monthly_budget: 5000,
   currency: "CNY",
   warning_threshold_percent: 80,
+  category_budgets: {},
 };
 
 const defaultTagSettings = {
@@ -214,6 +223,7 @@ const state = {
   },
   bootstrap: null,
   billOverview: null,
+  report: null,
   taskOverview: null,
   snapshotStatus: null,
   categorySettings: null,
@@ -1154,6 +1164,7 @@ async function loadData() {
     const [
       bootstrap,
       billOverview,
+      report,
       billList,
       taskList,
       taskOverview,
@@ -1167,6 +1178,7 @@ async function loadData() {
     ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
+      api("/reports/monthly"),
       api(buildBillListPath()),
       api(buildTaskListPath()),
       api("/tasks/statistics/overview?upcoming_days=7&item_limit=10"),
@@ -1180,6 +1192,7 @@ async function loadData() {
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
+    state.report = report;
     state.bills = billList.items ?? [];
     state.billListMeta = {
       total: billList.total ?? 0,
@@ -3398,6 +3411,11 @@ async function submitBudgetSettings(formData) {
     showToast("预警比例需要在 1 到 100 之间。");
     return;
   }
+  const categoryBudgets = parseCategoryBudgets(formData.get("category_budgets"));
+  if (categoryBudgets === null) {
+    showToast("分类预算格式不正确，请使用“餐饮=1200”的格式。");
+    return;
+  }
 
   state.saving = true;
   render();
@@ -3408,6 +3426,7 @@ async function submitBudgetSettings(formData) {
       body: JSON.stringify({
         monthly_budget: monthlyBudget,
         warning_threshold_percent: Math.round(warningThreshold),
+        category_budgets: categoryBudgets,
       }),
     });
     state.budgetSettings = updated;
@@ -4158,6 +4177,24 @@ function normalizeStoredChatResponse(response) {
   };
 }
 
+function parseCategoryBudgets(value) {
+  const entries = String(value ?? "")
+    .split(/[\n,，;]/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const result = {};
+  for (const entry of entries) {
+    const parts = entry.split(/[=:：]/u).map((item) => item.trim());
+    const category = parts[0];
+    const amount = Number(parts[1]);
+    if (!category || parts.length !== 2 || !Number.isFinite(amount) || amount < 0) {
+      return null;
+    }
+    result[category.slice(0, 40)] = amount;
+  }
+  return result;
+}
+
 function normalizeChatAnalysis(analysis) {
   if (!analysis || typeof analysis !== "object") {
     return null;
@@ -4421,7 +4458,7 @@ function applyCurrentLanguage() {
 function render() {
   const route = routes.find((item) => item.id === state.route) ?? routes[0];
   const primaryAction = getPrimaryAction();
-  const hasCustomHeader = ["dashboard", "bills", "tasks", "diary", "assistant", "admin", "settings"].includes(state.route);
+  const hasCustomHeader = ["dashboard", "bills", "reports", "tasks", "diary", "assistant", "admin", "settings"].includes(state.route);
   app.innerHTML = `
     <div class="app-shell mobile-shell simple-shell">
       ${renderSidebar()}
@@ -4584,7 +4621,8 @@ function renderSidebar() {
   return `<aside class="sidebar simple-sidebar">
     <a class="brand" href="#dashboard" aria-label="LifeSnap 首页"><span class="brand-mark">${icon("wallet")}</span><span><strong class="brand-title">LifeSnap</strong><small class="brand-subtitle">把每一笔，记清楚</small></span></a>
     <nav class="nav" aria-label="主导航">
-      ${item("dashboard", "首页", "home")}${item("bills", "账单", "receipt")}${item("assistant", "AI 帮记", "spark")}
+     ${item("dashboard", "首页", "home")}${item("bills", "账单", "receipt")}${item("assistant", "AI 帮记", "spark")}
+      ${item("dashboard", "首页", "home")}${item("bills", "账单", "receipt")}${item("reports", "报告", "pie-chart")}${item("assistant", "AI 帮记", "spark")}
       <p class="nav-group-label">生活小事</p>${item("tasks", "待办", "check")}${item("diary", "日记", "book")}
       <p class="nav-group-label">管理</p>${item("admin", "管理员", "database")}${item("settings", "设置", "settings")}
     </nav><div class="simple-sidebar-note">${icon("check-circle")}每笔收支，由你确认。</div>
@@ -4604,7 +4642,8 @@ function renderPage() {
     `;
   }
 
-  if (state.route === "bills") return renderBillsPage();
+ if (state.route === "bills") return renderBillsPage();
+  if (state.route === "reports") return renderReportsPage();
   if (state.route === "tasks") return renderTasksPage();
   if (state.route === "diary") return renderDiaryMobilePage();
   if (state.route === "assistant") return renderAssistantPage();
@@ -4650,6 +4689,73 @@ function renderDashboard() {
 
 function renderSimpleEmpty(title, description, action = "") {
   return `<div class="simple-empty">${icon("receipt")}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p>${action}</div>`;
+}
+
+function renderReportsPage() {
+  const report = state.report ?? {};
+  const monthly = report.monthly_statistics ?? {};
+  const alerts = Array.isArray(report.alerts) ? report.alerts : [];
+  const anomalies = Array.isArray(report.anomalies) ? report.anomalies : [];
+  const rules = Array.isArray(report.category_budget_statuses) ? report.category_budget_statuses : [];
+  const insights = Array.isArray(report.insights) ? report.insights : [];
+  const merchants = Array.isArray(report.top_merchants) ? report.top_merchants : [];
+  const budget = Number(report.monthly_budget ?? 0);
+  const usage = Number(report.budget_usage_percentage ?? 0);
+  const remaining = Number(report.budget_remaining ?? 0);
+  const period = String(report.year ?? new Date().getFullYear()) + " 年 " + String(report.month ?? new Date().getMonth() + 1) + " 月";
+  const alertsHtml = alerts.length
+    ? '<div class="report-alert-list">' + alerts.map(renderReportAlert).join("") + "</div>"
+    : '<div class="report-empty">' + icon("check-circle") + "<span>当前没有需要处理的预算提醒。</span></div>";
+  const rulesHtml = rules.length
+    ? '<div class="report-rule-list">' + rules.map(renderReportRule).join("") + "</div>"
+    : '<div class="report-empty">' + icon("pie-chart") + '<span>还没有分类预算规则。</span><button class="text-action" type="button" data-open-budget-settings>去设置</button></div>';
+  const anomaliesHtml = anomalies.length
+    ? '<div class="report-anomaly-list">' + anomalies.map(renderReportAnomaly).join("") + "</div>"
+    : '<div class="report-empty">' + icon("check-circle") + "<span>账单样本中暂无异常消费。</span></div>";
+  const insightsHtml = insights.length
+    ? '<ul class="report-insights">' + insights.map((item) => "<li>" + icon("lightbulb") + "<span>" + escapeHtml(item) + "</span></li>").join("") + "</ul>"
+    : '<div class="report-empty">' + icon("lightbulb") + "<span>记录更多账单后，这里会出现消费洞察。</span></div>";
+  const merchantsHtml = merchants.length
+    ? '<div class="report-merchant-list">' + merchants.map((item) => "<div><span>" + escapeHtml(item.merchant || "未填写") + "</span><strong>" + money(item.amount) + "</strong><small>" + Number(item.count ?? 0) + " 笔 · " + Number(item.percentage ?? 0) + "%</small></div>").join("") + "</div>"
+    : '<div class="report-empty">' + icon("receipt") + "<span>还没有本月商户支出数据。</span></div>";
+  return '<div class="simple-reports">'
+    + '<header class="simple-page-header"><div><p class="simple-kicker">财务洞察</p><h1>月度报告</h1><p>' + escapeHtml(period) + ' 的消费趋势、预算规则和需要留意的支出。</p></div><div class="action-row"><button class="button ghost" type="button" data-open-budget-settings>' + icon("settings") + '预算规则</button><button class="button primary" type="button" data-refresh>' + icon("refresh") + "刷新报告</button></div></header>"
+    + '<section class="surface report-summary" aria-label="月度报告摘要">'
+    + reportMetric("本月支出", money(monthly.total_expense), "expense")
+    + reportMetric("本月收入", money(monthly.total_income), "income")
+    + reportMetric("预算使用", budget > 0 ? String(usage) + "%" : "未设置", budget > 0 && usage >= Number(report.warning_threshold_percent ?? 80) ? "expense" : "mint")
+    + reportMetric("剩余预算", budget > 0 ? money(Math.abs(remaining)) : "设置预算", remaining < 0 ? "expense" : "mint")
+    + "</section>"
+    + '<section class="surface report-alerts"><div class="simple-section-heading"><div><h2>' + icon("bell") + "预算与提醒</h2><p>由本地账单和预算规则计算，不依赖模型生成。</p></div></div>" + alertsHtml + "</section>"
+    + '<div class="report-grid"><section class="surface report-panel"><div class="simple-section-heading"><div><h2>分类预算</h2><p>为常用分类设定限额，提前看到风险。</p></div></div>' + rulesHtml + "</section>"
+    + '<section class="surface report-panel"><div class="simple-section-heading"><div><h2>' + icon("alert-circle") + "异常消费</h2><p>基于本月中位支出与日支出峰值识别。</p></div></div>" + anomaliesHtml + "</section></div>"
+    + '<div class="report-grid"><section class="surface report-panel"><div class="simple-section-heading"><div><h2>本月洞察</h2><p>确定性统计结论，可直接用于月度复盘。</p></div></div>' + insightsHtml + "</section>"
+    + '<section class="surface report-panel"><div class="simple-section-heading"><div><h2>高频商户</h2><p>按本月支出金额排序。</p></div></div>' + merchantsHtml + "</section></div>"
+    + "</div>";
+}
+
+function reportMetric(label, value, tone) {
+  return '<div class="report-metric ' + tone + '"><span>' + escapeHtml(label) + "</span><strong>" + escapeHtml(value) + "</strong></div>";
+}
+
+function renderReportAlert(alert) {
+  const severity = alert.severity === "critical" ? "critical" : "warning";
+  const title = alert.category
+    ? String(alert.category) + " " + (severity === "critical" ? "已超出预算" : "接近预算")
+    : severity === "critical" ? "本月预算已超出" : "本月预算接近预警线";
+  return '<article class="report-alert ' + severity + '">' + icon(severity === "critical" ? "alert-circle" : "bell") + "<div><strong>" + escapeHtml(title) + "</strong><p>" + escapeHtml(alert.message) + "</p></div></article>";
+}
+
+function renderReportRule(rule) {
+  const usage = Math.max(0, Math.min(100, Number(rule.usage_percentage ?? 0)));
+  const status = rule.status === "over_budget" ? "critical" : rule.status === "warning" ? "warning" : "on-track";
+  const label = status === "critical" ? "已超出" : status === "warning" ? "需留意" : "正常";
+  return '<div class="report-rule ' + status + '"><div><strong>' + escapeHtml(rule.category) + "</strong><span>" + money(rule.spent) + " / " + money(rule.budget) + '</span></div><div class="report-rule-track"><i style="width:' + usage + '%"></i></div><small>' + label + " · " + Number(rule.usage_percentage ?? 0) + "%</small></div>";
+}
+
+function renderReportAnomaly(anomaly) {
+  const kind = anomaly.kind === "daily_spike" ? "单日支出峰值" : "大额消费";
+  return '<article class="report-anomaly"><div><strong>' + kind + "</strong><p>" + escapeHtml(anomaly.message) + "</p><small>" + escapeHtml(formatDate(anomaly.occurred_on)) + "</small></div><b>" + money(anomaly.amount) + "</b></article>";
 }
 
 function renderBillsPage() {
@@ -8701,6 +8807,9 @@ function renderBudgetSettingsModal() {
   const expense = Number(monthly.total_expense ?? 0);
   const progress = financeProgress(monthly, budget);
   const remaining = Math.max(0, monthlyBudget - expense);
+  const categoryBudgetText = Object.entries(budget.category_budgets ?? {})
+    .map(([category, amount]) => String(category) + "=" + String(amount))
+    .join("\n");
   return `
     <div class="modal-backdrop" role="presentation">
       <section class="modal compact-modal budget-settings-modal" role="dialog" aria-modal="true" aria-labelledby="budget-settings-title">
@@ -8739,8 +8848,13 @@ function renderBudgetSettingsModal() {
               <input id="warning_threshold_percent" name="warning_threshold_percent" type="number" min="1" max="100" step="1" required
                 value="${escapeHtml(threshold)}" />
             </div>
+            <div class="field full">
+              <label for="category_budgets">分类预算（选填）</label>
+              <textarea id="category_budgets" name="category_budgets" rows="3" maxlength="500"
+                placeholder="餐饮=1200&#10;交通=600">${escapeHtml(categoryBudgetText)}</textarea>
+            </div>
           </div>
-          <p class="form-hint">当预算使用进度达到预警比例时，页面会用支出色提示；当前先支持全局月预算。</p>
+          <p class="form-hint">全局和分类预算达到预警比例时会生成提醒。每行使用“分类=金额”，例如“餐饮=1200”。</p>
           <div class="form-actions">
             <button class="button ghost" type="button" data-close-budget-settings>取消</button>
             <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
@@ -9859,6 +9973,11 @@ function getBudgetSettings() {
     warning_threshold_percent: Number.isFinite(threshold)
       ? Math.min(100, Math.max(1, Math.round(threshold)))
       : defaultBudgetSettings.warning_threshold_percent,
+    category_budgets: Object.fromEntries(
+      Object.entries(source.category_budgets ?? {}).filter(([category, amount]) => {
+        return String(category).trim() && Number.isFinite(Number(amount)) && Number(amount) >= 0;
+      }),
+    ),
   };
 }
 

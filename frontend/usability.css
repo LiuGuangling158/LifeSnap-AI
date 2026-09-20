@@ -283,6 +283,56 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
 }
 .simple-page-header > div:first-child { min-width:0; flex:1; }
 .simple-page-header > .button { width:auto; flex:none; }
+
+.simple-reports { max-width:1120px; }
+.report-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; padding:0; overflow:hidden; }
+.report-metric { min-height:116px; padding:22px; background:#f7faf8; display:flex; flex-direction:column; justify-content:space-between; gap:10px; }
+.report-metric span { color:var(--muted); font-size:13px; }
+.report-metric strong { font-size:25px; line-height:1.1; color:#1f2b26; }
+.report-metric.expense strong { color:#c44c3c; }
+.report-metric.income strong,.report-metric.mint strong { color:#16745d; }
+.report-alerts { margin-top:18px; }
+.report-alert-list,.report-rule-list,.report-anomaly-list,.report-merchant-list { display:grid; gap:10px; }
+.report-alert { display:grid; grid-template-columns:32px minmax(0,1fr); gap:12px; align-items:start; padding:14px; border-left:3px solid #e5b14e; background:#fffaf0; }
+.report-alert.critical { border-color:#d76050; background:#fff5f2; }
+.report-alert > .icon { color:#b9821d; }
+.report-alert.critical > .icon { color:#c44c3c; }
+.report-alert strong,.report-anomaly strong { font-size:14px; color:#24332c; }
+.report-alert p,.report-anomaly p { margin:5px 0 0; color:var(--muted); font-size:13px; line-height:1.55; overflow-wrap:anywhere; }
+.report-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-top:18px; }
+.report-panel { min-width:0; }
+.report-empty { min-height:86px; display:flex; align-items:center; gap:9px; color:var(--muted); font-size:13px; }
+.report-empty .icon { color:#377e69; }
+.report-rule { padding:12px 0; border-bottom:1px solid #e7eee9; }
+.report-rule:last-child { border-bottom:0; padding-bottom:0; }
+.report-rule > div:first-child { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+.report-rule strong { font-size:14px; color:#24332c; }
+.report-rule span,.report-rule small { color:var(--muted); font-size:12px; }
+.report-rule-track { height:6px; margin:9px 0 7px; overflow:hidden; background:#e4ece7; }
+.report-rule-track i { display:block; height:100%; background:#31836a; }
+.report-rule.warning .report-rule-track i { background:#d89a2f; }
+.report-rule.critical .report-rule-track i { background:#d76050; }
+.report-anomaly { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:12px 0; border-bottom:1px solid #e7eee9; }
+.report-anomaly:last-child { border-bottom:0; padding-bottom:0; }
+.report-anomaly > div { min-width:0; }
+.report-anomaly small { color:var(--muted); font-size:12px; }
+.report-anomaly > b { flex:none; color:#c44c3c; font-size:14px; }
+.report-insights { display:grid; gap:12px; padding:0; margin:0; list-style:none; }
+.report-insights li { display:grid; grid-template-columns:21px minmax(0,1fr); gap:9px; color:#41554b; font-size:13px; line-height:1.55; }
+.report-insights .icon { color:#bd7f1c; }
+.report-merchant-list > div { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 12px; padding:11px 0; border-bottom:1px solid #e7eee9; }
+.report-merchant-list > div:last-child { border-bottom:0; padding-bottom:0; }
+.report-merchant-list span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#24332c; font-size:14px; }
+.report-merchant-list strong { color:#24332c; font-size:14px; }
+.report-merchant-list small { grid-column:1/-1; color:var(--muted); font-size:12px; }
+@media (max-width:760px) {
+  .simple-reports .simple-page-header { flex-wrap:wrap; }
+  .simple-reports .simple-page-header .action-row { width:100%; justify-content:flex-start; }
+  .report-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .report-metric { min-height:98px; padding:16px; }
+  .report-metric strong { font-size:21px; }
+  .report-grid { grid-template-columns:minmax(0,1fr); gap:14px; margin-top:14px; }
+}
 @media (max-width:760px) {
   .simple-home .simple-page-header > div { flex-basis:100%; }
   .simple-home .simple-page-header > .button { width:100%; }

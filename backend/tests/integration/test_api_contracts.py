@@ -36,3 +36,46 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("feedback_count", response.json())
+
+    def test_monthly_report_applies_budget_rules_and_detects_anomalies(self) -> None:
+        invalid_budget = self.client.patch(
+            "/settings/budget",
+            json={"category_budgets": {"餐饮": -1}},
+        )
+        self.assertEqual(invalid_budget.status_code, 422)
+
+        budget = self.client.patch(
+            "/settings/budget",
+            json={
+                "monthly_budget": 100,
+                "warning_threshold_percent": 80,
+                "category_budgets": {"餐饮": 50},
+            },
+        )
+        self.assertEqual(budget.status_code, 200)
+
+        for amount, merchant, paid_at in (
+            (60, "测试午餐", "2026-09-10T12:00:00+08:00"),
+            (20, "测试咖啡", "2026-09-11T12:00:00+08:00"),
+            (300, "测试大额消费", "2026-09-12T12:00:00+08:00"),
+        ):
+            response = self.client.post(
+                "/bills",
+                json={
+                    "amount": amount,
+                    "merchant": merchant,
+                    "category": "餐饮",
+                    "transaction_type": "expense",
+                    "paid_at": paid_at,
+                },
+            )
+            self.assertEqual(response.status_code, 201)
+
+        report = self.client.get("/reports/monthly?year=2026&month=9")
+
+        self.assertEqual(report.status_code, 200)
+        payload = report.json()
+        self.assertTrue(payload["alerts"])
+        self.assertEqual(payload["category_budget_statuses"][0]["category"], "餐饮")
+        self.assertEqual(payload["category_budget_statuses"][0]["status"], "over_budget")
+        self.assertTrue(payload["anomalies"])

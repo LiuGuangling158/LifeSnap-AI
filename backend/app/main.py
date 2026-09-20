@@ -17,6 +17,7 @@ from app.api.health import router as health_router
 from app.api.ocr import router as ocr_router
 from app.api.observability import metrics_router, router as observability_router
 from app.api.quality import router as quality_router
+from app.api.reports import router as reports_router
 from app.api.settings import router as settings_router
 from app.api.tasks import router as tasks_router
 from app.core.error_handlers import register_exception_handlers
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(diagnostics_router)
     app.include_router(observability_router)
     app.include_router(quality_router)
+    app.include_router(reports_router)
     app.include_router(ocr_router)
     frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
     if (frontend_dir / "index.html").exists():

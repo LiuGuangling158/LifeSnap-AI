@@ -79,6 +79,7 @@ def update_budget_settings(
             "updated_fields": list(payload.model_dump(exclude_none=True, exclude_unset=True)),
             "monthly_budget": str(settings.monthly_budget),
             "warning_threshold_percent": settings.warning_threshold_percent,
+            "category_budget_count": len(settings.category_budgets),
         },
     )
     return settings

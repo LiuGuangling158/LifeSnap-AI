@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.agent import ParseBillResponse, ParseDiaryResponse, ParseTaskResponse
 from app.schemas.attachment import AttachmentRead, RetentionPolicy
@@ -72,7 +72,21 @@ class BudgetSettings(BaseModel):
     monthly_budget: Decimal = Field(default=Decimal("5000.00"), ge=0)
     currency: str = "CNY"
     warning_threshold_percent: int = Field(default=80, ge=1, le=100)
+    category_budgets: dict[str, Decimal] = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=_now_utc)
+
+    @field_validator("category_budgets")
+    @classmethod
+    def validate_category_budgets(cls, value: dict[str, Decimal]) -> dict[str, Decimal]:
+        normalized: dict[str, Decimal] = {}
+        for category, amount in value.items():
+            label = str(category).strip()
+            if not label or len(label) > 40:
+                raise ValueError("Category budget labels must contain 1 to 40 characters")
+            if amount < 0:
+                raise ValueError("Category budget amounts must not be negative")
+            normalized[label] = amount
+        return normalized
 
 
 class TagSettings(BaseModel):
@@ -95,6 +109,17 @@ class CategorySettingsUpdate(BaseModel):
 class BudgetSettingsUpdate(BaseModel):
     monthly_budget: Decimal | None = Field(default=None, ge=0)
     warning_threshold_percent: int | None = Field(default=None, ge=1, le=100)
+    category_budgets: dict[str, Decimal] | None = None
+
+    @field_validator("category_budgets")
+    @classmethod
+    def validate_category_budgets(
+        cls,
+        value: dict[str, Decimal] | None,
+    ) -> dict[str, Decimal] | None:
+        if value is None:
+            return None
+        return BudgetSettings(category_budgets=value).category_budgets
 
 
 class TagSettingsUpdate(BaseModel):

@@ -96,7 +96,11 @@ async function main() {
   await page.getByRole("button", { name: "完成修改", exact: true }).click(); await page.getByRole("dialog").waitFor({ state: "detached" });
   await page.getByRole("button", { name: "保存这笔账", exact: true }).click(); await page.getByText("账单已保存", { exact: true }).last().waitFor();
   assert.equal((await allBills()).total, before + 1);
-  assert((await allBills()).items.some(bill => bill.merchant === "沙县小吃" && Number(bill.amount) === 30));
+ assert((await allBills()).items.some(bill => bill.merchant === "沙县小吃" && Number(bill.amount) === 30));
+
+  await route("reports");
+  assert(await page.getByRole("heading", { name: "月度报告", exact: true }).isVisible());
+  await page.locator(".report-summary").waitFor();
 
   await route("tasks");
   await page.getByRole("button", { name: "添加事项", exact: true }).click();
@@ -122,7 +126,7 @@ async function main() {
   await page.getByRole("dialog").waitFor({ state: "detached" });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const id of ["dashboard", "bills", "assistant", "settings", "tasks", "diary"]) {
+  for (const id of ["dashboard", "bills", "reports", "assistant", "settings", "tasks", "diary"]) {
     await page.goto(`${base}/#${id}`); await page.locator('[data-route="settings"]').last().waitFor();
     await page.waitForFunction(() => !document.body.innerText.includes("正在加载你的记录"));
     await overflow(`390 ${id}`); await shot(`${id}-mobile`);
@@ -137,10 +141,10 @@ async function main() {
   await shot("entry-mobile"); await page.keyboard.press("Escape"); await page.getByRole("dialog").waitFor({ state: "detached" });
   for (const width of [320, 900]) {
     await page.setViewportSize({ width, height: 1000 });
-    for (const id of ["dashboard", "bills", "assistant", "settings"]) { await route(id); await overflow(`${width} ${id}`); }
+    for (const id of ["dashboard", "bills", "reports", "assistant", "settings"]) { await route(id); await overflow(`${width} ${id}`); }
   }
   assert.deepEqual(errors, [], "Browser JavaScript errors");
-  console.log(JSON.stringify({ status: "passed", checks: ["create", "edit", "pagination", "search", "type filters", "failed-save retry", "AI edit and confirm", "create unscheduled task", "diary empty and save", "image fallback", "six mobile routes", "320/390/900px overflow", "no browser exceptions"], artifacts: runDir }));
+  console.log(JSON.stringify({ status: "passed", checks: ["create", "edit", "pagination", "search", "type filters", "failed-save retry", "AI edit and confirm", "monthly report", "create unscheduled task", "diary empty and save", "image fallback", "seven mobile routes", "320/390/900px overflow", "no browser exceptions"], artifacts: runDir }));
 }
 main().catch(error => { console.error(error); console.error(`Artifacts: ${runDir}`); process.exitCode = 1; }).finally(async () => { if (browser) await browser.close(); if (server) server.kill(); });
 

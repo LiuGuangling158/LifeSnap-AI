@@ -31,7 +31,7 @@ provider adapters, monitoring, or the frontend independently when needed.
 | --- | --- |
 | Frontend | Presents bills, tasks, diaries, charts, administration, and review states. It does not hold provider secrets. |
 | API layer | Validates requests, maps domain errors to stable response shapes, and exposes capabilities, diagnostics, metrics, and application data. |
-| Domain services | Own bill, task, diary, attachment, dashboard, idempotency, audit, and settings behavior. |
+| Domain services | Own bill, task, diary, attachment, dashboard, report, idempotency, audit, and settings behavior. |
 | SQLite state store | Persists application state with WAL mode, schema migration metadata, and immediate transactions for confirmation flows. |
 | Agent runtime | Routes intent, retrieves knowledge, chooses supported tools, validates tool results, and returns a reviewable response. |
 | RAG knowledge base | Stores managed knowledge entries and versions; administrators can inspect, update, test, and roll back knowledge. |

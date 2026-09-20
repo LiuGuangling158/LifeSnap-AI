@@ -19,6 +19,8 @@ an AI-enabled financial workflow rather than a chat-only demo.
 - An Agent runtime with intent routing, RAG retrieval, function calling, and
   traceable tool execution.
 - Human correction feedback and repeatable quality evaluation cases.
+- A monthly report center with category budget rules and deterministic unusual
+  spending alerts.
 - Production-oriented request logs, Prometheus metrics, alerts, diagnostics,
   and test layers.
 - A local single-user mode; RAG administration is protected by a separate,

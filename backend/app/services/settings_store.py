@@ -133,6 +133,7 @@ class LocalSettingsStore:
             monthly_budget=payload.monthly_budget,
             currency="CNY",
             warning_threshold_percent=payload.warning_threshold_percent,
+            category_budgets=payload.category_budgets,
             updated_at=payload.updated_at or datetime.now(timezone.utc),
         )
         self._persist_budget_settings()
@@ -238,6 +239,7 @@ class LocalSettingsStore:
                 monthly_budget=loaded.monthly_budget,
                 currency="CNY",
                 warning_threshold_percent=loaded.warning_threshold_percent,
+                category_budgets=loaded.category_budgets,
                 updated_at=loaded.updated_at,
             )
         except (ValueError, TypeError):
