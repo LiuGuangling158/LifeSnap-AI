@@ -89,7 +89,8 @@ async function main() {
   await route("assistant"); await page.getByRole("button", { name: "记一笔午餐", exact: true }).click();
   const before = (await allBills()).total;
   await page.getByRole("button", { name: "帮我整理", exact: true }).click(); await page.locator(".chat-candidate").waitFor();
-  assert.equal((await allBills()).total, before); assert.equal(await page.locator(".chat-agent-steps").count(), 0);
+  assert.equal((await allBills()).total, before);
+  assert.ok(await page.locator(".chat-agent-steps").count() >= 1, "Agent tool trace is visible");
   assert(!(await page.locator(".chat-candidate").innerText()).includes("可信度")); await shot("assistant-desktop");
   await page.getByRole("button", { name: "修改信息", exact: true }).click(); await page.getByRole("dialog").waitFor(); await page.getByRole("dialog").locator('[name="amount"]').fill("30"); await shot("candidate-editor");
   await page.getByRole("button", { name: "完成修改", exact: true }).click(); await page.getByRole("dialog").waitFor({ state: "detached" });

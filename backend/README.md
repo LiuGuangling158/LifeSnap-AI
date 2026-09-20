@@ -1224,6 +1224,12 @@ Delete one bill:
 DELETE /bills/{bill_id}
 ```
 
+## Tests
+
+See the layered testing strategy in ../docs/testing-strategy.md for test
+boundaries and local commands. Backend test dependencies are kept in
+requirements-dev.txt; production installs only use requirements.txt.
+
 ## Tasks
 
 Create a todo:
