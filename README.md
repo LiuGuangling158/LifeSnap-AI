@@ -1,5 +1,7 @@
 # LifeSnap AI
 
+[简体中文](README.zh-CN.md) | English
+
 ![LifeSnap AI concept visual](docs/assets/lifesnap-ai-demo-hero.png)
 
 LifeSnap AI is a local-first personal finance workspace with bill capture,

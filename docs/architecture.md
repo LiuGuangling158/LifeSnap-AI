@@ -1,5 +1,7 @@
 # Architecture
 
+[简体中文](architecture.zh-CN.md) | English
+
 ## System Boundary
 
 LifeSnap AI is a FastAPI application that serves both the public API and the

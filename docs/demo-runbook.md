@@ -1,5 +1,7 @@
 # Demo Runbook
 
+[简体中文](demo-runbook.zh-CN.md) | English
+
 ## Purpose
 
 This script demonstrates that LifeSnap AI is a working financial workflow with
