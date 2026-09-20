@@ -7,7 +7,10 @@ from app.core.user_context import current_owner_id
 from app.schemas.bill import BillRead
 from app.schemas.diary import DiaryRead
 from app.schemas.chat import (
+    CandidateSessionStatus,
     ChatActionType,
+    ChatCandidateUpdateRequest,
+    ChatCandidateUpdateResponse,
     ChatConfirmActionRequest,
     ChatConfirmActionResponse,
     ChatDiscardActionRequest,
@@ -18,6 +21,11 @@ from app.schemas.chat import (
 from app.schemas.task import TaskRead
 from app.services.audit_log_store import audit_log_store
 from app.services.bill_candidate_store import bill_candidate_store
+from app.services.candidate_session_store import (
+    CandidateSessionConflictError,
+    CandidateSessionNotFoundError,
+    candidate_session_store,
+)
 from app.services.chat_service import chat_service
 from app.services.diary_candidate_store import diary_candidate_store
 from app.services.idempotency_store import IdempotencyConflictError, idempotency_store
@@ -30,7 +38,12 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("/messages", response_model=ChatMessageResponse)
 def send_message(payload: ChatMessageRequest, request: Request) -> ChatMessageResponse:
     started = perf_counter()
-    response = chat_service.handle_message(payload)
+    try:
+        response = chat_service.handle_message(payload)
+    except CandidateSessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CandidateSessionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     observability_service.record_agent_response(
         response,
         request_id=getattr(request.state, "request_id", None),
@@ -76,7 +89,7 @@ def confirm_action(
             scope="POST /chat/confirm-action",
             key=idempotency_key,
             fingerprint=payload.model_dump(mode="json"),
-            factory=lambda: _confirm_candidate(payload),
+            factory=lambda: _confirm_candidate_with_session(payload),
         )
         audit_log_store.record(
             action="chat_action_confirmed",
@@ -91,7 +104,9 @@ def confirm_action(
             },
         )
         return response
-    except IdempotencyConflictError as exc:
+    except CandidateSessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (IdempotencyConflictError, CandidateSessionConflictError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
@@ -106,7 +121,7 @@ def discard_action(
             scope="POST /chat/discard-action",
             key=idempotency_key,
             fingerprint=payload.model_dump(mode="json"),
-            factory=lambda: _discard_candidate(payload),
+            factory=lambda: _discard_candidate_with_session(payload),
         )
         audit_log_store.record(
             action="chat_action_discarded",
@@ -116,8 +131,50 @@ def discard_action(
             metadata={"action_type": payload.action_type},
         )
         return response
-    except IdempotencyConflictError as exc:
+    except CandidateSessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (IdempotencyConflictError, CandidateSessionConflictError) as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+
+@router.patch("/candidates/{candidate_id}", response_model=ChatCandidateUpdateResponse)
+def update_candidate(
+    candidate_id: UUID,
+    payload: ChatCandidateUpdateRequest,
+    request: Request,
+) -> ChatCandidateUpdateResponse:
+    try:
+        session = candidate_session_store.resolve(
+            session_id=payload.candidate_session_id,
+            action_type=payload.action_type,
+            candidate_id=candidate_id,
+            expected_revision=payload.expected_revision,
+        )
+        candidate, session = candidate_session_store.mutate(
+            session_id=session.session_id,
+            action_type=payload.action_type,
+            candidate_id=candidate_id,
+            expected_revision=payload.expected_revision or session.revision,
+            operation=lambda: _update_candidate_payload(
+                payload.action_type,
+                candidate_id,
+                payload.updates,
+            ),
+        )
+    except CandidateSessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CandidateSessionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="chat_candidate_updated",
+        entity_type=payload.action_type.value,
+        entity_id=candidate_id,
+        request=request,
+        metadata={"revision": session.revision, "updated_fields": sorted(payload.updates)},
+    )
+    return ChatCandidateUpdateResponse(candidate=candidate, candidate_session=session)
 
 
 def _confirm_candidate(payload: ChatConfirmActionRequest) -> ChatConfirmActionResponse:
@@ -134,6 +191,27 @@ def _confirm_candidate(payload: ChatConfirmActionRequest) -> ChatConfirmActionRe
     )
 
 
+def _confirm_candidate_with_session(
+    payload: ChatConfirmActionRequest,
+) -> ChatConfirmActionResponse:
+    session = candidate_session_store.resolve(
+        session_id=payload.candidate_session_id,
+        action_type=payload.action_type,
+        candidate_id=payload.candidate_id,
+        expected_revision=payload.expected_revision,
+    )
+    response, updated_session = candidate_session_store.mutate(
+        session_id=session.session_id,
+        action_type=payload.action_type,
+        candidate_id=payload.candidate_id,
+        expected_revision=payload.expected_revision or session.revision,
+        operation=lambda: _confirm_candidate(payload),
+        final_status=CandidateSessionStatus.confirmed,
+    )
+    response.candidate_session = updated_session
+    return response
+
+
 def _discard_candidate(payload: ChatDiscardActionRequest) -> ChatDiscardActionResponse:
     if payload.action_type == ChatActionType.bill_candidate:
         return _discard_bill_candidate(payload.candidate_id)
@@ -146,6 +224,47 @@ def _discard_candidate(payload: ChatDiscardActionRequest) -> ChatDiscardActionRe
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Chat action type is not discardable",
     )
+
+
+def _discard_candidate_with_session(
+    payload: ChatDiscardActionRequest,
+) -> ChatDiscardActionResponse:
+    session = candidate_session_store.resolve(
+        session_id=payload.candidate_session_id,
+        action_type=payload.action_type,
+        candidate_id=payload.candidate_id,
+        expected_revision=payload.expected_revision,
+    )
+    response, updated_session = candidate_session_store.mutate(
+        session_id=session.session_id,
+        action_type=payload.action_type,
+        candidate_id=payload.candidate_id,
+        expected_revision=payload.expected_revision or session.revision,
+        operation=lambda: _discard_candidate(payload),
+        final_status=CandidateSessionStatus.discarded,
+    )
+    response.candidate_session = updated_session
+    return response
+
+
+def _update_candidate_payload(
+    action_type: ChatActionType,
+    candidate_id: UUID,
+    updates: dict[str, object],
+):
+    if action_type == ChatActionType.bill_candidate:
+        from app.schemas.agent import BillCandidateUpdate
+
+        return bill_candidate_store.update(candidate_id, BillCandidateUpdate(**updates))
+    if action_type == ChatActionType.task_candidate:
+        from app.schemas.agent import TaskCandidateUpdate
+
+        return task_candidate_store.update(candidate_id, TaskCandidateUpdate(**updates))
+    if action_type == ChatActionType.diary_candidate:
+        from app.schemas.agent import DiaryCandidateUpdate
+
+        return diary_candidate_store.update(candidate_id, DiaryCandidateUpdate(**updates))
+    raise ValueError("Chat action type is not editable")
 
 
 def _confirm_bill_candidate(candidate_id: UUID) -> ChatConfirmActionResponse:

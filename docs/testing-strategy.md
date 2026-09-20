@@ -35,6 +35,8 @@ should be fixed before diagnosing a higher layer failure.
 
 - Add pure classification, parsing, and policy behavior to the unit layer.
 - Add route status codes and response-shape guarantees to the integration layer.
+- Cover candidate-session revision changes, stale-write conflicts and final
+  confirmation or discard transitions in integration tests.
 - Add cross-service, persistence, agent tool, and observability scenarios to the workflow layer.
 - Add primary user-visible flows and responsive layout regressions to the browser layer.
 - Use synthetic data only. Do not put API keys, uploaded bill images, or real personal finance data in fixtures, logs, or assertions.

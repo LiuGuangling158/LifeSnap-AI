@@ -2817,6 +2817,12 @@ function chatMessageRequestBody(message, context = activeChatCandidateContext())
   if (context) {
     body.context_action_type = context.context_action_type;
     body.context_candidate_id = context.context_candidate_id;
+    if (context.context_session_id) {
+      body.context_session_id = context.context_session_id;
+    }
+    if (context.context_candidate_revision) {
+      body.context_candidate_revision = context.context_candidate_revision;
+    }
   }
   return body;
 }
@@ -2834,6 +2840,8 @@ function activeChatCandidateContext() {
       return {
         context_action_type: actionType,
         context_candidate_id: candidateId,
+        context_session_id: response.candidate_session?.session_id,
+        context_candidate_revision: response.candidate_session?.revision,
       };
     }
   }
@@ -2846,7 +2854,7 @@ function applyChatAgentResponseSideEffects(response) {
   }
   const candidateId = getChatCandidateId(response);
   if (response.updated_existing_candidate && response.candidate && candidateId) {
-    updateChatCandidateInMessages(candidateId, response.candidate);
+    updateChatCandidateInMessages(candidateId, response.candidate, response.candidate_session);
   }
   if ((response.created_bill || response.created_task || response.created_diary) && candidateId) {
     markChatCandidate(candidateId, "confirmed");
@@ -2961,6 +2969,7 @@ function openChatCandidateEditor(candidateId) {
     candidateId: String(candidateId),
     actionType: message.response.action_type,
     candidate: message.response.candidate,
+    candidateSession: message.response.candidate_session || null,
   };
   render();
 }
@@ -2971,9 +2980,8 @@ async function submitChatCandidateEdit(formData) {
     return;
   }
 
-  const endpoint = chatCandidateEndpoint(editor.actionType, editor.candidateId);
   const payload = chatCandidateUpdatePayload(editor.actionType, formData);
-  if (!endpoint || !payload) {
+  if (!payload) {
     showToast("这条记录暂时无法修改，请重新整理。");
     return;
   }
@@ -2981,12 +2989,21 @@ async function submitChatCandidateEdit(formData) {
   state.saving = true;
   render();
   try {
-    const candidate = await api(endpoint, {
+    const response = await api("/chat/candidates/" + editor.candidateId, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        action_type: editor.actionType,
+        candidate_session_id: editor.candidateSession?.session_id,
+        expected_revision: editor.candidateSession?.revision,
+        updates: payload,
+      }),
     });
-    updateChatCandidateInMessages(editor.candidateId, candidate);
+    updateChatCandidateInMessages(
+      editor.candidateId,
+      response.candidate,
+      response.candidate_session,
+    );
     state.chatCandidateEditor = null;
     state.toast = "信息已修改，请核对后保存";
   } catch (error) {
@@ -2996,14 +3013,6 @@ async function submitChatCandidateEdit(formData) {
     saveAssistantSession();
     render();
   }
-}
-
-function chatCandidateEndpoint(actionType, candidateId) {
-  return {
-    bill_candidate: `/agent/bill-candidates/${candidateId}`,
-    task_candidate: `/agent/task-candidates/${candidateId}`,
-    diary_candidate: `/agent/diary-candidates/${candidateId}`,
-  }[actionType] || "";
 }
 
 function chatCandidateUpdatePayload(actionType, formData) {
@@ -3046,7 +3055,7 @@ function chatCandidateUpdatePayload(actionType, formData) {
   return null;
 }
 
-function updateChatCandidateInMessages(candidateId, candidate) {
+function updateChatCandidateInMessages(candidateId, candidate, candidateSession = null) {
   state.chatMessages = state.chatMessages.map((message) => {
     if (getChatCandidateId(message.response) !== String(candidateId)) {
       return message;
@@ -3058,12 +3067,20 @@ function updateChatCandidateInMessages(candidateId, candidate) {
         ...response,
         candidate,
         candidate_id: candidate.candidate_id || response.candidate_id,
+        candidate_session: candidateSession || response.candidate_session,
         confidence: candidate.confidence ?? response.confidence,
         warnings: candidate.warnings ?? response.warnings,
         need_user_confirmation: candidate.need_user_confirmation ?? response.need_user_confirmation,
       },
     };
   });
+}
+
+function chatCandidateSession(candidateId) {
+  const message = state.chatMessages.find(
+    (item) => getChatCandidateId(item.response) === String(candidateId),
+  );
+  return message?.response?.candidate_session || null;
 }
 
 function textOrNull(value) {
@@ -3091,13 +3108,19 @@ async function confirmChatAction(actionType, candidateId) {
   state.saving = true;
   render();
   try {
+    const candidateSession = chatCandidateSession(candidateId);
     const response = await api("/chat/confirm-action", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": `web-chat-confirm-${actionType}-${candidateId}`,
+        "Idempotency-Key": `web-chat-confirm-${actionType}-${candidateId}-${candidateSession?.revision || "legacy"}`,
       },
-      body: JSON.stringify({ action_type: actionType, candidate_id: candidateId }),
+      body: JSON.stringify({
+        action_type: actionType,
+        candidate_id: candidateId,
+        candidate_session_id: candidateSession?.session_id,
+        expected_revision: candidateSession?.revision,
+      }),
     });
     markChatCandidate(candidateId, "confirmed");
     state.chatMessages = [
@@ -3132,13 +3155,19 @@ async function discardChatAction(actionType, candidateId) {
   state.saving = true;
   render();
   try {
+    const candidateSession = chatCandidateSession(candidateId);
     const response = await api("/chat/discard-action", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Idempotency-Key": `web-chat-discard-${actionType}-${candidateId}`,
+        "Idempotency-Key": `web-chat-discard-${actionType}-${candidateId}-${candidateSession?.revision || "legacy"}`,
       },
-      body: JSON.stringify({ action_type: actionType, candidate_id: candidateId }),
+      body: JSON.stringify({
+        action_type: actionType,
+        candidate_id: candidateId,
+        candidate_session_id: candidateSession?.session_id,
+        expected_revision: candidateSession?.revision,
+      }),
     });
     markChatCandidate(candidateId, "discarded");
     state.chatMessages = [

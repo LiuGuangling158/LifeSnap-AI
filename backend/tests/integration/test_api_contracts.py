@@ -1,8 +1,14 @@
 import unittest
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.schemas.agent import BillCandidateData, ParseBillResponse
+from app.schemas.bill import BillSource, TransactionType
+from app.schemas.chat import ChatActionType
+from app.services.bill_candidate_store import bill_candidate_store
+from app.services.candidate_session_store import candidate_session_store
 
 
 class ApiContractTests(unittest.TestCase):
@@ -79,3 +85,67 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(payload["category_budget_statuses"][0]["category"], "餐饮")
         self.assertEqual(payload["category_budget_statuses"][0]["status"], "over_budget")
         self.assertTrue(payload["anomalies"])
+
+    def test_chat_candidate_session_rejects_stale_edits_and_confirms_latest_revision(self) -> None:
+        candidate = bill_candidate_store.save(
+            ParseBillResponse(
+                candidate_id=uuid4(),
+                confidence=0.9,
+                data=BillCandidateData(
+                    amount=28,
+                    merchant="候选会话测试",
+                    category="餐饮",
+                    transaction_type=TransactionType.expense,
+                    source=BillSource.ai_chat,
+                ),
+                field_confidence={"amount": 1, "transaction_type": 1},
+                warnings=[],
+            )
+        )
+        session = candidate_session_store.ensure(
+            ChatActionType.bill_candidate,
+            candidate.candidate_id,
+        )
+        first_edit = self.client.patch(
+            f"/chat/candidates/{candidate.candidate_id}",
+            json={
+                "action_type": "bill_candidate",
+                "candidate_session_id": str(session.session_id),
+                "expected_revision": session.revision,
+                "updates": {"merchant": "已更新的候选会话测试"},
+            },
+        )
+
+        self.assertEqual(first_edit.status_code, 200)
+        edited = first_edit.json()
+        self.assertEqual(edited["candidate"]["data"]["merchant"], "已更新的候选会话测试")
+        self.assertEqual(edited["candidate_session"]["revision"], 2)
+
+        stale_edit = self.client.patch(
+            f"/chat/candidates/{candidate.candidate_id}",
+            json={
+                "action_type": "bill_candidate",
+                "candidate_session_id": str(session.session_id),
+                "expected_revision": 1,
+                "updates": {"merchant": "旧页面不应覆盖"},
+            },
+        )
+        self.assertEqual(stale_edit.status_code, 409)
+
+        confirmed = self.client.post(
+            "/chat/confirm-action",
+            json={
+                "action_type": "bill_candidate",
+                "candidate_id": str(candidate.candidate_id),
+                "candidate_session_id": str(session.session_id),
+                "expected_revision": 2,
+            },
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        confirmed_payload = confirmed.json()
+        self.assertEqual(confirmed_payload["candidate_session"]["revision"], 3)
+        self.assertEqual(confirmed_payload["candidate_session"]["status"], "confirmed")
+        self.assertEqual(
+            confirmed_payload["created_bill"]["merchant"],
+            "已更新的候选会话测试",
+        )

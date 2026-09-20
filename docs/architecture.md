@@ -56,6 +56,13 @@ Write-like actions create a candidate that the user can edit and confirm.
 Read-only questions can return analysis and chart-ready data without changing
 personal records.
 
+Each chat candidate is paired with a persisted server-side session containing
+an action type, candidate ID, lifecycle status and monotonically increasing
+revision. Edit, confirm and discard requests carry the expected revision and
+run their domain mutation plus session transition inside one SQLite
+transaction. A stale browser tab receives HTTP 409 instead of overwriting the
+latest candidate state.
+
 ## Data and Security Boundaries
 
 - External model calls are opt-in through environment configuration. Credentials

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID
@@ -29,6 +29,22 @@ class ChatActionType(str, Enum):
     none = "none"
 
 
+class CandidateSessionStatus(str, Enum):
+    active = "active"
+    confirmed = "confirmed"
+    discarded = "discarded"
+
+
+class CandidateSessionRead(BaseModel):
+    session_id: UUID
+    candidate_id: UUID
+    action_type: ChatActionType
+    revision: int = Field(ge=1)
+    status: CandidateSessionStatus
+    created_at: datetime
+    updated_at: datetime
+
+
 class ChatAgentStepStatus(str, Enum):
     completed = "completed"
     needs_confirmation = "needs_confirmation"
@@ -45,6 +61,8 @@ class ChatMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
     context_action_type: ChatActionType | None = None
     context_candidate_id: UUID | None = None
+    context_session_id: UUID | None = None
+    context_candidate_revision: int | None = Field(default=None, ge=1)
 
 
 class ChatBillAnalysisDailyPoint(BaseModel):
@@ -114,6 +132,7 @@ class ChatMessageResponse(BaseModel):
     action_type: ChatActionType = ChatActionType.none
     candidate_id: UUID | None = None
     candidate: ParseBillResponse | ParseTaskResponse | ParseDiaryResponse | None = None
+    candidate_session: CandidateSessionRead | None = None
     analysis: ChatBillAnalysis | None = None
     warnings: list[str] = []
     agent_steps: list[ChatAgentStep] = Field(default_factory=list)
@@ -131,6 +150,8 @@ class ChatMessageResponse(BaseModel):
 class ChatConfirmActionRequest(BaseModel):
     action_type: ChatActionType
     candidate_id: UUID
+    candidate_session_id: UUID | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class ChatConfirmActionResponse(BaseModel):
@@ -138,6 +159,7 @@ class ChatConfirmActionResponse(BaseModel):
     reply: str
     action_type: ChatActionType
     candidate_id: UUID
+    candidate_session: CandidateSessionRead | None = None
     created_bill: BillRead | None = None
     created_task: TaskRead | None = None
     created_diary: DiaryRead | None = None
@@ -147,6 +169,8 @@ class ChatConfirmActionResponse(BaseModel):
 class ChatDiscardActionRequest(BaseModel):
     action_type: ChatActionType
     candidate_id: UUID
+    candidate_session_id: UUID | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class ChatDiscardActionResponse(BaseModel):
@@ -154,5 +178,18 @@ class ChatDiscardActionResponse(BaseModel):
     reply: str
     action_type: ChatActionType
     candidate_id: UUID
+    candidate_session: CandidateSessionRead | None = None
     discarded: bool = True
     warnings: list[str] = []
+
+
+class ChatCandidateUpdateRequest(BaseModel):
+    action_type: ChatActionType
+    candidate_session_id: UUID | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+    updates: dict[str, object] = Field(default_factory=dict)
+
+
+class ChatCandidateUpdateResponse(BaseModel):
+    candidate: ParseBillResponse | ParseTaskResponse | ParseDiaryResponse
+    candidate_session: CandidateSessionRead

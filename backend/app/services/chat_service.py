@@ -17,6 +17,7 @@ from app.schemas.agent import (
 from app.schemas.agent_runtime import AgentKnowledgeHit
 from app.schemas.bill import BillSource, TransactionType
 from app.schemas.chat import (
+    CandidateSessionStatus,
     ChatActionType,
     ChatAgentStep,
     ChatAgentStepStatus,
@@ -35,6 +36,10 @@ from app.services.agent_runtime_service import agent_runtime_service
 from app.services.agent_tool_registry import AgentFunctionCallSession, agent_tool_registry
 from app.services.bill_analysis_service import BillAnalysisResult, bill_analysis_service
 from app.services.bill_candidate_store import bill_candidate_store
+from app.services.candidate_session_store import (
+    CandidateSessionNotFoundError,
+    candidate_session_store,
+)
 from app.services.bill_category_classifier import bill_category_classifier
 from app.services.bill_parser import RuleBasedBillParser, bill_parser
 from app.services.diary_candidate_store import diary_candidate_store
@@ -515,19 +520,37 @@ class RuleBasedChatService:
                     warnings=["context_candidate_not_found"],
                 )
             return None
+        candidate_session = candidate_session_store.resolve(
+            session_id=payload.context_session_id,
+            action_type=action_type,
+            candidate_id=candidate_id,
+            expected_revision=payload.context_candidate_revision,
+        )
+        expected_revision = payload.context_candidate_revision or candidate_session.revision
 
         if self._is_discard_message(text):
             return function_session.call(
                 "discard_candidate",
                 {"candidate_id": str(candidate_id), "action_type": action_type.value},
-                lambda: self._discard_context_candidate(action_type, candidate_id),
+                lambda: self._discard_context_candidate(
+                    action_type,
+                    candidate_id,
+                    candidate_session.session_id,
+                    expected_revision,
+                ),
                 self._context_action_result,
             )
         if self._is_confirm_message(text):
             return function_session.call(
                 "confirm_candidate",
                 {"candidate_id": str(candidate_id), "action_type": action_type.value},
-                lambda: self._confirm_context_candidate(action_type, candidate_id, candidate),
+                lambda: self._confirm_context_candidate(
+                    action_type,
+                    candidate_id,
+                    candidate,
+                    candidate_session.session_id,
+                    expected_revision,
+                ),
                 self._context_action_result,
             )
 
@@ -545,7 +568,12 @@ class RuleBasedChatService:
                         "action_type": action_type.value,
                         "fields": ",".join(sorted(updates)),
                     },
-                    lambda: self._update_bill_context_candidate(candidate_id, updates),
+                    lambda: self._update_bill_context_candidate(
+                        candidate_id,
+                        updates,
+                        candidate_session.session_id,
+                        expected_revision,
+                    ),
                     self._context_action_result,
                 )
         if action_type == ChatActionType.task_candidate:
@@ -562,7 +590,12 @@ class RuleBasedChatService:
                         "action_type": action_type.value,
                         "fields": ",".join(sorted(updates)),
                     },
-                    lambda: self._update_task_context_candidate(candidate_id, updates),
+                    lambda: self._update_task_context_candidate(
+                        candidate_id,
+                        updates,
+                        candidate_session.session_id,
+                        expected_revision,
+                    ),
                     self._context_action_result,
                 )
         if action_type == ChatActionType.diary_candidate:
@@ -579,7 +612,12 @@ class RuleBasedChatService:
                         "action_type": action_type.value,
                         "fields": ",".join(sorted(updates)),
                     },
-                    lambda: self._update_diary_context_candidate(candidate_id, updates),
+                    lambda: self._update_diary_context_candidate(
+                        candidate_id,
+                        updates,
+                        candidate_session.session_id,
+                        expected_revision,
+                    ),
                     self._context_action_result,
                 )
 
@@ -605,22 +643,45 @@ class RuleBasedChatService:
         action_type: ChatActionType,
         candidate_id,
         candidate,
+        session_id,
+        expected_revision: int,
     ) -> ChatMessageResponse:
         if action_type == ChatActionType.bill_candidate:
             if not bill_candidate_store.is_confirmable(candidate):
                 return self._context_missing_response(action_type, candidate)
-            bill = bill_candidate_store.confirm(candidate_id)
-            return self._context_confirmed_response(action_type, candidate_id, created_bill=bill)
+            bill, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=action_type,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: bill_candidate_store.confirm(candidate_id),
+                final_status=CandidateSessionStatus.confirmed,
+            )
+            return self._context_confirmed_response(action_type, candidate_id, session, created_bill=bill)
         if action_type == ChatActionType.task_candidate:
             if not task_candidate_store.is_confirmable(candidate):
                 return self._context_missing_response(action_type, candidate)
-            task = task_candidate_store.confirm(candidate_id)
-            return self._context_confirmed_response(action_type, candidate_id, created_task=task)
+            task, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=action_type,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: task_candidate_store.confirm(candidate_id),
+                final_status=CandidateSessionStatus.confirmed,
+            )
+            return self._context_confirmed_response(action_type, candidate_id, session, created_task=task)
         if action_type == ChatActionType.diary_candidate:
             if not diary_candidate_store.is_confirmable(candidate):
                 return self._context_missing_response(action_type, candidate)
-            diary = diary_candidate_store.confirm(candidate_id)
-            return self._context_confirmed_response(action_type, candidate_id, created_diary=diary)
+            diary, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=action_type,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: diary_candidate_store.confirm(candidate_id),
+                final_status=CandidateSessionStatus.confirmed,
+            )
+            return self._context_confirmed_response(action_type, candidate_id, session, created_diary=diary)
 
         return self._unsupported_response(
             reply="这条记录暂时不能通过聊天确认。",
@@ -632,14 +693,44 @@ class RuleBasedChatService:
         self,
         action_type: ChatActionType,
         candidate_id,
+        session_id,
+        expected_revision: int,
     ) -> ChatMessageResponse:
         deleted = False
+        session = None
         if action_type == ChatActionType.bill_candidate:
-            deleted = bill_candidate_store.delete(candidate_id)
+            deleted, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=action_type,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: self._require_candidate_delete(
+                    bill_candidate_store.delete(candidate_id)
+                ),
+                final_status=CandidateSessionStatus.discarded,
+            )
         elif action_type == ChatActionType.task_candidate:
-            deleted = task_candidate_store.delete(candidate_id)
+            deleted, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=action_type,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: self._require_candidate_delete(
+                    task_candidate_store.delete(candidate_id)
+                ),
+                final_status=CandidateSessionStatus.discarded,
+            )
         elif action_type == ChatActionType.diary_candidate:
-            deleted = diary_candidate_store.delete(candidate_id)
+            deleted, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=action_type,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: self._require_candidate_delete(
+                    diary_candidate_store.delete(candidate_id)
+                ),
+                final_status=CandidateSessionStatus.discarded,
+            )
 
         if not deleted:
             return self._unsupported_response(
@@ -657,6 +748,7 @@ class RuleBasedChatService:
             action_type=action_type,
             candidate_id=candidate_id,
             candidate=None,
+            candidate_session=session,
             warnings=[],
             agent_steps=[
                 self._agent_step("读取上下文", "已找到上一条待确认记录。"),
@@ -666,10 +758,17 @@ class RuleBasedChatService:
             discarded=True,
         )
 
+    @staticmethod
+    def _require_candidate_delete(deleted: bool) -> bool:
+        if not deleted:
+            raise CandidateSessionNotFoundError("Candidate not found")
+        return True
+
     def _context_confirmed_response(
         self,
         action_type: ChatActionType,
         candidate_id,
+        candidate_session,
         created_bill=None,
         created_task=None,
         created_diary=None,
@@ -683,6 +782,7 @@ class RuleBasedChatService:
             action_type=action_type,
             candidate_id=candidate_id,
             candidate=None,
+            candidate_session=candidate_session,
             warnings=[],
             agent_steps=[
                 self._agent_step("读取上下文", "已找到上一条待确认记录。"),
@@ -726,9 +826,20 @@ class RuleBasedChatService:
         self,
         candidate_id,
         updates: dict[str, Any],
+        session_id,
+        expected_revision: int,
     ) -> ChatMessageResponse:
         try:
-            candidate = bill_candidate_store.update(candidate_id, BillCandidateUpdate(**updates))
+            candidate, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=ChatActionType.bill_candidate,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: bill_candidate_store.update(
+                    candidate_id,
+                    BillCandidateUpdate(**updates),
+                ),
+            )
         except ValueError:
             candidate = None
         if candidate is None:
@@ -742,15 +853,27 @@ class RuleBasedChatService:
             candidate,
             updates,
             bill_candidate_store.is_confirmable(candidate),
+            session,
         )
 
     def _update_task_context_candidate(
         self,
         candidate_id,
         updates: dict[str, Any],
+        session_id,
+        expected_revision: int,
     ) -> ChatMessageResponse:
         try:
-            candidate = task_candidate_store.update(candidate_id, TaskCandidateUpdate(**updates))
+            candidate, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=ChatActionType.task_candidate,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: task_candidate_store.update(
+                    candidate_id,
+                    TaskCandidateUpdate(**updates),
+                ),
+            )
         except ValueError:
             candidate = None
         if candidate is None:
@@ -764,15 +887,27 @@ class RuleBasedChatService:
             candidate,
             updates,
             task_candidate_store.is_confirmable(candidate),
+            session,
         )
 
     def _update_diary_context_candidate(
         self,
         candidate_id,
         updates: dict[str, Any],
+        session_id,
+        expected_revision: int,
     ) -> ChatMessageResponse:
         try:
-            candidate = diary_candidate_store.update(candidate_id, DiaryCandidateUpdate(**updates))
+            candidate, session = candidate_session_store.mutate(
+                session_id=session_id,
+                action_type=ChatActionType.diary_candidate,
+                candidate_id=candidate_id,
+                expected_revision=expected_revision,
+                operation=lambda: diary_candidate_store.update(
+                    candidate_id,
+                    DiaryCandidateUpdate(**updates),
+                ),
+            )
         except ValueError:
             candidate = None
         if candidate is None:
@@ -786,6 +921,7 @@ class RuleBasedChatService:
             candidate,
             updates,
             diary_candidate_store.is_confirmable(candidate),
+            session,
         )
 
     def _context_updated_response(
@@ -794,6 +930,7 @@ class RuleBasedChatService:
         candidate,
         updates: dict[str, Any],
         confirmable: bool,
+        candidate_session=None,
     ) -> ChatMessageResponse:
         field_text = self._field_names_text(action_type, updates)
         missing_detail = self._context_missing_detail(action_type, candidate)
@@ -811,6 +948,7 @@ class RuleBasedChatService:
             action_type=action_type,
             candidate_id=candidate.candidate_id,
             candidate=candidate,
+            candidate_session=candidate_session,
             warnings=candidate.warnings,
             agent_steps=[
                 self._agent_step("读取上下文", "已找到上一条待确认记录。"),
@@ -1236,6 +1374,10 @@ class RuleBasedChatService:
             ),
             lambda item: f"candidate_id={item.candidate_id}, task_type={item.data.task_type.value}",
         )
+        candidate_session = candidate_session_store.ensure(
+            ChatActionType.task_candidate,
+            candidate.candidate_id,
+        )
         confirmable = task_candidate_store.is_confirmable(candidate)
         waiting_status = (
             ChatAgentStepStatus.needs_confirmation
@@ -1251,6 +1393,7 @@ class RuleBasedChatService:
             action_type=ChatActionType.task_candidate,
             candidate_id=candidate.candidate_id,
             candidate=candidate,
+            candidate_session=candidate_session,
             warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
             agent_steps=[
                 self._agent_step("理解意图", "识别为提醒或待办请求。"),
@@ -1295,6 +1438,10 @@ class RuleBasedChatService:
             lambda: bill_category_classifier.classify(text, candidate.data.transaction_type),
             lambda match: f"category={match.category}, confidence={match.confidence}, source={match.source}",
         )
+        candidate_session = candidate_session_store.ensure(
+            ChatActionType.bill_candidate,
+            candidate.candidate_id,
+        )
         confirmable = bill_candidate_store.is_confirmable(candidate)
         waiting_status = (
             ChatAgentStepStatus.needs_confirmation
@@ -1310,6 +1457,7 @@ class RuleBasedChatService:
             action_type=ChatActionType.bill_candidate,
             candidate_id=candidate.candidate_id,
             candidate=candidate,
+            candidate_session=candidate_session,
             warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
             agent_steps=[
                 self._agent_step("理解意图", "识别为记账请求。"),
@@ -1463,6 +1611,10 @@ class RuleBasedChatService:
             lambda: diary_candidate_store.save(self._parse_diary_candidate(text)),
             lambda item: f"candidate_id={item.candidate_id}, mood={item.data.mood.value}",
         )
+        candidate_session = candidate_session_store.ensure(
+            ChatActionType.diary_candidate,
+            candidate.candidate_id,
+        )
         return ChatMessageResponse(
             message_id=uuid4(),
             reply=reply or "我先整理成一篇待确认日记，你确认后再保存到日记本。",
@@ -1472,6 +1624,7 @@ class RuleBasedChatService:
             action_type=ChatActionType.diary_candidate,
             candidate_id=candidate.candidate_id,
             candidate=candidate,
+            candidate_session=candidate_session,
             warnings=self._dedupe(candidate.warnings + (fallback_warnings or [])),
             agent_steps=[
                 self._agent_step("理解意图", "识别为写日记或记录生活片段。"),
