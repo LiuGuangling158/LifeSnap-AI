@@ -10,11 +10,13 @@ from app.services.external_ai_parser import external_ai_parser
 
 class RuleBasedBillParser:
     _amount_patterns = [
-        re.compile(r"(?:¥|￥|人民币|金额|实付|支付|付款)\s*([0-9]+(?:\.[0-9]{1,2})?)"),
+        re.compile(r"(?:¥|￥|人民币|金额|实付|支付|付款)\s*[-−]?\s*([0-9]+(?:\.[0-9]{1,2})?)"),
         re.compile(r"([0-9]+(?:\.[0-9]{1,2})?)\s*元"),
+        re.compile(r"(?m)^\s*[-−]\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$"),
     ]
     _payment_keywords = {
         "微信": "微信支付",
+        "零钱": "微信支付",
         "wechat": "微信支付",
         "支付宝": "支付宝",
         "alipay": "支付宝",
@@ -72,7 +74,30 @@ class RuleBasedBillParser:
         return None
 
     def _extract_merchant(self, lines: list[str]) -> str | None:
-        ignored_keywords = ["支付", "付款", "金额", "成功", "订单", "交易", "时间"]
+        labeled_merchant = re.search(
+            r"(?:收款方|商户|商家)\s*(?:名称)?\s*[：:]?\s*([^\n]{1,80})",
+            "\n".join(lines),
+        )
+        if labeled_merchant is not None:
+            merchant = labeled_merchant.group(1).strip()
+            if merchant:
+                return merchant
+
+        ignored_keywords = [
+            "支付",
+            "付款",
+            "金额",
+            "成功",
+            "订单",
+            "交易",
+            "时间",
+            "全部订单",
+            "当前状态",
+            "商品",
+            "收款方",
+            "商户",
+            "服务",
+        ]
         for line in lines:
             if len(line) > 120:
                 continue
@@ -145,12 +170,22 @@ class ConfigurableBillParser:
 
     def parse_bill(self, payload: ParseBillRequest) -> ParseBillResponse:
         external_candidate, fallback_warnings = external_ai_parser.parse_bill(payload)
-        if external_candidate is not None:
+        rule_candidate = self._rule_based_parser.parse_bill(payload)
+        if external_candidate is not None and (
+            external_candidate.data.amount is not None or rule_candidate.data.amount is None
+        ):
             return external_candidate
 
-        candidate = self._rule_based_parser.parse_bill(payload)
-        candidate.warnings = self._dedupe(candidate.warnings + fallback_warnings)
-        return candidate
+        rule_candidate.warnings = self._dedupe(
+            rule_candidate.warnings
+            + fallback_warnings
+            + (
+                ["external_ai_parser_amount_missing_fallback"]
+                if external_candidate is not None
+                else []
+            )
+        )
+        return rule_candidate
 
     def _dedupe(self, warnings: list[str]) -> list[str]:
         deduped: list[str] = []

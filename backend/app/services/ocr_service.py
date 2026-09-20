@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -173,15 +174,29 @@ class ConfigurableOcrService:
         if settings.external_ocr_api_key:
             headers["Authorization"] = f"Bearer {settings.external_ocr_api_key}"
 
-        request = Request(
-            settings.external_ocr_endpoint or "",
-            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        with urlopen(request, timeout=settings.external_ocr_timeout_seconds) as response:
-            response_body = json.loads(response.read().decode("utf-8"))
-        return self._kimi_vision_response_data(response_body)
+        for attempt in range(2):
+            try:
+                request = Request(
+                    settings.external_ocr_endpoint or "",
+                    data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                with urlopen(request, timeout=settings.external_ocr_timeout_seconds) as response:
+                    response_body = json.loads(response.read().decode("utf-8"))
+                return self._kimi_vision_response_data(response_body)
+            except HTTPError as error:
+                if attempt or not self._retryable_kimi_status(error.code):
+                    raise
+            except (URLError, TimeoutError, OSError):
+                if attempt:
+                    raise
+            time.sleep(0.4)
+
+        raise RuntimeError("Kimi Vision OCR retry loop exited unexpectedly")
+
+    def _retryable_kimi_status(self, status_code: int) -> bool:
+        return status_code in {408, 409, 425, 429} or status_code >= 500
 
     def _kimi_vision_request_body(
         self,

@@ -327,7 +327,7 @@ def _find_existing_attachment_bill_candidate(
             continue
         seen_ids.add(candidate_attachment_id)
         candidate = bill_candidate_store.find_by_source_attachment(candidate_attachment_id)
-        if candidate is not None:
+        if candidate is not None and bill_candidate_store.is_confirmable(candidate):
             return candidate
     return None
 
