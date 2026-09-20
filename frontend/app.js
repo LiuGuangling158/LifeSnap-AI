@@ -1404,6 +1404,10 @@ function collectAdminKnowledgeEditorDocuments() {
 function syncAdminKnowledgeEditorDocuments() {
   const form = document.querySelector("[data-admin-knowledge-form]");
   if (!form) return;
+  const adminKeyInput = form.querySelector("#admin_key");
+  if (adminKeyInput) {
+    state.adminKnowledgeAdminKey = String(adminKeyInput.value || "").trim();
+  }
   const entries = Array.from(form.querySelectorAll("[data-admin-knowledge-entry]"));
   state.adminKnowledgeEditorDocuments = entries.map((entry) => ({
     source_id: String(entry.dataset.sourceId || createAdminKnowledgeSourceId()),
