@@ -152,6 +152,7 @@ class AgentRuntimeProfile(BaseModel):
     rag_enabled: bool = True
     function_calling_enabled: bool = True
     fine_tuning_ready: bool = True
+    rag_profile: AgentRagProfile
     knowledge_sources: list[AgentKnowledgeSource]
     function_tools: list[AgentFunctionToolCapability]
     model_profile: AgentModelTrace

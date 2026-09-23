@@ -194,15 +194,20 @@ class AgentKnowledgeBase:
             hybrid_rag_retriever.reindex(self._rag_documents())
         )
 
+    def rag_profile(self) -> AgentRagProfile:
+        return AgentRagProfile.model_validate(
+            hybrid_rag_retriever.profile(
+                hybrid_rag_retriever.chunks(self._rag_documents())
+            )
+        )
+
     def response(self) -> AgentKnowledgeBaseResponse:
         active_documents = self._documents()
         documents = [
             self._to_schema(document)
             for document in self._documents(include_disabled=True)
         ]
-        retrieval = AgentRagProfile.model_validate(
-            hybrid_rag_retriever.profile(hybrid_rag_retriever.chunks(self._rag_documents()))
-        )
+        retrieval = self.rag_profile()
         return AgentKnowledgeBaseResponse(
             generated_at=datetime.now(timezone.utc),
             total=len(documents),

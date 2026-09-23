@@ -92,5 +92,33 @@ class HybridRagRetrieverTests(unittest.TestCase):
         self.assertGreaterEqual(post.call_count, 2)
 
 
+    @patch("app.services.rag_retriever.httpx.post")
+    @patch("app.services.rag_retriever.settings_store.get_privacy_settings")
+    @patch("app.services.rag_retriever.settings")
+    def test_embedding_failure_falls_back_to_bm25(
+        self,
+        runtime_settings,
+        privacy_settings,
+        post,
+    ) -> None:
+        runtime_settings.rag_embedding_configured = True
+        runtime_settings.rag_embedding_endpoint = "https://embedding.example/v1/embeddings"
+        runtime_settings.rag_embedding_api_key = "test-key"
+        runtime_settings.rag_embedding_model = "test-model"
+        runtime_settings.rag_embedding_timeout_seconds = 3.0
+        runtime_settings.rag_semantic_weight = 0.65
+        privacy_settings.return_value = SimpleNamespace(
+            allow_ai_text_processing=True,
+            local_only_mode=False,
+        )
+        post.side_effect = OSError("provider unavailable")
+
+        retriever = HybridRagRetriever()
+        results = retriever.search("奶茶应该怎么分类", self.documents)
+
+        self.assertEqual(results[0].chunk.source_id, "coffee")
+        self.assertEqual(results[0].retrieval_method, "bm25")
+        self.assertTrue(retriever.profile(retriever.chunks(self.documents))["last_error"])
+
 if __name__ == "__main__":
     unittest.main()

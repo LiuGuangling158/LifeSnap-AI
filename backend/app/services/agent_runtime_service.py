@@ -24,6 +24,7 @@ class AgentRuntimeService:
             rag_enabled=True,
             function_calling_enabled=True,
             fine_tuning_ready=True,
+            rag_profile=agent_knowledge_base.rag_profile(),
             knowledge_sources=agent_knowledge_base.sources(),
             function_tools=agent_tool_registry.all(),
             model_profile=self.model_trace(),

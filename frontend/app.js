@@ -1255,6 +1255,7 @@ function setAdminKnowledge(knowledge) {
     active_count: Number(knowledge?.active_count ?? documents.filter((item) => item.enabled !== false).length),
     documents,
     versions: Array.isArray(knowledge?.versions) ? knowledge.versions : [],
+    retrieval: knowledge?.retrieval && typeof knowledge.retrieval === "object" ? knowledge.retrieval : null,
   };
   state.adminKnowledgeEditorDocuments = documents
     .filter((document) => document.source === "admin")
