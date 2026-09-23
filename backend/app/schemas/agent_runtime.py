@@ -12,6 +12,22 @@ class AgentKnowledgeHit(BaseModel):
     snippet: str = Field(min_length=1, max_length=240)
     score: float = Field(ge=0, le=1)
     tags: list[str] = Field(default_factory=list)
+    chunk_id: str | None = Field(default=None, max_length=120)
+    retrieval_method: str = Field(default="bm25", max_length=40)
+    lexical_score: float | None = Field(default=None, ge=0, le=1)
+    semantic_score: float | None = Field(default=None, ge=0, le=1)
+
+
+class AgentRagProfile(BaseModel):
+    strategy: str = Field(min_length=1, max_length=80)
+    embedding_configured: bool
+    embedding_ready: bool
+    privacy_allows_external_embedding: bool
+    embedding_model: str | None = Field(default=None, max_length=160)
+    chunk_count: int = Field(ge=0)
+    indexed_chunk_count: int = Field(ge=0)
+    last_indexed_at: datetime | None = None
+    last_error: str | None = Field(default=None, max_length=160)
 
 
 class AgentFunctionCallTrace(BaseModel):
@@ -89,6 +105,7 @@ class AgentKnowledgeBaseResponse(BaseModel):
     active_count: int = Field(ge=0)
     documents: list[AgentKnowledgeDocument]
     versions: list[AgentKnowledgeVersionSummary] = Field(default_factory=list)
+    retrieval: AgentRagProfile
 
 
 class AgentKnowledgeBaseUpdateRequest(BaseModel):

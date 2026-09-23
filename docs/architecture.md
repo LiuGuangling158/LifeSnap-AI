@@ -93,3 +93,14 @@ replace the scrape target and configure a real alert delivery destination.
    service when data volume requires it.
 4. Add identity, tenant isolation, secret management, and a network policy
    before exposing the service publicly.
+
+## Hybrid RAG Retrieval
+
+Knowledge documents are split into traceable chunks and retrieved with local BM25 first. When an OpenAI-compatible Embeddings provider is configured and local-only mode is disabled, query and chunk vectors are generated and fused with BM25 using cosine similarity.
+
+- GET /agent/knowledge/search returns the matched chunk_id, retrieval method, BM25 score, and vector score.
+- POST /agent/knowledge/reindex requires an administrator session and prebuilds the vector cache for active knowledge chunks.
+- The vector cache keeps chunk fingerprints and float vectors only; document text remains in the application database.
+- Privacy restrictions, local-only mode, missing Embedding configuration, or provider failures automatically fall back to local BM25 without blocking Agent retrieval.
+
+See .env.example for LIFESNAP_RAG_EMBEDDING_BASE_URL, LIFESNAP_RAG_EMBEDDING_MODEL, LIFESNAP_RAG_EMBEDDING_API_KEY, and LIFESNAP_RAG_SEMANTIC_WEIGHT.

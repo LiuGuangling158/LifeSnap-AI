@@ -15,6 +15,7 @@ from app.schemas.agent_runtime import (
     AgentKnowledgeBaseUpdateRequest,
     AgentFineTuningDatasetResponse,
     AgentKnowledgeHit,
+    AgentRagProfile,
     AgentRuntimeProfile,
 )
 from app.schemas.agent import (
@@ -97,6 +98,26 @@ def search_agent_knowledge(
 @router.get("/knowledge/documents", response_model=AgentKnowledgeBaseResponse)
 def list_agent_knowledge_documents() -> AgentKnowledgeBaseResponse:
     return agent_knowledge_base.response()
+
+
+@router.post("/knowledge/reindex", response_model=AgentRagProfile)
+def reindex_agent_knowledge(
+    request: Request,
+    _: None = Depends(require_admin_api_key),
+) -> AgentRagProfile:
+    profile = agent_knowledge_base.reindex()
+    audit_log_store.record(
+        action="agent_knowledge_reindexed",
+        entity_type="agent_knowledge_base",
+        request=request,
+        metadata={
+            "strategy": profile.strategy,
+            "chunk_count": profile.chunk_count,
+            "indexed_chunk_count": profile.indexed_chunk_count,
+            "embedding_ready": profile.embedding_ready,
+        },
+    )
+    return profile
 
 
 @router.get("/admin-key", response_model=AgentAdminKeyRevealResponse)

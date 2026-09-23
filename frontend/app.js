@@ -241,6 +241,7 @@ const state = {
   adminKeyRevealLoading: false,
   adminKnowledgeLoading: false,
   adminKnowledgeSearching: false,
+  adminKnowledgeReindexing: false,
   adminKnowledgeRollingBack: "",
   bills: [],
   tasks: [],
@@ -296,6 +297,11 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-admin-knowledge-reset]")) {
     resetAdminKnowledge();
+    return;
+  }
+
+  if (event.target.closest("[data-admin-knowledge-reindex]")) {
+    reindexAdminKnowledge();
     return;
   }
 
@@ -1372,6 +1378,32 @@ async function submitAdminKnowledge(formData) {
     state.toast = adminKnowledgeErrorMessage(error);
   } finally {
     state.saving = false;
+    render();
+  }
+}
+
+async function reindexAdminKnowledge() {
+  if (state.adminKnowledgeReindexing || state.saving) return;
+  const adminKey = state.adminKnowledgeAdminKey.trim();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再重建语义索引。");
+    return;
+  }
+
+  state.adminKnowledgeReindexing = true;
+  render();
+  try {
+    const profile = await api("/agent/knowledge/reindex", {
+      method: "POST",
+      headers: await adminKnowledgeHeaders(adminKey),
+    });
+    state.toast = profile.embedding_ready
+      ? "语义索引已重建，下一次检索会使用 BM25 和向量融合。"
+      : "当前仍使用本地 BM25。请关闭本地-only 模式并配置 Embedding 服务后重建。";
+  } catch (error) {
+    state.toast = adminKnowledgeErrorMessage(error);
+  } finally {
+    state.adminKnowledgeReindexing = false;
     render();
   }
 }
@@ -6253,6 +6285,7 @@ function renderAdminPage() {
           <button class="button ghost" type="button" data-admin-knowledge-refresh ${state.adminKnowledgeLoading ? "disabled" : ""}>
             ${icon("refresh")}${state.adminKnowledgeLoading ? "刷新中..." : "刷新知识库"}
           </button>
+          <button class="button ghost" type="button" data-admin-knowledge-reindex>重建语义索引</button>
           <button class="button" type="button" data-route="assistant">${icon("spark")}去测试 Agent</button>
         </div>
       </header>

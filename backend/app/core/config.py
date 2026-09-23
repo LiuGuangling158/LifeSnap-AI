@@ -107,6 +107,34 @@ def _chat_completions_url(base_url: str) -> str:
     return f"{url}/chat/completions"
 
 
+def _embeddings_url(base_url: str) -> str:
+    url = base_url.rstrip("/")
+    if url.endswith("/embeddings"):
+        return url
+    return f"{url}/embeddings"
+
+
+def _default_rag_embedding_endpoint() -> str | None:
+    endpoint = _env_first_optional_str(
+        "LIFESNAP_RAG_EMBEDDING_ENDPOINT",
+        "LIFESNAP_EMBEDDING_ENDPOINT",
+    )
+    if endpoint:
+        return endpoint
+    base_url = _env_first_optional_str(
+        "LIFESNAP_RAG_EMBEDDING_BASE_URL",
+        "LIFESNAP_EMBEDDING_BASE_URL",
+    )
+    return _embeddings_url(base_url) if base_url else None
+
+
+def _default_rag_embedding_api_key() -> str | None:
+    return _env_first_optional_str(
+        "LIFESNAP_RAG_EMBEDDING_API_KEY",
+        "LIFESNAP_EMBEDDING_API_KEY",
+    )
+
+
 def _kimi_ocr_requested() -> bool:
     provider = _env_optional_str("LIFESNAP_OCR_PROVIDER")
     if provider and provider.casefold() in KIMI_OCR_PROVIDERS:
@@ -326,6 +354,7 @@ class Settings:
     local_audit_path: Path = DATA_DIR / "audit_events.json"
     local_idempotency_path: Path = DATA_DIR / "idempotency.json"
     local_agent_knowledge_path: Path = DATA_DIR / "agent_knowledge.json"
+    local_rag_embedding_cache_path: Path = DATA_DIR / "rag_embedding_cache.json"
     local_database_path: Path = field(
         default_factory=lambda: Path(
             os.getenv("LIFESNAP_SQLITE_PATH", str(DATA_DIR / "lifesnap.sqlite3"))
@@ -394,6 +423,20 @@ class Settings:
     )
     llm_agent_reasoning_effort: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_LLM_REASONING_EFFORT")
+    )
+    rag_embedding_endpoint: str | None = field(default_factory=_default_rag_embedding_endpoint)
+    rag_embedding_api_key: str | None = field(default_factory=_default_rag_embedding_api_key)
+    rag_embedding_model: str | None = field(
+        default_factory=lambda: _env_first_optional_str(
+            "LIFESNAP_RAG_EMBEDDING_MODEL",
+            "LIFESNAP_EMBEDDING_MODEL",
+        )
+    )
+    rag_embedding_timeout_seconds: float = field(
+        default_factory=lambda: _env_float("LIFESNAP_RAG_EMBEDDING_TIMEOUT_SECONDS", 12.0)
+    )
+    rag_semantic_weight: float = field(
+        default_factory=lambda: _env_float("LIFESNAP_RAG_SEMANTIC_WEIGHT", 0.65)
     )
 
     @property
@@ -505,6 +548,14 @@ class Settings:
     @property
     def fine_tuned_llm_agent_enabled(self) -> bool:
         return bool(self.llm_agent_fine_tuned_model)
+
+    @property
+    def rag_embedding_configured(self) -> bool:
+        return bool(
+            self.rag_embedding_endpoint
+            and self.rag_embedding_api_key
+            and self.rag_embedding_model
+        )
 
 
 settings = Settings()

@@ -14,9 +14,11 @@ from app.schemas.agent_runtime import (
     AgentKnowledgeDocument,
     AgentKnowledgeDocumentInput,
     AgentKnowledgeHit,
+    AgentRagProfile,
     AgentKnowledgeSource,
     AgentKnowledgeVersionSummary,
 )
+from app.services.rag_retriever import RagDocument, hybrid_rag_retriever
 from app.services.sqlite_state_store import sqlite_state_store
 
 
@@ -167,38 +169,50 @@ class AgentKnowledgeBase:
         if not query_text:
             return []
 
-        query_terms = self._terms(query_text)
-        scored: list[tuple[float, KnowledgeDocument, tuple[str, ...]]] = []
-        for document in self._documents():
-            score, matched = self._score_document(query_text, query_terms, document)
-            if score <= 0:
-                continue
-            scored.append((score, document, matched))
-
-        scored.sort(key=lambda item: item[0], reverse=True)
+        results = hybrid_rag_retriever.search(
+            query_text,
+            self._rag_documents(),
+            limit=limit,
+        )
         return [
             AgentKnowledgeHit(
-                source_id=document.source_id,
-                title=document.title,
-                snippet=document.content[:240],
-                score=min(1.0, round(score, 2)),
-                tags=list(document.tags),
+                source_id=result.chunk.source_id,
+                title=result.chunk.title,
+                snippet=result.chunk.content[:240],
+                score=result.score,
+                tags=list(result.chunk.tags),
+                chunk_id=result.chunk.chunk_id,
+                retrieval_method=result.retrieval_method,
+                lexical_score=result.lexical_score,
+                semantic_score=result.semantic_score,
             )
-            for score, document, _ in scored[: max(0, limit)]
+            for result in results
         ]
 
+    def reindex(self) -> AgentRagProfile:
+        return AgentRagProfile.model_validate(
+            hybrid_rag_retriever.reindex(self._rag_documents())
+        )
+
     def response(self) -> AgentKnowledgeBaseResponse:
-        documents = [self._to_schema(document) for document in self._documents(include_disabled=True)]
+        active_documents = self._documents()
+        documents = [
+            self._to_schema(document)
+            for document in self._documents(include_disabled=True)
+        ]
+        retrieval = AgentRagProfile.model_validate(
+            hybrid_rag_retriever.profile(hybrid_rag_retriever.chunks(self._rag_documents()))
+        )
         return AgentKnowledgeBaseResponse(
             generated_at=datetime.now(timezone.utc),
             total=len(documents),
             builtin_count=len(self._builtin_documents),
             admin_count=len(self._admin_documents),
-            active_count=len(self._documents()),
+            active_count=len(active_documents),
             documents=documents,
             versions=self._version_summaries(),
+            retrieval=retrieval,
         )
-
     def replace_admin_documents(
         self,
         documents: Iterable[AgentKnowledgeDocumentInput],
@@ -275,6 +289,17 @@ class AgentKnowledgeBase:
     def document_count(self) -> int:
         return len(self._documents())
 
+    def _rag_documents(self) -> list[RagDocument]:
+        return [
+            RagDocument(
+                source_id=document.source_id,
+                title=document.title,
+                content=document.content,
+                tags=document.tags,
+                keywords=document.keywords,
+            )
+            for document in self._documents()
+        ]
     def _documents(self, *, include_disabled: bool = False) -> list[KnowledgeDocument]:
         by_id: dict[str, KnowledgeDocument] = {}
         order: list[str] = []

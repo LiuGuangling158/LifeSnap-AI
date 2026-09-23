@@ -73,3 +73,14 @@ LifeSnap AI 使用 FastAPI 同时提供业务 API 和静态前端。当前可以
 2. 当多用户并发写入成为需求时，将 SQLite 迁移至托管关系型数据库。
 3. 当附件和知识规模增长时，迁移至对象存储和托管向量服务。
 4. 对公网开放前，补齐身份、租户隔离、密钥管理和网络策略。
+
+## 混合 RAG 检索
+
+知识库会先按段落和句子切分为可追溯的片段，再以 BM25 进行本地关键词检索。配置 OpenAI-compatible Embeddings 服务，并关闭 local-only 模式后，系统会对查询和知识片段生成向量，以 BM25 与余弦相似度融合排序。
+
+- GET /agent/knowledge/search 返回命中的 chunk_id、检索方式、BM25 分数和向量分数。
+- POST /agent/knowledge/reindex 需要管理员会话，用于预构建当前知识片段的向量缓存。
+- 向量缓存只保存片段指纹和浮点向量，知识正文仍保留在应用数据库。
+- 隐私模式、本地-only 模式、Embedding 服务未配置或请求失败时，系统自动回退至本地 BM25，不会阻断 Agent 的知识检索。
+
+配置变量见 .env.example：LIFESNAP_RAG_EMBEDDING_BASE_URL、LIFESNAP_RAG_EMBEDDING_MODEL、LIFESNAP_RAG_EMBEDDING_API_KEY 和 LIFESNAP_RAG_SEMANTIC_WEIGHT。
