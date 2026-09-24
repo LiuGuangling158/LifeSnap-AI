@@ -114,3 +114,5 @@ The versioned suite at backend/evaluations/agent_admission_v1.json is the offlin
 - Offline mode bypasses LLM and Embedding providers so CI does not use production credentials, expose evaluation prompts, or consume external quota.
 - Run backend/scripts/agent_eval_gate.py. A rejected admission exits non-zero and GitHub Actions blocks the change.
 - Administrators can run quality evaluation; stored results include dataset version, mode, critical failures, and the admission decision.
+
+- A same-dataset, same-mode baseline is selected from the latest prior run. Newly failed cases or a lower pass rate are quality regressions and reject admission when `require_no_regression` is enabled.

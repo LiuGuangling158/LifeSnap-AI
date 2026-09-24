@@ -23,6 +23,13 @@ def main() -> int:
         "admitted": run.admission.admitted,
         "failed_critical_case_ids": run.admission.failed_critical_case_ids,
         "failure_reasons": run.admission.failure_reasons,
+        "baseline_run_id": (
+            str(run.regression.baseline_run_id)
+            if run.regression.baseline_run_id
+            else None
+        ),
+        "pass_rate_delta": run.regression.pass_rate_delta,
+        "newly_failed_case_ids": run.regression.newly_failed_case_ids,
     }
     print(json.dumps(summary, ensure_ascii=False))
     return 0 if run.admission.admitted else 1

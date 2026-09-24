@@ -1636,10 +1636,13 @@ async function runAgentQualityEvaluation() {
     const failures = Array.isArray(run?.admission?.failed_critical_case_ids)
       ? run.admission.failed_critical_case_ids
       : [];
+    const regressions = Array.isArray(run?.regression?.newly_failed_case_ids)
+      ? run.regression.newly_failed_case_ids
+      : [];
     showToast(
       admitted
         ? "准入通过：" + run.passed_cases + "/" + run.total_cases + " 用例通过。"
-        : "准入拒绝：" + (failures.join("、") || "通过率未达标")
+        : "准入拒绝：" + (failures.join("、") || regressions.join("、") || "通过率未达标")
     );
   } catch (error) {
     showToast(adminKnowledgeErrorMessage(error));

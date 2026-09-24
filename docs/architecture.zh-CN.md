@@ -94,3 +94,5 @@ LifeSnap AI 使用 FastAPI 同时提供业务 API 和静态前端。当前可以
 - 离线模式会绕过 LLM 和 Embedding 服务，避免 CI 使用真实密钥、泄露评测文本或产生外部调用费用。
 - 执行 backend/scripts/agent_eval_gate.py；准入失败时脚本以非零退出码结束，并被 GitHub Actions 阻止合并。
 - 管理员可运行质量评测；结果会保存评测集版本、模式、关键失败项和准入结论。
+
+- 系统会选择同评测集、同模式的最近一次结果作为基线。开启 `require_no_regression` 后，新增失败用例或通过率下降都会被视为质量回归，并拒绝准入。

@@ -15,6 +15,7 @@ from app.schemas.quality import (
     AgentQualityEvaluationRun,
     AgentQualityFeedbackCreate,
     AgentQualityFeedbackRead,
+    AgentQualityRegression,
     AgentQualitySummary,
 )
 from app.services.bill_candidate_store import bill_candidate_store
@@ -73,6 +74,7 @@ class AgentQualityService:
         execution_mode: Literal["offline", "live"] = "offline",
     ) -> AgentQualityEvaluationRun:
         suite = self._load_suite()
+        baseline = self._compatible_baseline(suite, execution_mode)
         results: list[AgentQualityEvaluationCase] = []
         strategy = "unknown"
 
@@ -126,7 +128,8 @@ class AgentQualityService:
 
         passed_cases = sum(1 for item in results if item.passed)
         pass_rate = round(passed_cases / len(results), 4) if results else 0.0
-        admission = self._admission(suite, results, pass_rate)
+        regression = self._regression(baseline, results, pass_rate)
+        admission = self._admission(suite, results, pass_rate, regression)
         run = AgentQualityEvaluationRun(
             run_id=uuid4(),
             created_at=datetime.now(timezone.utc),
@@ -143,6 +146,7 @@ class AgentQualityService:
             dataset_version=suite["dataset_version"],
             execution_mode=execution_mode,
             admission=admission,
+            regression=regression,
         )
         sqlite_state_store.append_agent_quality_evaluation(run.model_dump(mode="json"))
         return run
@@ -197,6 +201,7 @@ class AgentQualityService:
             "dataset_version": str(payload.get("dataset_version") or "v1"),
             "policy_id": str(payload.get("policy_id") or "agent-admission-v1"),
             "minimum_pass_rate": minimum_pass_rate,
+            "require_no_regression": bool(payload.get("require_no_regression", True)),
             "cases": normalized_cases,
         }
 
@@ -205,6 +210,7 @@ class AgentQualityService:
         suite: dict,
         cases: list[AgentQualityEvaluationCase],
         pass_rate: float,
+        regression: AgentQualityRegression | None = None,
     ) -> AgentQualityAdmission:
         failed_critical = [
             case.case_id
@@ -221,6 +227,10 @@ class AgentQualityService:
             reasons.append(
                 "critical_cases_failed:" + ",".join(failed_critical)
             )
+        if suite.get("require_no_regression", True) and regression and regression.regressed:
+            reasons.append(
+                "quality_regression:" + ",".join(regression.newly_failed_case_ids)
+            )
         return AgentQualityAdmission(
             policy_id=suite["policy_id"],
             dataset_version=suite["dataset_version"],
@@ -229,6 +239,44 @@ class AgentQualityService:
             critical_case_count=sum(1 for case in cases if case.critical),
             failed_critical_case_ids=failed_critical,
             failure_reasons=reasons,
+        )
+
+    def _compatible_baseline(
+        self,
+        suite: dict,
+        execution_mode: Literal["offline", "live"],
+    ) -> AgentQualityEvaluationRun | None:
+        for item in sqlite_state_store.list_agent_quality_evaluations(limit=100):
+            run = AgentQualityEvaluationRun.model_validate(item)
+            if (
+                run.dataset_id == suite["dataset_id"]
+                and run.dataset_version == suite["dataset_version"]
+                and run.execution_mode == execution_mode
+            ):
+                return run
+        return None
+
+    def _regression(
+        self,
+        baseline: AgentQualityEvaluationRun | None,
+        cases: list[AgentQualityEvaluationCase],
+        pass_rate: float,
+    ) -> AgentQualityRegression:
+        if baseline is None:
+            return AgentQualityRegression()
+
+        baseline_passed = {case.case_id for case in baseline.cases if case.passed}
+        current_passed = {case.case_id for case in cases if case.passed}
+        newly_failed = sorted(baseline_passed - current_passed)
+        resolved = sorted(current_passed - baseline_passed)
+        pass_rate_delta = round(pass_rate - baseline.pass_rate, 4)
+        return AgentQualityRegression(
+            baseline_run_id=baseline.run_id,
+            baseline_pass_rate=baseline.pass_rate,
+            pass_rate_delta=pass_rate_delta,
+            newly_failed_case_ids=newly_failed,
+            resolved_case_ids=resolved,
+            regressed=bool(newly_failed or pass_rate_delta < 0),
         )
 
     @contextmanager

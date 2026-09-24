@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
-from app.schemas.quality import AgentQualityEvaluationCase
+from app.schemas.quality import AgentQualityEvaluationCase, AgentQualityEvaluationRun
 from app.services.agent_quality_service import agent_quality_service
 
 
@@ -45,5 +46,48 @@ class AgentQualityAdmissionTests(unittest.TestCase):
         self.assertIn("critical_cases_failed:critical_bill", admission.failure_reasons)
 
 
+    def test_newly_failed_case_rejects_non_regression_policy(self) -> None:
+        baseline = AgentQualityEvaluationRun(
+            run_id=uuid4(),
+            created_at="2026-01-01T00:00:00Z",
+            total_cases=1,
+            passed_cases=1,
+            pass_rate=1.0,
+            model_strategy="offline_rule_based_admission",
+            cases=[
+                AgentQualityEvaluationCase(
+                    case_id="bill_dining",
+                    passed=True,
+                    expected_intent="create_bill",
+                    actual_intent="create_bill",
+                )
+            ],
+        )
+        current = [
+            AgentQualityEvaluationCase(
+                case_id="bill_dining",
+                passed=False,
+                expected_intent="create_bill",
+                actual_intent="unsupported",
+            )
+        ]
+
+        regression = agent_quality_service._regression(baseline, current, 0.0)
+        admission = agent_quality_service._admission(
+            {
+                "policy_id": "test-policy",
+                "dataset_version": "test",
+                "minimum_pass_rate": 0.0,
+                "require_no_regression": True,
+            },
+            current,
+            0.0,
+            regression,
+        )
+
+        self.assertTrue(regression.regressed)
+        self.assertEqual(regression.newly_failed_case_ids, ["bill_dining"])
+        self.assertFalse(admission.admitted)
+        self.assertIn("quality_regression:bill_dining", admission.failure_reasons)
 if __name__ == "__main__":
     unittest.main()

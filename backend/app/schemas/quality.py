@@ -28,6 +28,17 @@ class AgentQualityAdmission(BaseModel):
     failure_reasons: list[str] = Field(default_factory=list)
 
 
+class AgentQualityRegression(BaseModel):
+    """Comparison with the last compatible evaluation baseline."""
+
+    baseline_run_id: UUID | None = None
+    baseline_pass_rate: float | None = Field(default=None, ge=0, le=1)
+    pass_rate_delta: float | None = Field(default=None, ge=-1, le=1)
+    newly_failed_case_ids: list[str] = Field(default_factory=list)
+    resolved_case_ids: list[str] = Field(default_factory=list)
+    regressed: bool = False
+
+
 class AgentQualityEvaluationCase(BaseModel):
     case_id: str
     passed: bool
@@ -53,6 +64,7 @@ class AgentQualityEvaluationRun(BaseModel):
     dataset_version: str = Field(default="v1", min_length=1, max_length=40)
     execution_mode: Literal["offline", "live"] = "offline"
     admission: AgentQualityAdmission = Field(default_factory=AgentQualityAdmission)
+    regression: AgentQualityRegression = Field(default_factory=AgentQualityRegression)
 
 
 class AgentQualitySummary(BaseModel):

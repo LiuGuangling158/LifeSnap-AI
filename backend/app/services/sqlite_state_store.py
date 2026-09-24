@@ -363,6 +363,29 @@ class SQLiteStateStore:
             finally:
                 connection.close()
 
+    def list_agent_quality_evaluations(
+        self,
+        *,
+        owner_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return recent runs so callers can select a compatible baseline."""
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT payload FROM agent_quality_evaluation_runs
+                    WHERE owner_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (owner_id, max(1, min(limit, 500))),
+                ).fetchall()
+                return [json.loads(str(row["payload"])) for row in rows]
+            finally:
+                connection.close()
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
