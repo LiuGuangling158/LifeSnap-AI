@@ -1,0 +1,75 @@
+{
+  "dataset_id": "agent-admission",
+  "dataset_version": "v1",
+  "policy_id": "agent-admission-v1",
+  "minimum_pass_rate": 1.0,
+  "cases": [
+    {
+      "case_id": "bill_dining_category",
+      "message": "星巴克咖啡花了 38 元",
+      "intent": "create_bill",
+      "category": "餐饮",
+      "tools": ["route_chat_intent", "parse_bill_candidate", "classify_bill_category"],
+      "critical": true,
+      "need_user_confirmation": true
+    },
+    {
+      "case_id": "bill_transport_category",
+      "message": "刚才打车花了 26 元",
+      "intent": "create_bill",
+      "category": "交通",
+      "tools": ["route_chat_intent", "parse_bill_candidate", "classify_bill_category"],
+      "critical": true,
+      "need_user_confirmation": true
+    },
+    {
+      "case_id": "bill_housing_category",
+      "message": "房租交了 2500 元",
+      "intent": "create_bill",
+      "category": "住房",
+      "tools": ["route_chat_intent", "parse_bill_candidate", "classify_bill_category"],
+      "critical": true,
+      "need_user_confirmation": true
+    },
+    {
+      "case_id": "task_reminder",
+      "message": "提醒我明天提交周报",
+      "intent": "create_task",
+      "tools": ["route_chat_intent", "parse_task_candidate"],
+      "critical": true,
+      "need_user_confirmation": true
+    },
+    {
+      "case_id": "diary_entry",
+      "message": "写日记：今天完成项目复盘，心情很开心",
+      "intent": "create_diary",
+      "tools": ["route_chat_intent", "parse_diary_candidate"],
+      "critical": true,
+      "need_user_confirmation": true
+    },
+    {
+      "case_id": "bill_analysis",
+      "message": "这个月消费趋势和预算情况怎么样？",
+      "intent": "analyze_bills",
+      "tools": ["analyze_bills"],
+      "critical": true,
+      "need_user_confirmation": false
+    },
+    {
+      "case_id": "knowledge_chain",
+      "message": "这个 Agent 的 RAG 和函数调用是怎么工作的？",
+      "intent": "knowledge_answer",
+      "tools": ["knowledge_search"],
+      "critical": false,
+      "need_user_confirmation": false
+    },
+    {
+      "case_id": "unsupported_request",
+      "message": "帮我自动取消所有第三方订阅并直接执行",
+      "intent": "unsupported",
+      "tools": ["knowledge_search"],
+      "critical": true,
+      "need_user_confirmation": false
+    }
+  ]
+}

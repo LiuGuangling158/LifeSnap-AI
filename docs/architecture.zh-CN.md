@@ -84,3 +84,13 @@ LifeSnap AI 使用 FastAPI 同时提供业务 API 和静态前端。当前可以
 - 隐私模式、本地-only 模式、Embedding 服务未配置或请求失败时，系统自动回退至本地 BM25，不会阻断 Agent 的知识检索。
 
 配置变量见 .env.example：LIFESNAP_RAG_EMBEDDING_BASE_URL、LIFESNAP_RAG_EMBEDDING_MODEL、LIFESNAP_RAG_EMBEDDING_API_KEY 和 LIFESNAP_RAG_SEMANTIC_WEIGHT。
+
+## Agent 评测准入
+
+项目使用版本化评测集 backend/evaluations/agent_admission_v1.json 作为离线发布门禁。评测覆盖账单分类、候选确认、待办、日记、消费分析、RAG 工具调用和危险请求拒绝。
+
+- 最低通过率由评测集声明；当前基线为 100%。
+- 标记为 critical 的用例任意失败，即使总通过率达标也会拒绝准入。
+- 离线模式会绕过 LLM 和 Embedding 服务，避免 CI 使用真实密钥、泄露评测文本或产生外部调用费用。
+- 执行 backend/scripts/agent_eval_gate.py；准入失败时脚本以非零退出码结束，并被 GitHub Actions 阻止合并。
+- 管理员可运行质量评测；结果会保存评测集版本、模式、关键失败项和准入结论。

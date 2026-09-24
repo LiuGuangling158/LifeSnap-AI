@@ -21,6 +21,7 @@ jobs:
       - run: python scripts/test_runner.py unit
       - run: python scripts/test_runner.py integration
       - run: python scripts/test_runner.py workflow
+      - run: python scripts/agent_eval_gate.py
 
   frontend:
     runs-on: ubuntu-latest

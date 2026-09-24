@@ -104,3 +104,13 @@ Knowledge documents are split into traceable chunks and retrieved with local BM2
 - Privacy restrictions, local-only mode, missing Embedding configuration, or provider failures automatically fall back to local BM25 without blocking Agent retrieval.
 
 See .env.example for LIFESNAP_RAG_EMBEDDING_BASE_URL, LIFESNAP_RAG_EMBEDDING_MODEL, LIFESNAP_RAG_EMBEDDING_API_KEY, and LIFESNAP_RAG_SEMANTIC_WEIGHT.
+
+## Agent Evaluation Admission
+
+The versioned suite at backend/evaluations/agent_admission_v1.json is the offline release gate. It covers bill classification, candidate confirmation, tasks, diaries, spending analysis, RAG tool invocation, and rejection of unsafe requests.
+
+- The dataset declares the minimum pass rate; the current baseline is 100 percent.
+- Any failed critical case rejects admission even when the aggregate pass rate is met.
+- Offline mode bypasses LLM and Embedding providers so CI does not use production credentials, expose evaluation prompts, or consume external quota.
+- Run backend/scripts/agent_eval_gate.py. A rejected admission exits non-zero and GitHub Actions blocks the change.
+- Administrators can run quality evaluation; stored results include dataset version, mode, critical failures, and the admission decision.

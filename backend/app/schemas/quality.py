@@ -18,6 +18,16 @@ class AgentQualityFeedbackRead(AgentQualityFeedbackCreate):
     created_at: datetime
 
 
+class AgentQualityAdmission(BaseModel):
+    policy_id: str = Field(default="agent-admission-v1", min_length=1, max_length=80)
+    dataset_version: str = Field(default="v1", min_length=1, max_length=40)
+    minimum_pass_rate: float = Field(default=1.0, ge=0, le=1)
+    admitted: bool = False
+    critical_case_count: int = Field(default=0, ge=0)
+    failed_critical_case_ids: list[str] = Field(default_factory=list)
+    failure_reasons: list[str] = Field(default_factory=list)
+
+
 class AgentQualityEvaluationCase(BaseModel):
     case_id: str
     passed: bool
@@ -26,6 +36,9 @@ class AgentQualityEvaluationCase(BaseModel):
     expected_category: str | None = None
     actual_category: str | None = None
     missing_function_tools: list[str] = Field(default_factory=list)
+    critical: bool = False
+    expected_confirmation: bool | None = None
+    actual_confirmation: bool | None = None
 
 
 class AgentQualityEvaluationRun(BaseModel):
@@ -36,6 +49,10 @@ class AgentQualityEvaluationRun(BaseModel):
     pass_rate: float
     model_strategy: str
     cases: list[AgentQualityEvaluationCase] = Field(default_factory=list)
+    dataset_id: str = Field(default="agent-admission", min_length=1, max_length=80)
+    dataset_version: str = Field(default="v1", min_length=1, max_length=40)
+    execution_mode: Literal["offline", "live"] = "offline"
+    admission: AgentQualityAdmission = Field(default_factory=AgentQualityAdmission)
 
 
 class AgentQualitySummary(BaseModel):

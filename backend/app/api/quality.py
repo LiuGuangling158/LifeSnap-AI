@@ -66,6 +66,10 @@ def run_quality_evaluation(
             "passed_cases": run.passed_cases,
             "pass_rate": run.pass_rate,
             "model_strategy": run.model_strategy,
+            "dataset_version": run.dataset_version,
+            "execution_mode": run.execution_mode,
+            "admitted": run.admission.admitted,
+            "failed_critical_case_ids": run.admission.failed_critical_case_ids,
         },
     )
     return run

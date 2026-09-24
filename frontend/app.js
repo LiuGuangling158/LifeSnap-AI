@@ -1632,7 +1632,15 @@ async function runAgentQualityEvaluation() {
   try {
     const headers = await adminKnowledgeHeaders(adminKey);
     const run = await api("/quality/evaluations/run", { method: "POST", headers });
-    showToast("质量评测完成：" + run.passed_cases + "/" + run.total_cases + " 通过。");
+    const admitted = Boolean(run?.admission?.admitted);
+    const failures = Array.isArray(run?.admission?.failed_critical_case_ids)
+      ? run.admission.failed_critical_case_ids
+      : [];
+    showToast(
+      admitted
+        ? "准入通过：" + run.passed_cases + "/" + run.total_cases + " 用例通过。"
+        : "准入拒绝：" + (failures.join("、") || "通过率未达标")
+    );
   } catch (error) {
     showToast(adminKnowledgeErrorMessage(error));
   } finally {
