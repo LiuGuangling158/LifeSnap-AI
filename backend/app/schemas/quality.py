@@ -76,3 +76,4 @@ class AgentQualitySummary(BaseModel):
     acceptance_rate: float | None = None
     correction_rate: float | None = None
     latest_evaluation: AgentQualityEvaluationRun | None = None
+    recent_evaluations: list[AgentQualityEvaluationRun] = Field(default_factory=list)

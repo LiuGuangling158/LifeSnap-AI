@@ -47,7 +47,10 @@ class AgentQualityService:
             if verdict in counts:
                 counts[verdict] += 1
         feedback_count = len(feedback)
-        latest = sqlite_state_store.latest_agent_quality_evaluation()
+        recent_evaluations = [
+            AgentQualityEvaluationRun.model_validate(item)
+            for item in sqlite_state_store.list_agent_quality_evaluations(limit=10)
+        ]
         return AgentQualitySummary(
             generated_at=datetime.now(timezone.utc),
             feedback_count=feedback_count,
@@ -63,9 +66,8 @@ class AgentQualityService:
             )
             if feedback_count
             else None,
-            latest_evaluation=AgentQualityEvaluationRun.model_validate(latest)
-            if latest
-            else None,
+            latest_evaluation=recent_evaluations[0] if recent_evaluations else None,
+            recent_evaluations=recent_evaluations,
         )
 
     def run_evaluation(

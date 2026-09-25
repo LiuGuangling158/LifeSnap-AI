@@ -243,6 +243,7 @@ const state = {
   adminKnowledgeSearching: false,
   adminKnowledgeReindexing: false,
   adminKnowledgeRollingBack: "",
+  adminQuality: null,
   bills: [],
   tasks: [],
   profile: loadProfileSettings(),
@@ -1190,6 +1191,7 @@ async function loadData() {
       budgetSettings,
       tagSettings,
       adminKnowledge,
+      adminQuality,
     ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
@@ -1204,6 +1206,7 @@ async function loadData() {
       api("/settings/budget"),
       api("/settings/tags"),
       api("/agent/knowledge/documents"),
+      api("/quality/summary"),
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
@@ -1237,6 +1240,7 @@ async function loadData() {
     state.budgetSettings = budgetSettings;
     state.tagSettings = tagSettings;
     setAdminKnowledge(adminKnowledge);
+    state.adminQuality = adminQuality;
   } catch (error) {
     state.error = error.message || "后端连接失败";
   } finally {
@@ -1632,6 +1636,7 @@ async function runAgentQualityEvaluation() {
   try {
     const headers = await adminKnowledgeHeaders(adminKey);
     const run = await api("/quality/evaluations/run", { method: "POST", headers });
+    state.adminQuality = await api("/quality/summary");
     const admitted = Boolean(run?.admission?.admitted);
     const failures = Array.isArray(run?.admission?.failed_critical_case_ids)
       ? run.admission.failed_critical_case_ids
@@ -6285,6 +6290,7 @@ function renderAdminPage() {
   const adminDocuments = documents.filter((document) => document.source === "admin");
   const versions = Array.isArray(knowledge.versions) ? knowledge.versions : [];
   const searchResults = state.adminKnowledgeSearchResults ?? [];
+  const quality = state.adminQuality ?? {};
   return `
     <div class="simple-admin">
       <header class="simple-page-header">
@@ -6310,6 +6316,16 @@ function renderAdminPage() {
           ${diagnosticMetric("最近刷新", formatDate(knowledge.generated_at), "info")}
         </div>
         <p class="admin-note">知识规则会安全保存在应用数据库中，并在下一次 Agent 对话时参与 RAG 检索。保存前可以随时测试检索结果。</p>
+      </section>
+
+      <section class="surface admin-knowledge-version-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>Agent 评测准入</h2>
+            <p>离线评测会校验意图、分类、函数调用和确认门槛，并与上一条同版本基线对比。</p>
+          </div>
+        </div>
+        ${renderAdminQualityGovernance(quality)}
       </section>
 
       <section class="surface admin-knowledge-search-panel">
@@ -6404,6 +6420,68 @@ function renderAdminPage() {
         ${renderAdminKnowledgeDocuments(documents)}
       </section>
     </div>
+  `;
+}
+
+function renderAdminQualityGovernance(summary) {
+  const latest = summary?.latest_evaluation;
+  const recent = Array.isArray(summary?.recent_evaluations)
+    ? summary.recent_evaluations.slice(0, 5)
+    : [];
+  if (!latest) {
+    return `<p class="form-hint">还没有评测记录。建立管理员会话后，运行一次 AI 质量评测即可生成准入基线。</p>`;
+  }
+
+  const admitted = Boolean(latest?.admission?.admitted);
+  const regression = latest?.regression ?? {};
+  const failures = Array.isArray(latest?.admission?.failed_critical_case_ids)
+    ? latest.admission.failed_critical_case_ids
+    : [];
+  const newlyFailed = Array.isArray(regression?.newly_failed_case_ids)
+    ? regression.newly_failed_case_ids
+    : [];
+  const passRate = `${Math.round(Number(latest.pass_rate ?? 0) * 100)}%`;
+  const delta = regression.pass_rate_delta;
+  const deltaText = delta === null || delta === undefined
+    ? "首条基线"
+    : `${delta > 0 ? "+" : ""}${Math.round(Number(delta) * 100)}%`;
+  const issueText = [...failures, ...newlyFailed].filter(Boolean).join("、");
+
+  return `
+    <div class="diagnostics-summary admin-summary-grid">
+      ${diagnosticMetric("当前准入", admitted ? "通过" : "拒绝", admitted ? "ok" : "error")}
+      ${diagnosticMetric("评测通过率", passRate, admitted ? "ok" : "warning")}
+      ${diagnosticMetric("回归变化", deltaText, regression.regressed ? "error" : "info")}
+      ${diagnosticMetric("关键用例", `${latest?.admission?.critical_case_count ?? 0} 个`, "info")}
+    </div>
+    <p class="admin-note">${issueText
+      ? `需要处理：${escapeHtml(issueText)}`
+      : "当前版本未发现关键失败或质量回归。"}</p>
+    <div class="admin-version-list">
+      ${recent.map(renderAdminQualityRun).join("")}
+    </div>
+  `;
+}
+
+function renderAdminQualityRun(run) {
+  const admitted = Boolean(run?.admission?.admitted);
+  const regression = run?.regression ?? {};
+  const failures = Array.isArray(run?.admission?.failure_reasons)
+    ? run.admission.failure_reasons
+    : [];
+  const delta = regression.pass_rate_delta;
+  const deltaText = delta === null || delta === undefined
+    ? "首条基线"
+    : `变化 ${delta > 0 ? "+" : ""}${Math.round(Number(delta) * 100)}%`;
+  return `
+    <article class="admin-version-card">
+      <div>
+        <strong>${admitted ? "准入通过" : "准入拒绝"} · ${escapeHtml(String(run.passed_cases ?? 0))}/${escapeHtml(String(run.total_cases ?? 0))}</strong>
+        <small>${escapeHtml(formatDate(run.created_at))} · ${escapeHtml(String(run.dataset_version ?? "v1"))} · ${escapeHtml(String(run.execution_mode ?? "offline"))}</small>
+        <p>${failures.length ? escapeHtml(failures.join("；")) : escapeHtml(deltaText)}</p>
+      </div>
+      <span class="knowledge-source-badge ${admitted ? "builtin" : "admin"}">${admitted ? "可发布" : "需处理"}</span>
+    </article>
   `;
 }
 

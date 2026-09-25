@@ -366,6 +366,10 @@ class DiagnosticsService:
             status = "degraded"
             warnings = ["quality_evaluation_not_run"]
             next_action = "Run the standard Agent quality evaluation before release."
+        elif not evaluation.admission.admitted:
+            status = "action_required"
+            warnings = ["quality_gate_rejected", *evaluation.admission.failure_reasons]
+            next_action = "Fix failed or regressed evaluation cases before release."
         elif evaluation.pass_rate < 0.9:
             status = "action_required"
             warnings = ["quality_gate_failed"]
@@ -385,6 +389,8 @@ class DiagnosticsService:
                 "correction_rate": summary.correction_rate,
                 "latest_evaluation_pass_rate": evaluation.pass_rate if evaluation else None,
                 "latest_evaluation_case_count": evaluation.total_cases if evaluation else 0,
+                "latest_evaluation_admitted": evaluation.admission.admitted if evaluation else False,
+                "latest_evaluation_regressed": evaluation.regression.regressed if evaluation else False,
             },
             warnings=warnings,
             next_action=next_action,

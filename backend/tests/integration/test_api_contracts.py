@@ -42,6 +42,7 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("feedback_count", response.json())
+        self.assertIn("recent_evaluations", response.json())
 
     def test_monthly_report_applies_budget_rules_and_detects_anomalies(self) -> None:
         invalid_budget = self.client.patch(
