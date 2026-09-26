@@ -20,7 +20,7 @@ class SQLiteStateStore:
     database. Legacy files are read only once, on first access to a namespace.
     """
 
-    _migration_version = 6
+    _migration_version = 7
     _collection_tables = {
         "bills": ("bills", "id"),
         "tasks": ("tasks", "id"),
@@ -386,6 +386,243 @@ class SQLiteStateStore:
                 return [json.loads(str(row["payload"])) for row in rows]
             finally:
                 connection.close()
+
+    def create_async_job(self, job: dict[str, Any], *, owner_id: str | None = None) -> None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO async_jobs(
+                        job_id, owner_id, job_type, status, created_at, updated_at,
+                        started_at, completed_at, attempt, max_attempts, result,
+                        error_code, error_message
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(job["job_id"]),
+                        owner_id,
+                        str(job["job_type"]),
+                        str(job["status"]),
+                        str(job["created_at"]),
+                        str(job["updated_at"]),
+                        job.get("started_at"),
+                        job.get("completed_at"),
+                        int(job.get("attempt", 0)),
+                        int(job.get("max_attempts", 1)),
+                        self._json_value(job.get("result")),
+                        job.get("error_code"),
+                        job.get("error_message"),
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+    def get_async_job(self, job_id: Any, *, owner_id: str | None = None) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT * FROM async_jobs WHERE job_id = ? AND owner_id = ?",
+                    (str(job_id), owner_id),
+                ).fetchone()
+                return self._async_job_row(row) if row else None
+            finally:
+                connection.close()
+
+    def list_async_jobs(self, *, owner_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM async_jobs WHERE owner_id = ?
+                    ORDER BY created_at DESC LIMIT ?
+                    """,
+                    (owner_id, max(1, min(limit, 100))),
+                ).fetchall()
+                return [self._async_job_row(row) for row in rows]
+            finally:
+                connection.close()
+
+    def claim_async_job(self, job_id: Any, *, owner_id: str | None = None) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        now = self._now()
+        with self._lock:
+            connection = self._connect()
+            try:
+                updated = connection.execute(
+                    """
+                    UPDATE async_jobs
+                    SET status = 'running', started_at = ?, updated_at = ?, attempt = attempt + 1
+                    WHERE job_id = ? AND owner_id = ? AND status = 'queued'
+                    """,
+                    (now, now, str(job_id), owner_id),
+                ).rowcount
+                if not updated:
+                    connection.commit()
+                    return None
+                row = connection.execute(
+                    "SELECT * FROM async_jobs WHERE job_id = ? AND owner_id = ?",
+                    (str(job_id), owner_id),
+                ).fetchone()
+                connection.commit()
+                return self._async_job_row(row) if row else None
+            finally:
+                connection.close()
+
+    def succeed_async_job(self, job_id: Any, result: dict[str, Any], *, owner_id: str | None = None) -> None:
+        self._finish_async_job(job_id, "succeeded", result=result, owner_id=owner_id)
+
+    def fail_async_job(
+        self,
+        job_id: Any,
+        *,
+        error_code: str,
+        error_message: str,
+        owner_id: str | None = None,
+    ) -> None:
+        self._finish_async_job(
+            job_id,
+            "failed",
+            error_code=error_code,
+            error_message=error_message,
+            owner_id=owner_id,
+        )
+
+    def cancel_async_job(self, job_id: Any, *, owner_id: str | None = None) -> dict[str, Any] | None:
+        return self._change_async_job_status(job_id, "cancelled", ("queued",), owner_id=owner_id)
+
+    def retry_async_job(self, job_id: Any, *, owner_id: str | None = None) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                now = self._now()
+                updated = connection.execute(
+                    """
+                    UPDATE async_jobs
+                    SET status = 'queued', updated_at = ?, started_at = NULL, completed_at = NULL,
+                        error_code = NULL, error_message = NULL, result = NULL
+                    WHERE job_id = ? AND owner_id = ? AND status IN ('failed', 'cancelled')
+                      AND attempt < max_attempts
+                    """,
+                    (now, str(job_id), owner_id),
+                ).rowcount
+                row = connection.execute(
+                    "SELECT * FROM async_jobs WHERE job_id = ? AND owner_id = ?",
+                    (str(job_id), owner_id),
+                ).fetchone()
+                connection.commit()
+                return self._async_job_row(row) if updated and row else None
+            finally:
+                connection.close()
+
+    def recover_async_jobs(self, *, owner_id: str | None = None) -> list[dict[str, Any]]:
+        """Mark interrupted work explicitly and return safely queued jobs to dispatch."""
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                now = self._now()
+                connection.execute(
+                    """
+                    UPDATE async_jobs
+                    SET status = 'failed', completed_at = ?, updated_at = ?,
+                        error_code = 'worker_interrupted',
+                        error_message = 'Worker stopped before the job completed.'
+                    WHERE owner_id = ? AND status = 'running'
+                    """,
+                    (now, now, owner_id),
+                )
+                rows = connection.execute(
+                    "SELECT * FROM async_jobs WHERE owner_id = ? AND status = 'queued'",
+                    (owner_id,),
+                ).fetchall()
+                connection.commit()
+                return [self._async_job_row(row) for row in rows]
+            finally:
+                connection.close()
+
+    def _finish_async_job(
+        self,
+        job_id: Any,
+        status: str,
+        *,
+        result: dict[str, Any] | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        owner_id: str | None = None,
+    ) -> None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                now = self._now()
+                connection.execute(
+                    """
+                    UPDATE async_jobs
+                    SET status = ?, updated_at = ?, completed_at = ?, result = ?,
+                        error_code = ?, error_message = ?
+                    WHERE job_id = ? AND owner_id = ? AND status = 'running'
+                    """,
+                    (
+                        status,
+                        now,
+                        now,
+                        self._json_value(result),
+                        error_code,
+                        error_message,
+                        str(job_id),
+                        owner_id,
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+    def _change_async_job_status(
+        self,
+        job_id: Any,
+        status: str,
+        allowed_statuses: tuple[str, ...],
+        *,
+        owner_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        placeholders = ", ".join("?" for _ in allowed_statuses)
+        with self._lock:
+            connection = self._connect()
+            try:
+                now = self._now()
+                updated = connection.execute(
+                    f"UPDATE async_jobs SET status = ?, updated_at = ?, completed_at = ? "
+                    f"WHERE job_id = ? AND owner_id = ? AND status IN ({placeholders})",
+                    (status, now, now, str(job_id), owner_id, *allowed_statuses),
+                ).rowcount
+                row = connection.execute(
+                    "SELECT * FROM async_jobs WHERE job_id = ? AND owner_id = ?",
+                    (str(job_id), owner_id),
+                ).fetchone()
+                connection.commit()
+                return self._async_job_row(row) if updated and row else None
+            finally:
+                connection.close()
+
+    @staticmethod
+    def _json_value(value: Any) -> str | None:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str) if value is not None else None
+
+    @staticmethod
+    def _async_job_row(row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        data["result"] = json.loads(data["result"]) if data.get("result") else None
+        return data
+
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
@@ -424,6 +661,7 @@ class SQLiteStateStore:
                 self._apply_user_migration(connection)
                 self._apply_observability_migration(connection)
                 self._apply_agent_quality_migration(connection)
+                self._apply_async_job_migration(connection)
                 connection.commit()
             finally:
                 connection.close()
@@ -711,6 +949,45 @@ class SQLiteStateStore:
         connection.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
             (6, self._now()),
+        )
+
+    def _apply_async_job_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (7,),
+        ).fetchone()
+        if applied is not None:
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS async_jobs (
+                job_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                job_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                attempt INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 1,
+                result TEXT,
+                error_code TEXT,
+                error_message TEXT
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_async_jobs_owner_created "
+            "ON async_jobs(owner_id, created_at DESC)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_async_jobs_owner_status "
+            "ON async_jobs(owner_id, status, created_at)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (7, self._now()),
         )
 
     def _write_collection(

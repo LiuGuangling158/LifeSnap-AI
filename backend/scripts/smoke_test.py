@@ -1237,12 +1237,21 @@ def _check_agent_quality_governance(client: ApiClient) -> None:
         {"admin_key": "smoke-admin-key"},
     )
     _assert(status == 200, "Quality evaluation should obtain an admin session")
-    status, run = client.request(
+    admin_headers = {"Authorization": f"Bearer {session['token']}"}
+    status, job = client.request(
         "POST",
-        "/quality/evaluations/run",
-        headers={"Authorization": f"Bearer {session['token']}"},
+        "/jobs/agent-quality-evaluation",
+        headers=admin_headers,
     )
-    _assert(status == 200, "Quality evaluation should run with an admin session")
+    _assert(status == 202, "Quality evaluation job should be accepted with an admin session")
+    for _ in range(50):
+        status, job = client.request("GET", f"/jobs/{job['job_id']}", headers=admin_headers)
+        _assert(status == 200, "Queued quality evaluation should be queryable")
+        if job["status"] in {"succeeded", "failed", "cancelled"}:
+            break
+        time.sleep(0.05)
+    _assert(job["status"] == "succeeded", "Quality evaluation job should succeed")
+    run = job["result"]
     _assert(run["total_cases"] >= 4, "Quality evaluation should include standard cases")
     _assert(run["passed_cases"] == run["total_cases"], "Standard Agent evaluation should pass")
 

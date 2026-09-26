@@ -438,6 +438,12 @@ class Settings:
     rag_semantic_weight: float = field(
         default_factory=lambda: _env_float("LIFESNAP_RAG_SEMANTIC_WEIGHT", 0.65)
     )
+    async_job_worker_count: int = field(
+        default_factory=lambda: max(1, min(_env_int("LIFESNAP_ASYNC_JOB_WORKERS", 2), 4))
+    )
+    async_job_max_attempts: int = field(
+        default_factory=lambda: max(1, min(_env_int("LIFESNAP_ASYNC_JOB_MAX_ATTEMPTS", 3), 5))
+    )
 
     @property
     def business_tzinfo(self):

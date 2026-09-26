@@ -56,6 +56,20 @@ Write-like actions create a candidate that the user can edit and confirm.
 Read-only questions can return analysis and chart-ready data without changing
 personal records.
 
+## Durable asynchronous jobs
+
+Administrative work that can take longer than an HTTP request is submitted to a
+SQLite-backed queue. The in-process worker has bounded concurrency and the job
+record captures queued, running, succeeded, failed, or cancelled state, result,
+attempt count, and safe error details. On restart, queued jobs are dispatched
+again while interrupted running jobs are marked failed for an explicit retry.
+
+The first handlers are the offline Agent admission evaluation and RAG semantic
+reindex. They are submitted through `/jobs`, protected by the existing short
+administrator bearer session, and are polled by the administrator UI. This is a
+single-process deployment pattern; a distributed deployment should replace the
+worker implementation with a shared queue while retaining the job API contract.
+
 Each chat candidate is paired with a persisted server-side session containing
 an action type, candidate ID, lifecycle status and monotonically increasing
 revision. Edit, confirm and discard requests carry the expected revision and

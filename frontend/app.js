@@ -1398,10 +1398,13 @@ async function reindexAdminKnowledge() {
   state.adminKnowledgeReindexing = true;
   render();
   try {
-    const profile = await api("/agent/knowledge/reindex", {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    const job = await api("/jobs/rag-reindex", {
       method: "POST",
-      headers: await adminKnowledgeHeaders(adminKey),
+      headers,
     });
+    const completed = await waitForAsyncJob(job.job_id, headers);
+    const profile = completed.result ?? {};
     state.toast = profile.embedding_ready
       ? "语义索引已重建，下一次检索会使用 BM25 和向量融合。"
       : "当前仍使用本地 BM25。请关闭本地-only 模式并配置 Embedding 服务后重建。";
@@ -1635,7 +1638,9 @@ async function runAgentQualityEvaluation() {
   render();
   try {
     const headers = await adminKnowledgeHeaders(adminKey);
-    const run = await api("/quality/evaluations/run", { method: "POST", headers });
+    const job = await api("/jobs/agent-quality-evaluation", { method: "POST", headers });
+    const completed = await waitForAsyncJob(job.job_id, headers);
+    const run = completed.result ?? {};
     state.adminQuality = await api("/quality/summary");
     const admitted = Boolean(run?.admission?.admitted);
     const failures = Array.isArray(run?.admission?.failed_critical_case_ids)
@@ -1655,6 +1660,19 @@ async function runAgentQualityEvaluation() {
     state.saving = false;
     render();
   }
+}
+
+async function waitForAsyncJob(jobId, headers, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = await api(`/jobs/${encodeURIComponent(String(jobId))}`, { headers });
+    if (job.status === "succeeded") return job;
+    if (job.status === "failed" || job.status === "cancelled") {
+      throw new Error(job.error_message || "异步任务未完成");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+  }
+  throw new Error("异步任务仍在执行，请稍后在管理页查看结果。");
 }
 
 async function createAdminSession(adminKey) {

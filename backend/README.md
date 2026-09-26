@@ -80,6 +80,22 @@ execution. Log payloads include request ID, route, status, latency, model
 strategy, tool count, and knowledge-hit count; they intentionally exclude user
 messages, OCR text, attachment bytes, and credentials.
 
+## Asynchronous jobs
+
+Long-running administrative work uses a SQLite-backed job queue instead of a
+request-bound background callback. Jobs survive request completion and retain
+their state, result, attempt count, and error details for audit and retry.
+
+- `POST /jobs/agent-quality-evaluation` queues the offline Agent admission suite.
+- `POST /jobs/rag-reindex` queues RAG semantic index construction.
+- `GET /jobs` and `GET /jobs/{job_id}` return recent work and durable status.
+- `POST /jobs/{job_id}/retry` retries failed or cancelled work within its attempt limit.
+- `POST /jobs/{job_id}/cancel` cancels queued work before a worker claims it.
+
+These endpoints require a short-lived administrator bearer session. Configure
+`LIFESNAP_ASYNC_JOB_WORKERS` (default `2`, maximum `4`) and
+`LIFESNAP_ASYNC_JOB_MAX_ATTEMPTS` (default `3`, maximum `5`) when needed.
+
 Prometheus-compatible process metrics are available at GET /metrics. They
 include HTTP request counts, request duration summaries, Agent execution counts,
 and process uptime. The endpoint exposes only operational labels and should be

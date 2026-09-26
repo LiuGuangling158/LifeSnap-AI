@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.diaries import router as diaries_router
 from app.api.diagnostics import router as diagnostics_router
 from app.api.health import router as health_router
+from app.api.jobs import router as jobs_router
 from app.api.ocr import router as ocr_router
 from app.api.observability import metrics_router, router as observability_router
 from app.api.quality import router as quality_router
@@ -23,10 +25,24 @@ from app.api.tasks import router as tasks_router
 from app.core.error_handlers import register_exception_handlers
 from app.core.config import settings
 from app.core.request_middleware import register_request_middleware
+from app.services.async_job_service import async_job_service
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    async_job_service.start()
+    try:
+        yield
+    finally:
+        async_job_service.shutdown()
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.app_name, version=settings.app_version)
+    app = FastAPI(
+        title=settings.app_name,
+        version=settings.app_version,
+        lifespan=lifespan,
+    )
     register_request_middleware(app)
     register_exception_handlers(app)
     app.include_router(health_router)
@@ -45,6 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(diagnostics_router)
     app.include_router(observability_router)
     app.include_router(quality_router)
+    app.include_router(jobs_router)
     app.include_router(reports_router)
     app.include_router(ocr_router)
     frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
