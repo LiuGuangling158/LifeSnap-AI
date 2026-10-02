@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from app.services.bill_candidate_store import bill_candidate_store
 from app.services.chat_service import chat_service
 from app.services.diary_candidate_store import diary_candidate_store
 from app.services.external_ai_parser import external_ai_parser
+from app.services.agent_runtime_service import agent_runtime_service
 from app.services.rag_retriever import hybrid_rag_retriever
 from app.services.sqlite_state_store import sqlite_state_store
 from app.services.task_candidate_store import task_candidate_store
@@ -51,6 +53,14 @@ class AgentQualityService:
             AgentQualityEvaluationRun.model_validate(item)
             for item in sqlite_state_store.list_agent_quality_evaluations(limit=10)
         ]
+        latest_offline = next(
+            (run for run in recent_evaluations if run.execution_mode == "offline"),
+            None,
+        )
+        latest_live = next(
+            (run for run in recent_evaluations if run.execution_mode == "live"),
+            None,
+        )
         return AgentQualitySummary(
             generated_at=datetime.now(timezone.utc),
             feedback_count=feedback_count,
@@ -66,7 +76,8 @@ class AgentQualityService:
             )
             if feedback_count
             else None,
-            latest_evaluation=recent_evaluations[0] if recent_evaluations else None,
+            latest_evaluation=latest_offline,
+            latest_live_evaluation=latest_live,
             recent_evaluations=recent_evaluations,
         )
 
@@ -76,12 +87,19 @@ class AgentQualityService:
         execution_mode: Literal["offline", "live"] = "offline",
     ) -> AgentQualityEvaluationRun:
         suite = self._load_suite()
+        model_trace = agent_runtime_service.model_trace()
+        if execution_mode == "live" and not model_trace.external_model_ready:
+            raise RuntimeError(
+                "Live evaluation requires an external model with privacy consent enabled"
+            )
         baseline = self._compatible_baseline(suite, execution_mode)
         results: list[AgentQualityEvaluationCase] = []
         strategy = "unknown"
+        started_at = time.perf_counter()
 
         with self._provider_mode(execution_mode):
             for fixture in suite["cases"]:
+                case_started_at = time.perf_counter()
                 response = chat_service.handle_message(
                     ChatMessageRequest(message=fixture["message"])
                 )
@@ -121,6 +139,15 @@ class AgentQualityService:
                         critical=bool(fixture.get("critical", False)),
                         expected_confirmation=expected_confirmation,
                         actual_confirmation=response.need_user_confirmation,
+                        latency_ms=round((time.perf_counter() - case_started_at) * 1000, 2),
+                        model_strategy=(
+                            response.model_trace.strategy if response.model_trace else None
+                        ),
+                        external_model_ready=(
+                            response.model_trace.external_model_ready
+                            if response.model_trace
+                            else None
+                        ),
                     )
                 )
                 self._discard_candidate(
@@ -147,6 +174,10 @@ class AgentQualityService:
             dataset_id=suite["dataset_id"],
             dataset_version=suite["dataset_version"],
             execution_mode=execution_mode,
+            duration_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            online_model_ready=(model_trace.external_model_ready if execution_mode == "live" else None),
+            online_model_provider=(model_trace.provider if execution_mode == "live" else None),
+            online_model=(model_trace.runtime_model if execution_mode == "live" else None),
             admission=admission,
             regression=regression,
         )

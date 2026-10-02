@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class AsyncJobType(str, Enum):
     agent_quality_evaluation = "agent_quality_evaluation"
+    agent_quality_evaluation_live = "agent_quality_evaluation_live"
     rag_reindex = "rag_reindex"
 
 

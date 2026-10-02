@@ -87,6 +87,9 @@ request-bound background callback. Jobs survive request completion and retain
 their state, result, attempt count, and error details for audit and retry.
 
 - `POST /jobs/agent-quality-evaluation` queues the offline Agent admission suite.
+- `POST /jobs/agent-quality-evaluation-live` queues an administrator-triggered
+  real-model shadow evaluation. It requires an externally ready model and does
+  not change the offline CI admission decision.
 - `POST /jobs/rag-reindex` queues RAG semantic index construction.
 - `GET /jobs` and `GET /jobs/{job_id}` return recent work and durable status.
 - `POST /jobs/{job_id}/retry` retries failed or cancelled work within its attempt limit.

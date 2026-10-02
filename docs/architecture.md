@@ -70,6 +70,15 @@ administrator bearer session, and are polled by the administrator UI. This is a
 single-process deployment pattern; a distributed deployment should replace the
 worker implementation with a shared queue while retaining the job API contract.
 
+## Online Agent shadow evaluation
+
+The offline suite remains the deterministic CI release gate. An administrator
+can separately run the same versioned suite with the configured live model.
+Online runs require an externally ready model and record per-case latency,
+runtime strategy, provider and model metadata. They establish their own live
+baseline and regression history, but never replace the latest offline admission
+decision used by production readiness.
+
 Each chat candidate is paired with a persisted server-side session containing
 an action type, candidate ID, lifecycle status and monotonically increasing
 revision. Edit, confirm and discard requests carry the expected revision and

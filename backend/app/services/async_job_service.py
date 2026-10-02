@@ -106,6 +106,10 @@ class AsyncJobService:
     def _execute(self, job_type: AsyncJobType) -> dict[str, Any]:
         if job_type == AsyncJobType.agent_quality_evaluation:
             return agent_quality_service.run_evaluation().model_dump(mode="json")
+        if job_type == AsyncJobType.agent_quality_evaluation_live:
+            return agent_quality_service.run_evaluation(
+                execution_mode="live"
+            ).model_dump(mode="json")
         if job_type == AsyncJobType.rag_reindex:
             return agent_knowledge_base.reindex().model_dump(mode="json")
         raise ValueError(f"Unsupported asynchronous job type: {job_type}")

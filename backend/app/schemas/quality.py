@@ -50,6 +50,9 @@ class AgentQualityEvaluationCase(BaseModel):
     critical: bool = False
     expected_confirmation: bool | None = None
     actual_confirmation: bool | None = None
+    latency_ms: float | None = Field(default=None, ge=0)
+    model_strategy: str | None = Field(default=None, max_length=120)
+    external_model_ready: bool | None = None
 
 
 class AgentQualityEvaluationRun(BaseModel):
@@ -63,6 +66,10 @@ class AgentQualityEvaluationRun(BaseModel):
     dataset_id: str = Field(default="agent-admission", min_length=1, max_length=80)
     dataset_version: str = Field(default="v1", min_length=1, max_length=40)
     execution_mode: Literal["offline", "live"] = "offline"
+    duration_ms: float | None = Field(default=None, ge=0)
+    online_model_ready: bool | None = None
+    online_model_provider: str | None = Field(default=None, max_length=80)
+    online_model: str | None = Field(default=None, max_length=160)
     admission: AgentQualityAdmission = Field(default_factory=AgentQualityAdmission)
     regression: AgentQualityRegression = Field(default_factory=AgentQualityRegression)
 
@@ -76,4 +83,5 @@ class AgentQualitySummary(BaseModel):
     acceptance_rate: float | None = None
     correction_rate: float | None = None
     latest_evaluation: AgentQualityEvaluationRun | None = None
+    latest_live_evaluation: AgentQualityEvaluationRun | None = None
     recent_evaluations: list[AgentQualityEvaluationRun] = Field(default_factory=list)

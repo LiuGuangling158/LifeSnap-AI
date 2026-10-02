@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.schemas.async_job import AsyncJobStatus, AsyncJobType
 from app.services.async_job_service import async_job_service
@@ -39,6 +39,15 @@ class AsyncJobServiceTests(unittest.TestCase):
         self.assertIsNotNone(latest)
         self.assertEqual(latest.status, AsyncJobStatus.succeeded)
         self.assertTrue(latest.result["admission"]["admitted"])
+
+    @patch("app.services.async_job_service.agent_quality_service.run_evaluation")
+    def test_live_evaluation_job_uses_live_execution_mode(self, run_evaluation) -> None:
+        run_evaluation.return_value = Mock(model_dump=Mock(return_value={"mode": "live"}))
+
+        result = async_job_service._execute(AsyncJobType.agent_quality_evaluation_live)
+
+        self.assertEqual(result, {"mode": "live"})
+        run_evaluation.assert_called_once_with(execution_mode="live")
 
 
 if __name__ == "__main__":

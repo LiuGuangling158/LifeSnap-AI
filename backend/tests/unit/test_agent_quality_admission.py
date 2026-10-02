@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -89,5 +90,44 @@ class AgentQualityAdmissionTests(unittest.TestCase):
         self.assertEqual(regression.newly_failed_case_ids, ["bill_dining"])
         self.assertFalse(admission.admitted)
         self.assertIn("quality_regression:bill_dining", admission.failure_reasons)
+
+    @patch("app.services.agent_quality_service.agent_runtime_service.model_trace")
+    def test_live_evaluation_requires_ready_external_model(self, model_trace) -> None:
+        model_trace.return_value.external_model_ready = False
+
+        with self.assertRaisesRegex(RuntimeError, "external model"):
+            agent_quality_service.run_evaluation(execution_mode="live")
+
+    @patch("app.services.agent_quality_service.sqlite_state_store.list_agent_quality_evaluations")
+    def test_summary_keeps_offline_gate_separate_from_live_observation(self, list_runs) -> None:
+        now = datetime.now(timezone.utc)
+        offline = AgentQualityEvaluationRun(
+            run_id=uuid4(),
+            created_at=now,
+            total_cases=1,
+            passed_cases=1,
+            pass_rate=1.0,
+            model_strategy="offline_rule_based_admission",
+        )
+        live = AgentQualityEvaluationRun(
+            run_id=uuid4(),
+            created_at=now,
+            total_cases=1,
+            passed_cases=0,
+            pass_rate=0.0,
+            model_strategy="base_llm_with_rag_and_function_calling",
+            execution_mode="live",
+            online_model_ready=True,
+            online_model_provider="deepseek",
+        )
+        list_runs.return_value = [
+            live.model_dump(mode="json"),
+            offline.model_dump(mode="json"),
+        ]
+
+        summary = agent_quality_service.summary()
+
+        self.assertEqual(summary.latest_evaluation.run_id, offline.run_id)
+        self.assertEqual(summary.latest_live_evaluation.run_id, live.run_id)
 if __name__ == "__main__":
     unittest.main()

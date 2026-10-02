@@ -38,6 +38,18 @@ def enqueue_agent_quality_evaluation(
     return _enqueue(AsyncJobType.agent_quality_evaluation, request)
 
 
+@router.post(
+    "/agent-quality-evaluation-live",
+    response_model=AsyncJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def enqueue_live_agent_quality_evaluation(
+    request: Request,
+    _: None = Depends(require_job_admin_session),
+) -> AsyncJobRead:
+    return _enqueue(AsyncJobType.agent_quality_evaluation_live, request)
+
+
 @router.post("/rag-reindex", response_model=AsyncJobRead, status_code=status.HTTP_202_ACCEPTED)
 def enqueue_rag_reindex(
     request: Request,

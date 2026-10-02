@@ -321,6 +321,11 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-admin-quality-live-run]")) {
+    runAgentQualityEvaluation("live");
+    return;
+  }
+
   const knowledgeTemplateButton = event.target.closest("[data-admin-knowledge-add]");
   if (knowledgeTemplateButton) {
     addAdminKnowledgeDocument(knowledgeTemplateButton.dataset.adminKnowledgeAdd);
@@ -1627,7 +1632,7 @@ async function establishAdminSession() {
   }
 }
 
-async function runAgentQualityEvaluation() {
+async function runAgentQualityEvaluation(executionMode = "offline") {
   if (state.saving) return;
   const adminKey = state.adminKnowledgeAdminKey.trim();
   if (!adminKey) {
@@ -1638,7 +1643,10 @@ async function runAgentQualityEvaluation() {
   render();
   try {
     const headers = await adminKnowledgeHeaders(adminKey);
-    const job = await api("/jobs/agent-quality-evaluation", { method: "POST", headers });
+    const endpoint = executionMode === "live"
+      ? "/jobs/agent-quality-evaluation-live"
+      : "/jobs/agent-quality-evaluation";
+    const job = await api(endpoint, { method: "POST", headers });
     const completed = await waitForAsyncJob(job.job_id, headers);
     const run = completed.result ?? {};
     state.adminQuality = await api("/quality/summary");
@@ -1649,11 +1657,18 @@ async function runAgentQualityEvaluation() {
     const regressions = Array.isArray(run?.regression?.newly_failed_case_ids)
       ? run.regression.newly_failed_case_ids
       : [];
-    showToast(
-      admitted
-        ? "准入通过：" + run.passed_cases + "/" + run.total_cases + " 用例通过。"
-        : "准入拒绝：" + (failures.join("、") || regressions.join("、") || "通过率未达标")
-    );
+    if (executionMode === "live") {
+      showToast(
+        "线上评测完成：" + run.passed_cases + "/" + run.total_cases
+        + " 通过，耗时 " + Math.round(Number(run.duration_ms ?? 0)) + " ms。"
+      );
+    } else {
+      showToast(
+        admitted
+          ? "准入通过：" + run.passed_cases + "/" + run.total_cases + " 用例通过。"
+          : "准入拒绝：" + (failures.join("、") || regressions.join("、") || "通过率未达标")
+      );
+    }
   } catch (error) {
     showToast(adminKnowledgeErrorMessage(error));
   } finally {
@@ -6402,6 +6417,9 @@ function renderAdminPage() {
               <button class="button ghost" type="button" data-admin-quality-run ${state.saving ? "disabled" : ""}>
                 ${icon("activity")}${state.saving ? "评测中..." : "运行 AI 质量评测"}
               </button>
+              <button class="button ghost" type="button" data-admin-quality-live-run ${state.saving ? "disabled" : ""}>
+                ${icon("spark")}${state.saving ? "评测中..." : "运行线上模型评测"}
+              </button>
             </div>
             <small class="form-hint">仅当后端启用 LIFESNAP_ALLOW_ADMIN_KEY_REVEAL=true 且从本机访问时可用。</small>
             <small class="form-hint">${escapeHtml(adminSessionStatusText())}</small>
@@ -6443,6 +6461,7 @@ function renderAdminPage() {
 
 function renderAdminQualityGovernance(summary) {
   const latest = summary?.latest_evaluation;
+  const latestLive = summary?.latest_live_evaluation;
   const recent = Array.isArray(summary?.recent_evaluations)
     ? summary.recent_evaluations.slice(0, 5)
     : [];
@@ -6475,10 +6494,19 @@ function renderAdminQualityGovernance(summary) {
     <p class="admin-note">${issueText
       ? `需要处理：${escapeHtml(issueText)}`
       : "当前版本未发现关键失败或质量回归。"}</p>
+    <p class="admin-note">${renderOnlineEvaluationSummary(latestLive)}</p>
     <div class="admin-version-list">
       ${recent.map(renderAdminQualityRun).join("")}
     </div>
   `;
+}
+
+function renderOnlineEvaluationSummary(run) {
+  if (!run) return "尚未运行线上模型评测。该操作会调用已配置的外部模型，但不会影响离线发布准入。";
+  const duration = Math.round(Number(run.duration_ms ?? 0));
+  const provider = String(run.online_model_provider || "外部模型");
+  const model = run.online_model ? ` · ${String(run.online_model)}` : "";
+  return `最近线上评测：${run.passed_cases}/${run.total_cases} 通过，${provider}${model}，耗时 ${duration} ms。`;
 }
 
 function renderAdminQualityRun(run) {
