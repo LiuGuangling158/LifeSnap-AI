@@ -7573,6 +7573,16 @@ button:focus-visible {
   color: #d44848;
 }
 
+.diagnostic-issue.critical > span {
+  background: #fff0f0;
+  color: #b42318;
+}
+
+.diagnostic-issue.resolved > span {
+  background: #edf7f2;
+  color: #0f8f71;
+}
+
 .diagnostic-issue strong {
   color: #17243a;
   font-size: 14px;

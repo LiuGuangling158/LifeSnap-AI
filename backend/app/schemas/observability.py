@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -38,3 +39,37 @@ class MonitoringSummary(BaseModel):
     agent_average_latency_ms: float = Field(ge=0)
     agent_p95_latency_ms: float = Field(ge=0)
     agent_outcomes: dict[str, int] = Field(default_factory=dict)
+
+
+class AlertSeverity(str, Enum):
+    warning = "warning"
+    critical = "critical"
+
+
+class AlertStatus(str, Enum):
+    active = "active"
+    resolved = "resolved"
+
+
+class OperationalAlert(BaseModel):
+    alert_id: str = Field(min_length=1, max_length=80)
+    fingerprint: str = Field(min_length=1, max_length=120)
+    rule_id: str = Field(min_length=1, max_length=80)
+    severity: AlertSeverity
+    status: AlertStatus
+    title: str = Field(min_length=1, max_length=160)
+    summary: str = Field(min_length=1, max_length=320)
+    first_seen_at: datetime
+    last_seen_at: datetime
+    resolved_at: datetime | None = None
+    occurrence_count: int = Field(ge=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OperationalAlertSummary(BaseModel):
+    generated_at: datetime
+    active_count: int = Field(ge=0)
+    critical_count: int = Field(ge=0)
+    warning_count: int = Field(ge=0)
+    resolved_count: int = Field(ge=0)
+    alerts: list[OperationalAlert] = Field(default_factory=list)

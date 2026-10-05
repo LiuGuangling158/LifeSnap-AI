@@ -107,6 +107,18 @@ counts, Agent P95 latency, and uptime at /metrics. The included monitoring
 configuration and alert rules are starter assets: production deployment must
 replace the scrape target and configure a real alert delivery destination.
 
+The application also maintains durable alert state for a high HTTP error rate,
+high Agent P95 latency, a rejected offline Agent admission gate, and production
+readiness action items. Alert records are fingerprinted, incremented on repeat
+occurrence, and resolved rather than deleted when a condition clears. The
+diagnostics view reads this state from `/observability/alerts`; the background
+evaluator runs periodically and can be invoked immediately through
+`POST /observability/alerts/evaluate`. These local signals complement, rather
+than replace, Prometheus and Alertmanager in a production deployment. A
+privacy-safe `operational_alert` structured log event is emitted only on a
+lifecycle transition, and active counts are exported as
+`lifesnap_operational_alerts_active` for metric-based dashboards.
+
 ## Evolution Path
 
 1. Keep the current single-process deployment for local and pilot use.

@@ -85,6 +85,14 @@ LifeSnap AI 使用 FastAPI 同时提供业务 API 和静态前端。当前可以
 时间。仓库中的监控配置和告警规则是启动资产；正式部署前必须替换抓取目标并配置真实
 告警接收端。
 
+应用同时维护持久化的本地运行告警状态，覆盖 HTTP 错误率过高、Agent P95 时延过高、
+离线 Agent 准入被拒绝以及生产就绪度需处理项。告警以指纹去重，重复触发时累计次数，
+条件恢复后保留已恢复历史而不是直接删除。诊断页从 `/observability/alerts` 读取状态；
+后台评估器会周期运行，也可通过 `POST /observability/alerts/evaluate` 立即执行。这些
+本地信号用于补充 Prometheus 与 Alertmanager，而不是替代生产环境的值班告警投递。告警
+状态发生生命周期变化时，系统会输出不含用户内容的 `operational_alert` 结构化日志事件，
+并在 `/metrics` 导出 `lifesnap_operational_alerts_active`，便于统一到指标看板。
+
 ## 演进路径
 
 1. 本地与试点阶段继续使用当前单进程部署。

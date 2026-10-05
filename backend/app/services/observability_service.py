@@ -119,6 +119,27 @@ class ObservabilityService:
         )
         return trace
 
+    def record_operational_alert_event(
+        self,
+        *,
+        alert_id: str,
+        rule_id: str,
+        severity: str,
+        status: str,
+        occurrence_count: int,
+    ) -> None:
+        """Emit lifecycle events without carrying diagnostic or user content."""
+        self._emit(
+            {
+                "event": "operational_alert",
+                "alert_id": alert_id,
+                "rule_id": rule_id,
+                "severity": severity,
+                "status": status,
+                "occurrence_count": occurrence_count,
+            }
+        )
+
     def summary(self, *, owner_id: str) -> MonitoringSummary:
         with self._lock:
             request_count = sum(self._http_counts.values())
@@ -207,6 +228,21 @@ class ObservabilityService:
                         f"lifesnap_agent_execution_p95_seconds {self._percentile(self._agent_latency, 0.95) / 1000:.6f}",
                     ]
                 )
+        active_alert_counts = {"critical": 0, "warning": 0}
+        for alert in sqlite_state_store.list_operational_alerts(include_resolved=False):
+            severity = str(alert.get("severity", ""))
+            if severity in active_alert_counts:
+                active_alert_counts[severity] += 1
+        lines.extend(
+            [
+                "# HELP lifesnap_operational_alerts_active Active application alert states by severity.",
+                "# TYPE lifesnap_operational_alerts_active gauge",
+                *[
+                    f'lifesnap_operational_alerts_active{{severity="{severity}"}} {count}'
+                    for severity, count in active_alert_counts.items()
+                ],
+            ]
+        )
         return "\n".join(lines) + "\n"
 
     def _agent_outcome(self, response: ChatMessageResponse) -> str:

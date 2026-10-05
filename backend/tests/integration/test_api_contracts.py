@@ -36,6 +36,16 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("lifesnap_http_requests_total", response.text)
         self.assertIn("lifesnap_http_request_p95_seconds", response.text)
+        self.assertIn("lifesnap_operational_alerts_active", response.text)
+
+    def test_operational_alert_contract_evaluates_and_returns_history(self) -> None:
+        evaluated = self.client.post("/observability/alerts/evaluate")
+        listed = self.client.get("/observability/alerts")
+
+        self.assertEqual(evaluated.status_code, 200)
+        self.assertEqual(listed.status_code, 200)
+        self.assertIn("active_count", evaluated.json())
+        self.assertIn("alerts", listed.json())
 
     def test_quality_summary_contract_is_available_without_login(self) -> None:
         response = self.client.get("/quality/summary")

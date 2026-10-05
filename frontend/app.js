@@ -157,6 +157,7 @@ const state = {
   diagnostics: null,
   readinessDiagnostics: null,
   integrationDiagnostics: null,
+  operationalAlerts: null,
   integrationProbe: null,
   auditLogOpen: false,
   auditLogLoading: false,
@@ -3743,14 +3744,16 @@ async function refreshDiagnostics() {
   state.diagnosticsLoading = true;
   render();
   try {
-    const [readiness, dataQuality, integrations] = await Promise.all([
+    const [readiness, dataQuality, integrations, alerts] = await Promise.all([
       api("/diagnostics/readiness"),
       api("/diagnostics/data-quality?issue_limit=20"),
       api("/diagnostics/integrations"),
+      api("/observability/alerts/evaluate", { method: "POST" }),
     ]);
     state.readinessDiagnostics = readiness;
     state.diagnostics = dataQuality;
     state.integrationDiagnostics = integrations;
+    state.operationalAlerts = alerts;
   } catch (error) {
     state.toast = error.message || "系统自检失败";
   } finally {
@@ -9301,6 +9304,7 @@ function renderDiagnosticsModal() {
   const diagnostics = state.diagnostics;
   const readiness = state.readinessDiagnostics;
   const integrationDiagnostics = state.integrationDiagnostics;
+  const operationalAlerts = state.operationalAlerts;
   const issues = diagnostics?.issues ?? [];
   return `
     <div class="modal-backdrop" role="presentation">
@@ -9321,8 +9325,9 @@ function renderDiagnosticsModal() {
           </div>
         </div>
         <div class="diagnostics-body">
-          ${state.diagnosticsLoading && !readiness && !diagnostics && !integrationDiagnostics ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
+          ${state.diagnosticsLoading && !readiness && !diagnostics && !integrationDiagnostics && !operationalAlerts ? `<p class="diagnostics-empty">正在运行系统自检...</p>` : ""}
           ${readiness ? renderReadinessDiagnostics(readiness) : ""}
+          ${operationalAlerts ? renderOperationalAlerts(operationalAlerts) : ""}
           ${integrationDiagnostics ? renderIntegrationDiagnostics(integrationDiagnostics) : ""}
           ${renderMockProviderGuide()}
           ${renderExternalProviderGuide()}
@@ -9349,6 +9354,50 @@ function renderDiagnosticsModal() {
         </div>
       </section>
     </div>
+  `;
+}
+
+function renderOperationalAlerts(alertSummary) {
+  const alerts = alertSummary.alerts ?? [];
+  return `
+    <section class="diagnostics-section operational-alerts-section">
+      <div class="diagnostics-section-head">
+        <div>
+          <h3>运行告警</h3>
+          <span>${escapeHtml(formatDate(alertSummary.generated_at))}</span>
+        </div>
+      </div>
+      <div class="diagnostics-summary">
+        ${diagnosticMetric("活动", alertSummary.active_count ?? 0, (alertSummary.active_count ?? 0) > 0 ? "action_required" : "ready")}
+        ${diagnosticMetric("严重", alertSummary.critical_count ?? 0, (alertSummary.critical_count ?? 0) > 0 ? "action_required" : "ready")}
+        ${diagnosticMetric("警告", alertSummary.warning_count ?? 0, (alertSummary.warning_count ?? 0) > 0 ? "warning" : "ready")}
+        ${diagnosticMetric("已恢复", alertSummary.resolved_count ?? 0, "ready")}
+      </div>
+      ${alerts.length ? `
+        <div class="diagnostics-list">
+          ${alerts.map(renderOperationalAlert).join("")}
+        </div>
+      ` : `<p class="diagnostics-empty">当前没有活动或历史运行告警。</p>`}
+    </section>
+  `;
+}
+
+function renderOperationalAlert(alert) {
+  const active = alert.status === "active";
+  const severity = active ? (alert.severity === "critical" ? "critical" : "warning") : "resolved";
+  const statusLabel = active ? (alert.severity === "critical" ? "严重" : "警告") : "已恢复";
+  const occurrenceCount = alert.occurrence_count ?? 1;
+  const firstSeen = alert.first_seen_at ? formatDate(alert.first_seen_at) : "--";
+  const lastSeen = alert.last_seen_at ? formatDate(alert.last_seen_at) : "--";
+  return `
+    <article class="diagnostic-issue ${severity}">
+      <span>${statusLabel}</span>
+      <div>
+        <strong>${escapeHtml(alert.title || alert.rule_id || "运行告警")}</strong>
+        <p>${escapeHtml(alert.summary || "请检查相关服务配置与运行指标。")}</p>
+        <small>首次 ${escapeHtml(firstSeen)} | 最近 ${escapeHtml(lastSeen)} | 触发 ${occurrenceCount} 次</small>
+      </div>
+    </article>
   `;
 }
 

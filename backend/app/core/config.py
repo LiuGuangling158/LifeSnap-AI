@@ -444,6 +444,21 @@ class Settings:
     async_job_max_attempts: int = field(
         default_factory=lambda: max(1, min(_env_int("LIFESNAP_ASYNC_JOB_MAX_ATTEMPTS", 3), 5))
     )
+    alert_evaluation_interval_seconds: int = field(
+        default_factory=lambda: max(0, min(_env_int("LIFESNAP_ALERT_EVALUATION_INTERVAL_SECONDS", 60), 3600))
+    )
+    alert_minimum_request_count: int = field(
+        default_factory=lambda: max(1, _env_int("LIFESNAP_ALERT_MINIMUM_REQUEST_COUNT", 20))
+    )
+    alert_minimum_agent_trace_count: int = field(
+        default_factory=lambda: max(1, _env_int("LIFESNAP_ALERT_MINIMUM_AGENT_TRACE_COUNT", 10))
+    )
+    alert_http_error_rate_threshold: float = field(
+        default_factory=lambda: min(1.0, max(0.0, _env_float("LIFESNAP_ALERT_HTTP_ERROR_RATE_THRESHOLD", 0.05)))
+    )
+    alert_agent_p95_latency_ms: float = field(
+        default_factory=lambda: max(1.0, _env_float("LIFESNAP_ALERT_AGENT_P95_LATENCY_MS", 8000.0))
+    )
 
     @property
     def business_tzinfo(self):

@@ -26,14 +26,17 @@ from app.core.error_handlers import register_exception_handlers
 from app.core.config import settings
 from app.core.request_middleware import register_request_middleware
 from app.services.async_job_service import async_job_service
+from app.services.alerting_service import alerting_service
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     async_job_service.start()
+    alerting_service.start()
     try:
         yield
     finally:
+        alerting_service.shutdown()
         async_job_service.shutdown()
 
 

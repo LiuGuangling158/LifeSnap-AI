@@ -115,6 +115,31 @@ GET /observability/agent-traces and the monitoring summary through
 GET /observability/summary. Trace records store tool names, knowledge source
 IDs, step statuses, model strategy, and latency without persisting chat text.
 
+### Application alert state
+
+The service also evaluates a small set of privacy-safe, durable application
+alerts: elevated HTTP 5xx rate, high Agent P95 latency, a rejected offline
+Agent admission gate, and production-readiness action items. `GET
+/observability/alerts` returns the persisted state, while `POST
+/observability/alerts/evaluate` performs an immediate evaluation. A resolved
+condition remains visible as history instead of being deleted. Repeated
+evaluations update one alert fingerprint and increment its occurrence count.
+
+The in-product **System diagnostics** view refreshes these alert states. They
+are a local operational signal, not a replacement for Prometheus Alertmanager
+or an on-call delivery system. Lifecycle changes are also emitted as structured
+`operational_alert` log events, and active alert counts are exported through
+`lifesnap_operational_alerts_active` on `/metrics`.
+
+Configure the evaluator with these environment variables when deploying:
+
+- `LIFESNAP_ALERT_EVALUATION_INTERVAL_SECONDS` (default `60`, set `0` to
+  disable the periodic loop)
+- `LIFESNAP_ALERT_MINIMUM_REQUEST_COUNT` (default `20`)
+- `LIFESNAP_ALERT_MINIMUM_AGENT_TRACE_COUNT` (default `10`)
+- `LIFESNAP_ALERT_HTTP_ERROR_RATE_THRESHOLD` (default `0.05`)
+- `LIFESNAP_ALERT_AGENT_P95_LATENCY_MS` (default `8000`)
+
 ## Error Responses
 
 HTTP errors keep FastAPI's familiar `detail` field and add a stable `error`

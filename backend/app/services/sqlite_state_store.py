@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,7 @@ class SQLiteStateStore:
     database. Legacy files are read only once, on first access to a namespace.
     """
 
-    _migration_version = 7
+    _migration_version = 8
     _collection_tables = {
         "bills": ("bills", "id"),
         "tasks": ("tasks", "id"),
@@ -548,6 +549,110 @@ class SQLiteStateStore:
             finally:
                 connection.close()
 
+    def sync_operational_alerts(
+        self,
+        alerts: list[dict[str, Any]],
+        *,
+        owner_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Upsert currently firing alerts and resolve no-longer-firing records."""
+        owner_id = owner_id or current_owner_id()
+        now = self._now()
+        fingerprints = {str(alert["fingerprint"]) for alert in alerts}
+        with self._lock:
+            connection = self._connect()
+            try:
+                for alert in alerts:
+                    fingerprint = str(alert["fingerprint"])
+                    existing = connection.execute(
+                        "SELECT alert_id FROM operational_alerts WHERE owner_id = ? AND fingerprint = ?",
+                        (owner_id, fingerprint),
+                    ).fetchone()
+                    if existing is None:
+                        connection.execute(
+                            """
+                            INSERT INTO operational_alerts(
+                                alert_id, owner_id, fingerprint, rule_id, severity, status,
+                                title, summary, first_seen_at, last_seen_at, resolved_at,
+                                occurrence_count, metadata
+                            ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, NULL, 1, ?)
+                            """,
+                            (
+                                uuid.uuid4().hex,
+                                owner_id,
+                                fingerprint,
+                                str(alert["rule_id"]),
+                                str(alert["severity"]),
+                                str(alert["title"]),
+                                str(alert["summary"]),
+                                now,
+                                now,
+                                self._json_value(alert.get("metadata", {})),
+                            ),
+                        )
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE operational_alerts
+                            SET rule_id = ?, severity = ?, status = 'active', title = ?,
+                                summary = ?, last_seen_at = ?, resolved_at = NULL,
+                                occurrence_count = occurrence_count + 1, metadata = ?
+                            WHERE owner_id = ? AND fingerprint = ?
+                            """,
+                            (
+                                str(alert["rule_id"]),
+                                str(alert["severity"]),
+                                str(alert["title"]),
+                                str(alert["summary"]),
+                                now,
+                                self._json_value(alert.get("metadata", {})),
+                                owner_id,
+                                fingerprint,
+                            ),
+                        )
+
+                if fingerprints:
+                    placeholders = ", ".join("?" for _ in fingerprints)
+                    connection.execute(
+                        "UPDATE operational_alerts SET status = 'resolved', resolved_at = ?, "
+                        "last_seen_at = ? WHERE owner_id = ? AND status = 'active' "
+                        f"AND fingerprint NOT IN ({placeholders})",
+                        (now, now, owner_id, *sorted(fingerprints)),
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE operational_alerts SET status = 'resolved', resolved_at = ?, "
+                        "last_seen_at = ? WHERE owner_id = ? AND status = 'active'",
+                        (now, now, owner_id),
+                    )
+                connection.commit()
+            finally:
+                connection.close()
+        return self.list_operational_alerts(owner_id=owner_id, include_resolved=True)
+
+    def list_operational_alerts(
+        self,
+        *,
+        owner_id: str | None = None,
+        include_resolved: bool = True,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                filter_sql = "" if include_resolved else "AND status = 'active'"
+                rows = connection.execute(
+                    "SELECT * FROM operational_alerts WHERE owner_id = ? "
+                    + filter_sql
+                    + " ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, "
+                    "last_seen_at DESC LIMIT ?",
+                    (owner_id, max(1, min(limit, 200))),
+                ).fetchall()
+                return [self._operational_alert_row(row) for row in rows]
+            finally:
+                connection.close()
+
     def _finish_async_job(
         self,
         job_id: Any,
@@ -623,6 +728,12 @@ class SQLiteStateStore:
         data["result"] = json.loads(data["result"]) if data.get("result") else None
         return data
 
+    @staticmethod
+    def _operational_alert_row(row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        data["metadata"] = json.loads(data["metadata"]) if data.get("metadata") else {}
+        return data
+
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
@@ -662,6 +773,7 @@ class SQLiteStateStore:
                 self._apply_observability_migration(connection)
                 self._apply_agent_quality_migration(connection)
                 self._apply_async_job_migration(connection)
+                self._apply_operational_alert_migration(connection)
                 connection.commit()
             finally:
                 connection.close()
@@ -988,6 +1100,42 @@ class SQLiteStateStore:
         connection.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
             (7, self._now()),
+        )
+
+    def _apply_operational_alert_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (8,),
+        ).fetchone()
+        if applied is not None:
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS operational_alerts (
+                alert_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                rule_id TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                status TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                resolved_at TEXT,
+                occurrence_count INTEGER NOT NULL,
+                metadata TEXT NOT NULL,
+                UNIQUE(owner_id, fingerprint)
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_operational_alerts_owner_status_seen "
+            "ON operational_alerts(owner_id, status, last_seen_at DESC)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (8, self._now()),
         )
 
     def _write_collection(

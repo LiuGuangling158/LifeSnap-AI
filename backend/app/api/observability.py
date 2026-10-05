@@ -4,7 +4,9 @@ from app.core.user_context import current_owner_id
 from app.schemas.observability import (
     AgentExecutionTraceListResponse,
     MonitoringSummary,
+    OperationalAlertSummary,
 )
+from app.services.alerting_service import alerting_service
 from app.services.observability_service import observability_service
 
 
@@ -23,6 +25,16 @@ def list_agent_traces(
     limit: int = Query(default=20, ge=1, le=200),
 ) -> AgentExecutionTraceListResponse:
     return observability_service.list_agent_traces(owner_id=current_owner_id(), limit=limit)
+
+
+@router.get("/alerts", response_model=OperationalAlertSummary)
+def get_operational_alerts() -> OperationalAlertSummary:
+    return alerting_service.summary()
+
+
+@router.post("/alerts/evaluate", response_model=OperationalAlertSummary)
+def evaluate_operational_alerts() -> OperationalAlertSummary:
+    return alerting_service.evaluate()
 
 
 @metrics_router.get("/metrics", include_in_schema=False)
