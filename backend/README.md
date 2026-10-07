@@ -82,9 +82,19 @@ messages, OCR text, attachment bytes, and credentials.
 
 ## Asynchronous jobs
 
-Long-running administrative work uses a SQLite-backed job queue instead of a
-request-bound background callback. Jobs survive request completion and retain
-their state, result, attempt count, and error details for audit and retry.
+Long-running administrative work uses a SQLite-backed durable job queue instead
+of a request-bound background callback. Jobs survive request completion and
+retain their state, result, attempt count, and safe error details for audit.
+Workers claim jobs with a database lease, renew that lease while executing, and
+recover only expired work after a restart. Transient execution failures enter a
+`retry_scheduled` state and use bounded exponential backoff before the final
+failure state. Lifecycle transitions are emitted as privacy-safe `async_job`
+JSON log events without task input, result payloads, or credentials.
+
+The worker provides at-least-once delivery. A late worker cannot commit after
+losing its lease, but a process failure can still cause an expired job to run
+again. Keep every job handler idempotent; the shipped evaluation and reindex
+handlers are safe to repeat.
 
 - `POST /jobs/agent-quality-evaluation` queues the offline Agent admission suite.
 - `POST /jobs/agent-quality-evaluation-live` queues an administrator-triggered
@@ -95,14 +105,24 @@ their state, result, attempt count, and error details for audit and retry.
 - `POST /jobs/{job_id}/retry` retries failed or cancelled work within its attempt limit.
 - `POST /jobs/{job_id}/cancel` cancels queued work before a worker claims it.
 
+`POST` endpoints accept an optional `Idempotency-Key` header. Reusing the same
+key for the same job type returns the original durable job rather than creating
+duplicate administrative work.
+
 These endpoints require a short-lived administrator bearer session. Configure
 `LIFESNAP_ASYNC_JOB_WORKERS` (default `2`, maximum `4`) and
-`LIFESNAP_ASYNC_JOB_MAX_ATTEMPTS` (default `3`, maximum `5`) when needed.
+`LIFESNAP_ASYNC_JOB_MAX_ATTEMPTS` (default `3`, maximum `5`),
+`LIFESNAP_ASYNC_JOB_POLL_INTERVAL_SECONDS` (default `0.5`),
+`LIFESNAP_ASYNC_JOB_LEASE_SECONDS` (default `300`), and
+`LIFESNAP_ASYNC_JOB_RETRY_BASE_SECONDS` (default `2`) when needed. This is a
+reliable single-node deployment pattern; use a shared queue and worker fleet
+before deploying multiple application nodes.
 
 Prometheus-compatible process metrics are available at GET /metrics. They
 include HTTP request counts, request duration summaries, Agent execution counts,
-and process uptime. The endpoint exposes only operational labels and should be
-restricted at the network boundary in production.
+durable job counts and queue lag, and process uptime. The endpoint exposes only
+operational labels and should be restricted at the network boundary in
+production.
 
 The repository includes a starter Prometheus scrape configuration at
 monitoring/prometheus.yml and alert rules at monitoring/alerts.yml. The rules

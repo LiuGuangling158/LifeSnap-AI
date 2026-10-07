@@ -140,6 +140,28 @@ class ObservabilityService:
             }
         )
 
+    def record_async_job_event(
+        self,
+        *,
+        job_id: str,
+        job_type: str,
+        status: str,
+        attempt: int,
+        max_attempts: int,
+        retry_delay_seconds: float | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "event": "async_job",
+            "job_id": job_id,
+            "job_type": job_type,
+            "status": status,
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+        }
+        if retry_delay_seconds is not None:
+            payload["retry_delay_seconds"] = round(retry_delay_seconds, 3)
+        self._emit(payload)
+
     def summary(self, *, owner_id: str) -> MonitoringSummary:
         with self._lock:
             request_count = sum(self._http_counts.values())
@@ -241,6 +263,37 @@ class ObservabilityService:
                     f'lifesnap_operational_alerts_active{{severity="{severity}"}} {count}'
                     for severity, count in active_alert_counts.items()
                 ],
+            ]
+        )
+        job_metrics = sqlite_state_store.async_job_status_counts()
+        job_status_counts = job_metrics["counts"]
+        job_statuses = ("queued", "retry_scheduled", "running", "succeeded", "failed", "cancelled")
+        lines.extend(
+            [
+                "# HELP lifesnap_async_jobs Durable asynchronous jobs by current status.",
+                "# TYPE lifesnap_async_jobs gauge",
+                *[
+                    f'lifesnap_async_jobs{{status="{status}"}} {job_status_counts.get(status, 0)}'
+                    for status in job_statuses
+                ],
+            ]
+        )
+        queue_lag_seconds = 0.0
+        oldest_available_at = job_metrics.get("oldest_available_at")
+        if oldest_available_at:
+            try:
+                available_at = datetime.fromisoformat(str(oldest_available_at).replace("Z", "+00:00"))
+                queue_lag_seconds = max(
+                    0.0,
+                    (datetime.now(timezone.utc) - available_at.astimezone(timezone.utc)).total_seconds(),
+                )
+            except ValueError:
+                queue_lag_seconds = 0.0
+        lines.extend(
+            [
+                "# HELP lifesnap_async_job_queue_lag_seconds Age of the oldest dispatchable job.",
+                "# TYPE lifesnap_async_job_queue_lag_seconds gauge",
+                f"lifesnap_async_job_queue_lag_seconds {queue_lag_seconds:.3f}",
             ]
         )
         return "\n".join(lines) + "\n"

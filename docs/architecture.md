@@ -60,15 +60,24 @@ personal records.
 
 Administrative work that can take longer than an HTTP request is submitted to a
 SQLite-backed queue. The in-process worker has bounded concurrency and the job
-record captures queued, running, succeeded, failed, or cancelled state, result,
-attempt count, and safe error details. On restart, queued jobs are dispatched
-again while interrupted running jobs are marked failed for an explicit retry.
+record captures queued, retry-scheduled, running, succeeded, failed, or
+cancelled state, result, attempt count, and safe error details. Claims use a
+database lease and a periodic heartbeat. On restart, only jobs with an expired
+lease are recovered; eligible failures use bounded exponential backoff before a
+final failure. Job submission accepts an idempotency key scoped to the job type,
+so a client retry does not duplicate administrative work.
+
+This is at-least-once delivery, not exactly-once execution: an expired lease can
+lead to a retry after process failure. Job handlers must therefore be
+idempotent. The current evaluation and RAG reindex handlers are safe to repeat.
 
 The first handlers are the offline Agent admission evaluation and RAG semantic
 reindex. They are submitted through `/jobs`, protected by the existing short
 administrator bearer session, and are polled by the administrator UI. This is a
 single-process deployment pattern; a distributed deployment should replace the
-worker implementation with a shared queue while retaining the job API contract.
+worker implementation with a shared queue and worker fleet while retaining the
+job API contract. Prometheus exports durable job state counts and oldest queue
+lag, with a starter backlog rule in `monitoring/alerts.yml`.
 
 ## Online Agent shadow evaluation
 

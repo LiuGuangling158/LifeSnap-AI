@@ -37,6 +37,8 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("lifesnap_http_requests_total", response.text)
         self.assertIn("lifesnap_http_request_p95_seconds", response.text)
         self.assertIn("lifesnap_operational_alerts_active", response.text)
+        self.assertIn("lifesnap_async_jobs", response.text)
+        self.assertIn("lifesnap_async_job_queue_lag_seconds", response.text)
 
     def test_operational_alert_contract_evaluates_and_returns_history(self) -> None:
         evaluated = self.client.post("/observability/alerts/evaluate")

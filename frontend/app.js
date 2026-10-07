@@ -1404,7 +1404,10 @@ async function reindexAdminKnowledge() {
   state.adminKnowledgeReindexing = true;
   render();
   try {
-    const headers = await adminKnowledgeHeaders(adminKey);
+    const headers = {
+      ...(await adminKnowledgeHeaders(adminKey)),
+      "Idempotency-Key": `web-job-rag-reindex-${crypto.randomUUID()}`,
+    };
     const job = await api("/jobs/rag-reindex", {
       method: "POST",
       headers,
@@ -1544,7 +1547,10 @@ async function resetAdminKnowledge() {
   state.saving = true;
   render();
   try {
-    const headers = await adminKnowledgeHeaders(adminKey);
+    const headers = {
+      ...(await adminKnowledgeHeaders(adminKey)),
+      "Idempotency-Key": `web-job-agent-quality-${executionMode}-${crypto.randomUUID()}`,
+    };
     const updated = await api("/agent/knowledge/reset", {
       method: "POST",
       headers,

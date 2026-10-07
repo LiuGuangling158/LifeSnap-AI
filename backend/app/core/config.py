@@ -444,6 +444,15 @@ class Settings:
     async_job_max_attempts: int = field(
         default_factory=lambda: max(1, min(_env_int("LIFESNAP_ASYNC_JOB_MAX_ATTEMPTS", 3), 5))
     )
+    async_job_poll_interval_seconds: float = field(
+        default_factory=lambda: min(10.0, max(0.1, _env_float("LIFESNAP_ASYNC_JOB_POLL_INTERVAL_SECONDS", 0.5)))
+    )
+    async_job_lease_seconds: int = field(
+        default_factory=lambda: max(30, min(_env_int("LIFESNAP_ASYNC_JOB_LEASE_SECONDS", 300), 3600))
+    )
+    async_job_retry_base_seconds: float = field(
+        default_factory=lambda: min(300.0, max(0.1, _env_float("LIFESNAP_ASYNC_JOB_RETRY_BASE_SECONDS", 2.0)))
+    )
     alert_evaluation_interval_seconds: int = field(
         default_factory=lambda: max(0, min(_env_int("LIFESNAP_ALERT_EVALUATION_INTERVAL_SECONDS", 60), 3600))
     )

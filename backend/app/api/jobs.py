@@ -33,9 +33,10 @@ def list_async_jobs(
 )
 def enqueue_agent_quality_evaluation(
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=128),
     _: None = Depends(require_job_admin_session),
 ) -> AsyncJobRead:
-    return _enqueue(AsyncJobType.agent_quality_evaluation, request)
+    return _enqueue(AsyncJobType.agent_quality_evaluation, request, idempotency_key)
 
 
 @router.post(
@@ -45,17 +46,19 @@ def enqueue_agent_quality_evaluation(
 )
 def enqueue_live_agent_quality_evaluation(
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=128),
     _: None = Depends(require_job_admin_session),
 ) -> AsyncJobRead:
-    return _enqueue(AsyncJobType.agent_quality_evaluation_live, request)
+    return _enqueue(AsyncJobType.agent_quality_evaluation_live, request, idempotency_key)
 
 
 @router.post("/rag-reindex", response_model=AsyncJobRead, status_code=status.HTTP_202_ACCEPTED)
 def enqueue_rag_reindex(
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=128),
     _: None = Depends(require_job_admin_session),
 ) -> AsyncJobRead:
-    return _enqueue(AsyncJobType.rag_reindex, request)
+    return _enqueue(AsyncJobType.rag_reindex, request, idempotency_key)
 
 
 @router.get("/{job_id}", response_model=AsyncJobRead)
@@ -113,13 +116,21 @@ def cancel_async_job(
     return job
 
 
-def _enqueue(job_type: AsyncJobType, request: Request) -> AsyncJobRead:
-    job = async_job_service.enqueue(job_type)
+def _enqueue(
+    job_type: AsyncJobType,
+    request: Request,
+    idempotency_key: str | None,
+) -> AsyncJobRead:
+    job = async_job_service.enqueue(job_type, idempotency_key=idempotency_key)
     audit_log_store.record(
         action="async_job_enqueued",
         entity_type="async_job",
         entity_id=job.job_id,
         request=request,
-        metadata={"job_type": job.job_type, "max_attempts": job.max_attempts},
+        metadata={
+            "job_type": job.job_type,
+            "max_attempts": job.max_attempts,
+            "idempotency_key_provided": bool(idempotency_key and idempotency_key.strip()),
+        },
     )
     return job

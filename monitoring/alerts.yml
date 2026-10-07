@@ -18,3 +18,12 @@ groups:
           severity: warning
         annotations:
           summary: LifeSnap Agent P95 latency is above 8 seconds.
+      - alert: LifeSnapAsyncJobQueueBacklog
+        expr: |
+          sum(lifesnap_async_jobs{status=~"queued|retry_scheduled"}) > 20
+          or lifesnap_async_job_queue_lag_seconds > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: LifeSnap durable asynchronous job queue is backlogged.
