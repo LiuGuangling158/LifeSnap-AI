@@ -31,7 +31,8 @@
 .admin-knowledge-search-panel,
 .admin-knowledge-version-panel,
 .admin-knowledge-editor-panel,
-.admin-knowledge-list-panel {
+.admin-knowledge-list-panel,
+.admin-job-operations-panel {
   display: grid;
   gap: 14px;
 }
@@ -219,6 +220,123 @@
   color: #33423b;
 }
 
+.admin-job-list {
+  display: grid;
+  border-top: 1px solid #e3eae6;
+}
+
+.admin-job-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border-bottom: 1px solid #e3eae6;
+  padding: 12px 0;
+}
+
+.admin-job-main,
+.admin-job-actions,
+.admin-job-events {
+  min-width: 0;
+}
+
+.admin-job-heading,
+.admin-job-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-job-heading {
+  justify-content: space-between;
+}
+
+.admin-job-heading strong {
+  color: #24332b;
+  font-size: 14px;
+}
+
+.admin-job-main > small,
+.admin-job-events small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-job-status {
+  flex: 0 0 auto;
+  border: 1px solid #d5e0d8;
+  border-radius: 999px;
+  background: #f4f8f5;
+  color: #486054;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.admin-job-status.running,
+.admin-job-status.queued,
+.admin-job-status.retry_scheduled {
+  border-color: #ecd29e;
+  background: #fff9eb;
+  color: #855d12;
+}
+
+.admin-job-status.succeeded {
+  border-color: #b9dcc8;
+  background: #eef8f1;
+  color: #236844;
+}
+
+.admin-job-status.failed {
+  border-color: #edc8c8;
+  background: #fff4f4;
+  color: #a62d2d;
+}
+
+.admin-job-error {
+  overflow-wrap: anywhere;
+  margin: 7px 0 0;
+  color: #9f3131;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-job-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.admin-job-actions .button {
+  min-height: 36px;
+}
+
+.admin-job-events,
+.admin-job-events-empty {
+  grid-column: 1 / -1;
+}
+
+.admin-job-events {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 10px 12px 10px 30px;
+  border-left: 2px solid #b9dcc8;
+  background: #fbfdfa;
+}
+
+.admin-job-events li::marker {
+  color: var(--accent);
+}
+
+.admin-job-events span {
+  color: #24332b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .admin-json-example {
   margin-top: 0;
 }
@@ -356,6 +474,14 @@
 
   .admin-version-card {
     grid-template-columns: 1fr;
+  }
+
+  .admin-job-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-job-actions {
+    justify-content: flex-start;
   }
 }
 

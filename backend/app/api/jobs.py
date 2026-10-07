@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
-from app.schemas.async_job import AsyncJobRead, AsyncJobType
+from app.schemas.async_job import AsyncJobEventRead, AsyncJobRead, AsyncJobType
 from app.services.admin_auth_service import admin_auth_service
 from app.services.async_job_service import async_job_service
 from app.services.audit_log_store import audit_log_store
@@ -72,6 +72,18 @@ def get_async_job(
     return job
 
 
+@router.get("/{job_id}/events", response_model=list[AsyncJobEventRead])
+def list_async_job_events(
+    job_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    _: None = Depends(require_job_admin_session),
+) -> list[AsyncJobEventRead]:
+    job = async_job_service.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return async_job_service.list_events(job.job_id, limit=limit)
+
+
 @router.post("/{job_id}/retry", response_model=AsyncJobRead, status_code=status.HTTP_202_ACCEPTED)
 def retry_async_job(
     job_id: str,
@@ -90,6 +102,28 @@ def retry_async_job(
         entity_id=job.job_id,
         request=request,
         metadata={"job_type": job.job_type, "attempt": job.attempt},
+    )
+    return job
+
+
+@router.post("/{job_id}/redrive", response_model=AsyncJobRead, status_code=status.HTTP_202_ACCEPTED)
+def redrive_async_job(
+    job_id: str,
+    request: Request,
+    _: None = Depends(require_job_admin_session),
+) -> AsyncJobRead:
+    job = async_job_service.redrive(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only final failed jobs can be redriven",
+        )
+    audit_log_store.record(
+        action="async_job_redriven",
+        entity_type="async_job",
+        entity_id=job.job_id,
+        request=request,
+        metadata={"job_type": job.job_type, "max_attempts": job.max_attempts},
     )
     return job
 

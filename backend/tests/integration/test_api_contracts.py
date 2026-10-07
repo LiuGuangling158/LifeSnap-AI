@@ -1,14 +1,22 @@
 import unittest
+from dataclasses import replace
+from datetime import datetime, timezone
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.api import agent as agent_api
 from app.main import create_app
 from app.schemas.agent import BillCandidateData, ParseBillResponse
+from app.schemas.async_job import AsyncJobRead, AsyncJobStatus, AsyncJobType
 from app.schemas.bill import BillSource, TransactionType
 from app.schemas.chat import ChatActionType
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.candidate_session_store import candidate_session_store
+from app.services import admin_auth_service as admin_auth_module
+from app.services.sqlite_state_store import sqlite_state_store
+from app.core.config import settings
 
 
 class ApiContractTests(unittest.TestCase):
@@ -55,6 +63,36 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("feedback_count", response.json())
         self.assertIn("recent_evaluations", response.json())
+
+    def test_admin_can_read_durable_async_job_events(self) -> None:
+        now = datetime.now(timezone.utc)
+        job = AsyncJobRead(
+            job_id=uuid4(),
+            job_type=AsyncJobType.rag_reindex,
+            status=AsyncJobStatus.queued,
+            created_at=now,
+            updated_at=now,
+            available_at=now,
+        )
+        sqlite_state_store.create_or_get_async_job(job.model_dump(mode="json"))
+
+        admin_settings = replace(settings, admin_api_key="contract-admin-key")
+        with (
+            patch.object(agent_api, "settings", admin_settings),
+            patch.object(admin_auth_module, "settings", admin_settings),
+        ):
+            session = self.client.post(
+                "/agent/admin-session",
+                json={"admin_key": "contract-admin-key"},
+            )
+            self.assertEqual(session.status_code, 200)
+            headers = {"Authorization": f"Bearer {session.json()['token']}"}
+            response = self.client.get(f"/jobs/{job.job_id}/events", headers=headers)
+
+        self.assertEqual(response.status_code, 200)
+        events = response.json()
+        self.assertTrue(events)
+        self.assertIn("created", [event["event_type"] for event in events])
 
     def test_monthly_report_applies_budget_rules_and_detects_anomalies(self) -> None:
         invalid_budget = self.client.patch(

@@ -245,6 +245,10 @@ const state = {
   adminKnowledgeReindexing: false,
   adminKnowledgeRollingBack: "",
   adminQuality: null,
+  adminJobs: [],
+  adminJobsLoading: false,
+  adminJobActionId: "",
+  adminJobEvents: {},
   bills: [],
   tasks: [],
   profile: loadProfileSettings(),
@@ -324,6 +328,23 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-admin-quality-live-run]")) {
     runAgentQualityEvaluation("live");
+    return;
+  }
+
+  if (event.target.closest("[data-admin-jobs-refresh]")) {
+    loadAdminJobs({ showToastOnSuccess: true });
+    return;
+  }
+
+  const jobEventsButton = event.target.closest("[data-admin-job-events]");
+  if (jobEventsButton) {
+    toggleAdminJobEvents(jobEventsButton.dataset.adminJobEvents);
+    return;
+  }
+
+  const redriveJobButton = event.target.closest("[data-admin-job-redrive]");
+  if (redriveJobButton) {
+    redriveAdminJob(redriveJobButton.dataset.adminJobRedrive);
     return;
   }
 
@@ -1649,7 +1670,10 @@ async function runAgentQualityEvaluation(executionMode = "offline") {
   state.saving = true;
   render();
   try {
-    const headers = await adminKnowledgeHeaders(adminKey);
+    const headers = {
+      ...(await adminKnowledgeHeaders(adminKey)),
+      "Idempotency-Key": `web-job-agent-quality-${executionMode}-${crypto.randomUUID()}`,
+    };
     const endpoint = executionMode === "live"
       ? "/jobs/agent-quality-evaluation-live"
       : "/jobs/agent-quality-evaluation";
@@ -1680,6 +1704,87 @@ async function runAgentQualityEvaluation(executionMode = "offline") {
     showToast(adminKnowledgeErrorMessage(error));
   } finally {
     state.saving = false;
+    render();
+  }
+}
+
+async function loadAdminJobs({ showToastOnSuccess = false } = {}) {
+  if (state.adminJobsLoading) return;
+  const adminKey = state.adminKnowledgeAdminKey.trim();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再读取异步任务。");
+    return;
+  }
+  state.adminJobsLoading = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    state.adminJobs = await api("/jobs", { headers });
+    if (showToastOnSuccess) {
+      showToast(`已读取 ${state.adminJobs.length} 个异步任务。`);
+    }
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.adminJobsLoading = false;
+    render();
+  }
+}
+
+async function toggleAdminJobEvents(jobId) {
+  const normalizedJobId = String(jobId || "").trim();
+  if (!normalizedJobId || state.adminJobActionId) return;
+  if (Object.prototype.hasOwnProperty.call(state.adminJobEvents, normalizedJobId)) {
+    const { [normalizedJobId]: _, ...remaining } = state.adminJobEvents;
+    state.adminJobEvents = remaining;
+    render();
+    return;
+  }
+  const adminKey = state.adminKnowledgeAdminKey.trim();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再查看任务历史。");
+    return;
+  }
+  state.adminJobActionId = normalizedJobId;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    const events = await api(`/jobs/${encodeURIComponent(normalizedJobId)}/events`, { headers });
+    state.adminJobEvents = { ...state.adminJobEvents, [normalizedJobId]: events };
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.adminJobActionId = "";
+    render();
+  }
+}
+
+async function redriveAdminJob(jobId) {
+  const normalizedJobId = String(jobId || "").trim();
+  if (!normalizedJobId || state.adminJobActionId) return;
+  const adminKey = state.adminKnowledgeAdminKey.trim();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再重新投递任务。");
+    return;
+  }
+  state.adminJobActionId = normalizedJobId;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    const job = await api(`/jobs/${encodeURIComponent(normalizedJobId)}/redrive`, {
+      method: "POST",
+      headers,
+    });
+    state.adminJobs = state.adminJobs.map((item) => (
+      String(item.job_id) === normalizedJobId ? job : item
+    ));
+    const { [normalizedJobId]: _, ...remaining } = state.adminJobEvents;
+    state.adminJobEvents = remaining;
+    showToast("任务已重新投递，将从第 1 次尝试开始执行。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.adminJobActionId = "";
     render();
   }
 }
@@ -6370,6 +6475,8 @@ function renderAdminPage() {
         ${renderAdminQualityGovernance(quality)}
       </section>
 
+      ${renderAdminJobOperations()}
+
       <section class="surface admin-knowledge-search-panel">
         <div class="simple-section-heading">
           <div>
@@ -6508,6 +6615,111 @@ function renderAdminQualityGovernance(summary) {
       ${recent.map(renderAdminQualityRun).join("")}
     </div>
   `;
+}
+
+function renderAdminJobOperations() {
+  const jobs = Array.isArray(state.adminJobs) ? state.adminJobs : [];
+  const hasAdminKey = Boolean(state.adminKnowledgeAdminKey.trim());
+  return `
+    <section class="surface admin-job-operations-panel">
+      <div class="simple-section-heading">
+        <div>
+          <h2>异步任务管理</h2>
+          <p>查看评测和 RAG 索引任务的状态、重试轨迹与安全错误；最终失败的任务可在修复配置后重新投递。</p>
+        </div>
+        <button class="button ghost" type="button" data-admin-jobs-refresh ${state.adminJobsLoading ? "disabled" : ""}>
+          ${icon("refresh")}${state.adminJobsLoading ? "读取中..." : "读取任务"}
+        </button>
+      </div>
+      ${jobs.length
+        ? `<div class="admin-job-list">${jobs.map(renderAdminJob).join("")}</div>`
+        : `<p class="form-hint">${hasAdminKey ? "尚未读取任务，点击“读取任务”查看最近执行情况。" : "输入管理员密钥并建立会话后，可查看异步任务。"}</p>`}
+    </section>
+  `;
+}
+
+function renderAdminJob(job) {
+  const jobId = String(job?.job_id || "");
+  const status = String(job?.status || "queued");
+  const events = state.adminJobEvents[jobId];
+  const actionPending = state.adminJobActionId === jobId;
+  const attempt = `${Number(job?.attempt ?? 0)}/${Number(job?.max_attempts ?? 1)}`;
+  const errorText = String(job?.error_message || job?.error_code || "").trim();
+  return `
+    <article class="admin-job-row">
+      <div class="admin-job-main">
+        <div class="admin-job-heading">
+          <strong>${escapeHtml(adminJobTypeLabel(job?.job_type))}</strong>
+          <span class="admin-job-status ${escapeHtml(status)}">${escapeHtml(adminJobStatusLabel(status))}</span>
+        </div>
+        <small>${escapeHtml(formatDate(job?.updated_at || job?.created_at))} · 尝试 ${escapeHtml(attempt)} · ${escapeHtml(jobId.slice(0, 8))}</small>
+        ${errorText ? `<p class="admin-job-error">${escapeHtml(errorText)}</p>` : ""}
+      </div>
+      <div class="admin-job-actions">
+        <button class="button ghost compact-button" type="button" data-admin-job-events="${escapeHtml(jobId)}" ${actionPending ? "disabled" : ""}>
+          ${icon("clock")}${actionPending ? "读取中..." : Array.isArray(events) ? "收起轨迹" : "执行轨迹"}
+        </button>
+        ${status === "failed" ? `
+          <button class="button compact-button" type="button" data-admin-job-redrive="${escapeHtml(jobId)}" ${actionPending ? "disabled" : ""}>
+            ${icon("refresh")}重新投递
+          </button>
+        ` : ""}
+      </div>
+      ${Array.isArray(events) ? renderAdminJobEvents(events) : ""}
+    </article>
+  `;
+}
+
+function renderAdminJobEvents(events) {
+  if (!events.length) {
+    return `<p class="form-hint admin-job-events-empty">暂时没有可用事件。</p>`;
+  }
+  return `
+    <ol class="admin-job-events">
+      ${events.map((event) => `
+        <li>
+          <span>${escapeHtml(adminJobEventLabel(event?.event_type))}</span>
+          <small>${escapeHtml(formatDate(event?.occurred_at))} · 第 ${escapeHtml(String(event?.attempt ?? 0))} 次 · ${escapeHtml(adminJobStatusLabel(event?.status))}${event?.error_code ? ` · ${escapeHtml(String(event.error_code))}` : ""}</small>
+        </li>
+      `).join("")}
+    </ol>
+  `;
+}
+
+function adminJobTypeLabel(value) {
+  const labels = {
+    agent_quality_evaluation: "离线 Agent 评测",
+    agent_quality_evaluation_live: "线上模型评测",
+    rag_reindex: "RAG 语义索引重建",
+  };
+  return labels[String(value)] || String(value || "未知任务");
+}
+
+function adminJobStatusLabel(value) {
+  const labels = {
+    queued: "等待执行",
+    retry_scheduled: "延迟重试",
+    running: "执行中",
+    succeeded: "已完成",
+    failed: "最终失败",
+    cancelled: "已取消",
+  };
+  return labels[String(value)] || String(value || "未知状态");
+}
+
+function adminJobEventLabel(value) {
+  const labels = {
+    created: "任务已创建",
+    claimed: "工作器已领取",
+    retry_scheduled: "已安排重试",
+    succeeded: "任务已完成",
+    failed: "任务最终失败",
+    cancelled: "任务已取消",
+    manual_retry: "已手动重试",
+    lease_recovered: "已恢复过期租约",
+    redriven: "已重新投递",
+  };
+  return labels[String(value)] || String(value || "状态已更新");
 }
 
 function renderOnlineEvaluationSummary(run) {

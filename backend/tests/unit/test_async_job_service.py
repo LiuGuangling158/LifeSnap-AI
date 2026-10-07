@@ -127,6 +127,50 @@ class AsyncJobServiceTests(unittest.TestCase):
         self.assertEqual(recovered["status"], AsyncJobStatus.retry_scheduled.value)
         self.assertIsNone(recovered["lease_token"])
         self.assertEqual(recovered["attempt"], 1)
+        event_types = [
+            event["event_type"]
+            for event in sqlite_state_store.list_async_job_events(job.job_id, owner_id=owner_id)
+        ]
+        self.assertEqual(event_types, ["lease_recovered", "claimed", "created"])
+
+    def test_final_failure_can_be_redriven_with_durable_history(self) -> None:
+        owner_id = f"unit-redrive-{uuid4().hex}"
+        now = datetime.now(timezone.utc)
+        job = AsyncJobRead(
+            job_id=uuid4(),
+            job_type=AsyncJobType.rag_reindex,
+            status=AsyncJobStatus.queued,
+            created_at=now,
+            updated_at=now,
+            available_at=now,
+            max_attempts=1,
+        )
+        sqlite_state_store.create_or_get_async_job(job.model_dump(mode="json"), owner_id=owner_id)
+        sqlite_state_store.claim_async_job(
+            job.job_id,
+            owner_id=owner_id,
+            worker_id="failing-worker",
+            lease_token="failing-token",
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+        )
+        sqlite_state_store.fail_async_job(
+            job.job_id,
+            owner_id=owner_id,
+            error_code="test_failure",
+            error_message="intentional final failure",
+            lease_token="failing-token",
+            retry_delay_seconds=0,
+        )
+        redriven = sqlite_state_store.redrive_async_job(job.job_id, owner_id=owner_id)
+        events = sqlite_state_store.list_async_job_events(job.job_id, owner_id=owner_id)
+
+        self.assertIsNotNone(redriven)
+        self.assertEqual(redriven["status"], AsyncJobStatus.queued.value)
+        self.assertEqual(redriven["attempt"], 0)
+        self.assertEqual(
+            [event["event_type"] for event in events],
+            ["redriven", "failed", "claimed", "created"],
+        )
 
 
 if __name__ == "__main__":

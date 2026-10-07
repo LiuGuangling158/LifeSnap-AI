@@ -67,6 +67,12 @@ lease are recovered; eligible failures use bounded exponential backoff before a
 final failure. Job submission accepts an idempotency key scoped to the job type,
 so a client retry does not duplicate administrative work.
 
+Every lifecycle transition is also stored as an immutable, privacy-safe job
+event. Operators can inspect the history through `GET /jobs/{job_id}/events`.
+After correcting a provider or configuration issue, a final failed job can be
+submitted to `POST /jobs/{job_id}/redrive`; the new execution cycle starts at
+attempt zero while its prior failure history remains available for audit.
+
 This is at-least-once delivery, not exactly-once execution: an expired lease can
 lead to a retry after process failure. Job handlers must therefore be
 idempotent. The current evaluation and RAG reindex handlers are safe to repeat.

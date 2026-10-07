@@ -102,7 +102,11 @@ handlers are safe to repeat.
   not change the offline CI admission decision.
 - `POST /jobs/rag-reindex` queues RAG semantic index construction.
 - `GET /jobs` and `GET /jobs/{job_id}` return recent work and durable status.
+- `GET /jobs/{job_id}/events` returns the durable lifecycle history, including
+  claims, retries, lease recovery, completion, and safe error codes.
 - `POST /jobs/{job_id}/retry` retries failed or cancelled work within its attempt limit.
+- `POST /jobs/{job_id}/redrive` starts a fresh attempt cycle for a final failed
+  job after an operator has corrected the underlying configuration.
 - `POST /jobs/{job_id}/cancel` cancels queued work before a worker claims it.
 
 `POST` endpoints accept an optional `Idempotency-Key` header. Reusing the same

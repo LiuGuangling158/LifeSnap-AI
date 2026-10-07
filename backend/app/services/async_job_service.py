@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.core.config import settings
-from app.schemas.async_job import AsyncJobRead, AsyncJobStatus, AsyncJobType
+from app.schemas.async_job import AsyncJobEventRead, AsyncJobRead, AsyncJobStatus, AsyncJobType
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_quality_service import agent_quality_service
 from app.services.observability_service import observability_service
@@ -98,6 +98,12 @@ class AsyncJobService:
             for item in sqlite_state_store.list_async_jobs(limit=limit)
         ]
 
+    def list_events(self, job_id: UUID, limit: int = 100) -> list[AsyncJobEventRead]:
+        return [
+            AsyncJobEventRead.model_validate(item)
+            for item in sqlite_state_store.list_async_job_events(job_id, limit=limit)
+        ]
+
     def retry(self, job_id: UUID) -> AsyncJobRead | None:
         self.start()
         raw = sqlite_state_store.retry_async_job(job_id)
@@ -109,6 +115,14 @@ class AsyncJobService:
     def cancel(self, job_id: UUID) -> AsyncJobRead | None:
         raw = sqlite_state_store.cancel_async_job(job_id)
         return AsyncJobRead.model_validate(raw) if raw else None
+
+    def redrive(self, job_id: UUID) -> AsyncJobRead | None:
+        self.start()
+        raw = sqlite_state_store.redrive_async_job(job_id)
+        if raw is None:
+            return None
+        self._wake_event.set()
+        return AsyncJobRead.model_validate(raw)
 
     def _scheduler_loop(self) -> None:
         while not self._stop_event.is_set():

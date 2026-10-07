@@ -38,3 +38,13 @@ class AsyncJobRead(BaseModel):
     error_code: str | None = Field(default=None, max_length=80)
     error_message: str | None = Field(default=None, max_length=500)
 
+
+class AsyncJobEventRead(BaseModel):
+    event_id: UUID
+    job_id: UUID
+    occurred_at: datetime
+    event_type: str = Field(min_length=1, max_length=80)
+    status: AsyncJobStatus
+    attempt: int = Field(ge=0)
+    error_code: str | None = Field(default=None, max_length=80)
+
