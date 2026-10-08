@@ -16,6 +16,7 @@ from app.schemas.observability import (
     MonitoringSummary,
 )
 from app.services.sqlite_state_store import sqlite_state_store
+from app.services.model_invocation_service import model_invocation_service
 
 
 _ID_PATH_SEGMENT = re.compile(r"/(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(?=/|$)", re.I)
@@ -298,6 +299,27 @@ class ObservabilityService:
                 f"lifesnap_async_job_queue_lag_seconds {queue_lag_seconds:.3f}",
             ]
         )
+        model_usage = model_invocation_service.summary()
+        lines.extend(
+            [
+                "# HELP lifesnap_model_invocations_total External model calls by provider, model, and outcome.",
+                "# TYPE lifesnap_model_invocations_total counter",
+                *[
+                    f'lifesnap_model_invocations_total{{provider="{self._metric_label(item.provider)}",model="{self._metric_label(item.model)}",outcome="success"}} {item.success_count}'
+                    for item in model_usage.records
+                ],
+                *[
+                    f'lifesnap_model_invocations_total{{provider="{self._metric_label(item.provider)}",model="{self._metric_label(item.model)}",outcome="failure"}} {item.failure_count}'
+                    for item in model_usage.records
+                ],
+                "# HELP lifesnap_model_estimated_cost_usd Estimated external model cost in USD.",
+                "# TYPE lifesnap_model_estimated_cost_usd counter",
+                f"lifesnap_model_estimated_cost_usd {model_usage.estimated_cost_usd:.8f}",
+                "# HELP lifesnap_model_circuits_open Open external model circuit breakers.",
+                "# TYPE lifesnap_model_circuits_open gauge",
+                f"lifesnap_model_circuits_open {model_usage.active_circuit_count}",
+            ]
+        )
         return "\n".join(lines) + "\n"
 
     def _agent_outcome(self, response: ChatMessageResponse) -> str:
@@ -315,6 +337,10 @@ class ObservabilityService:
         ordered = sorted(values)
         index = max(0, round((len(ordered) - 1) * percentile))
         return ordered[index]
+
+    @staticmethod
+    def _metric_label(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
 
     def _emit(self, payload: dict[str, Any]) -> None:
         payload["timestamp"] = datetime.now(timezone.utc).isoformat()

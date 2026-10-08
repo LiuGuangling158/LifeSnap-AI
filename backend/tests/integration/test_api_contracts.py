@@ -48,6 +48,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("lifesnap_operational_alerts_active", response.text)
         self.assertIn("lifesnap_async_jobs", response.text)
         self.assertIn("lifesnap_async_job_queue_lag_seconds", response.text)
+        self.assertIn("lifesnap_model_invocations_total", response.text)
 
     def test_operational_alert_contract_evaluates_and_returns_history(self) -> None:
         evaluated = self.client.post("/observability/alerts/evaluate")
@@ -71,6 +72,13 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("active_release_id", response.json())
         self.assertIn("releases", response.json())
+
+    def test_model_usage_contract_is_available_without_login(self) -> None:
+        response = self.client.get("/observability/model-usage")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("estimated_cost_usd", response.json())
+        self.assertIn("records", response.json())
 
     def test_chat_response_includes_a_privacy_safe_agent_explanation(self) -> None:
         response = self.client.post(

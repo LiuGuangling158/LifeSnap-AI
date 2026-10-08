@@ -355,6 +355,7 @@ class Settings:
     local_idempotency_path: Path = DATA_DIR / "idempotency.json"
     local_agent_knowledge_path: Path = DATA_DIR / "agent_knowledge.json"
     local_agent_release_path: Path = DATA_DIR / "agent_releases.json"
+    local_model_usage_path: Path = DATA_DIR / "model_usage.json"
     local_rag_embedding_cache_path: Path = DATA_DIR / "rag_embedding_cache.json"
     local_database_path: Path = field(
         default_factory=lambda: Path(
@@ -416,6 +417,24 @@ class Settings:
     llm_agent_timeout_seconds: float = field(
         default_factory=lambda: _env_float("LIFESNAP_LLM_TIMEOUT_SECONDS", 20.0)
     )
+    model_invocation_max_retries: int = field(
+        default_factory=lambda: max(0, min(_env_int("LIFESNAP_MODEL_MAX_RETRIES", 1), 3))
+    )
+    model_invocation_retry_base_seconds: float = field(
+        default_factory=lambda: min(3.0, max(0.05, _env_float("LIFESNAP_MODEL_RETRY_BASE_SECONDS", 0.2)))
+    )
+    model_invocation_circuit_failure_threshold: int = field(
+        default_factory=lambda: max(1, min(_env_int("LIFESNAP_MODEL_CIRCUIT_FAILURE_THRESHOLD", 3), 10))
+    )
+    model_invocation_circuit_reset_seconds: float = field(
+        default_factory=lambda: min(600.0, max(5.0, _env_float("LIFESNAP_MODEL_CIRCUIT_RESET_SECONDS", 30.0)))
+    )
+    llm_agent_input_cost_per_million_usd: float = field(
+        default_factory=lambda: max(0.0, _env_float("LIFESNAP_LLM_INPUT_COST_PER_MILLION_USD", 0.0))
+    )
+    llm_agent_output_cost_per_million_usd: float = field(
+        default_factory=lambda: max(0.0, _env_float("LIFESNAP_LLM_OUTPUT_COST_PER_MILLION_USD", 0.0))
+    )
     llm_agent_temperature: float = field(
         default_factory=lambda: _env_float("LIFESNAP_LLM_TEMPERATURE", 0.0)
     )
@@ -468,6 +487,15 @@ class Settings:
     )
     alert_agent_p95_latency_ms: float = field(
         default_factory=lambda: max(1.0, _env_float("LIFESNAP_ALERT_AGENT_P95_LATENCY_MS", 8000.0))
+    )
+    alert_minimum_model_call_count: int = field(
+        default_factory=lambda: max(1, _env_int("LIFESNAP_ALERT_MINIMUM_MODEL_CALL_COUNT", 10))
+    )
+    alert_model_failure_rate_threshold: float = field(
+        default_factory=lambda: min(1.0, max(0.0, _env_float("LIFESNAP_ALERT_MODEL_FAILURE_RATE_THRESHOLD", 0.2)))
+    )
+    alert_model_cost_threshold_usd: float = field(
+        default_factory=lambda: max(0.0, _env_float("LIFESNAP_ALERT_MODEL_COST_THRESHOLD_USD", 0.0))
     )
 
     @property

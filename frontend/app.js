@@ -247,6 +247,7 @@ const state = {
   adminQuality: null,
   adminReleases: null,
   adminReleaseAction: "",
+  modelUsage: null,
   adminJobs: [],
   adminJobsLoading: false,
   adminJobActionId: "",
@@ -1240,6 +1241,7 @@ async function loadData() {
       adminKnowledge,
       adminQuality,
       adminReleases,
+      modelUsage,
     ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
@@ -1256,6 +1258,7 @@ async function loadData() {
       api("/agent/knowledge/documents"),
       api("/quality/summary"),
       api("/agent/releases"),
+      api("/observability/model-usage"),
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
@@ -1291,6 +1294,7 @@ async function loadData() {
     setAdminKnowledge(adminKnowledge);
     state.adminQuality = adminQuality;
     state.adminReleases = adminReleases;
+    state.modelUsage = modelUsage;
   } catch (error) {
     state.error = error.message || "后端连接失败";
   } finally {
@@ -6543,6 +6547,7 @@ function renderAdminPage() {
   const searchResults = state.adminKnowledgeSearchResults ?? [];
   const quality = state.adminQuality ?? {};
   const releases = state.adminReleases ?? { releases: [], active_release_id: null };
+  const modelUsage = state.modelUsage ?? {};
   return `
     <div class="simple-admin">
       <header class="simple-page-header">
@@ -6588,6 +6593,16 @@ function renderAdminPage() {
           </div>
         </div>
         ${renderAgentReleaseGovernance(releases)}
+      </section>
+
+      <section class="surface admin-runtime-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>模型韧性与成本</h2>
+            <p>外部模型的网络失败会有限重试，连续失败会自动熔断并回退到本地规则。这里仅保存模型级聚合用量，不保存对话正文或密钥。</p>
+          </div>
+        </div>
+        ${renderModelUsage(modelUsage)}
       </section>
 
       ${renderAdminJobOperations()}
@@ -6837,6 +6852,38 @@ function agentReleaseStateLabel(value) {
     superseded: "已替换",
   };
   return labels[value] || value;
+}
+
+function renderModelUsage(usage) {
+  const records = Array.isArray(usage?.records) ? usage.records.slice(0, 5) : [];
+  const totalCalls = Number(usage?.request_count ?? 0);
+  const failures = Number(usage?.failure_count ?? 0);
+  const failureRate = totalCalls ? `${Math.round((failures / totalCalls) * 100)}%` : "--";
+  const cost = Number(usage?.estimated_cost_usd ?? 0);
+  const costText = usage?.price_configured ? `$${cost.toFixed(4)}` : "未配置单价";
+  return `
+    <div class="diagnostics-summary admin-summary-grid">
+      ${diagnosticMetric("模型调用", totalCalls, totalCalls ? "info" : "fallback")}
+      ${diagnosticMetric("失败率", failureRate, failures ? "warning" : "ok")}
+      ${diagnosticMetric("自动重试", Number(usage?.retry_count ?? 0), "info")}
+      ${diagnosticMetric("熔断器", Number(usage?.active_circuit_count ?? 0) ? "已打开" : "正常", Number(usage?.active_circuit_count ?? 0) ? "error" : "ok")}
+    </div>
+    <p class="admin-note">预估成本：${escapeHtml(costText)}。${usage?.estimated_usage_count ? `其中 ${Number(usage.estimated_usage_count)} 次按请求/响应长度估算 Token。` : "仅基于模型返回的用量统计。"}</p>
+    ${records.length ? `
+      <div class="admin-version-list">
+        ${records.map((record) => `
+          <article class="admin-version-card">
+            <div>
+              <strong>${escapeHtml(String(record.provider || "external"))} · ${escapeHtml(String(record.model || "unspecified"))}</strong>
+              <small>调用 ${Number(record.request_count ?? 0)} · 成功 ${Number(record.success_count ?? 0)} · 失败 ${Number(record.failure_count ?? 0)} · 重试 ${Number(record.retry_count ?? 0)}</small>
+              <p>${Number(record.input_tokens ?? 0)} 输入 Token · ${Number(record.output_tokens ?? 0)} 输出 Token · $${Number(record.estimated_cost_usd ?? 0).toFixed(4)}</p>
+            </div>
+            <span class="knowledge-source-badge ${record.circuit_open ? "admin" : "builtin"}">${record.circuit_open ? "熔断中" : "可用"}</span>
+          </article>
+        `).join("")}
+      </div>
+    ` : `<p class="form-hint">尚无外部模型调用记录。本地规则和隐私拦截不会计入模型成本。</p>`}
+  `;
 }
 
 function renderAdminJobOperations() {

@@ -3,11 +3,13 @@ from fastapi import APIRouter, Query, Response
 from app.core.user_context import current_owner_id
 from app.schemas.observability import (
     AgentExecutionTraceListResponse,
+    ModelUsageSummary,
     MonitoringSummary,
     OperationalAlertSummary,
 )
 from app.services.alerting_service import alerting_service
 from app.services.observability_service import observability_service
+from app.services.model_invocation_service import model_invocation_service
 
 
 router = APIRouter(prefix="/observability", tags=["observability"])
@@ -25,6 +27,11 @@ def list_agent_traces(
     limit: int = Query(default=20, ge=1, le=200),
 ) -> AgentExecutionTraceListResponse:
     return observability_service.list_agent_traces(owner_id=current_owner_id(), limit=limit)
+
+
+@router.get("/model-usage", response_model=ModelUsageSummary)
+def get_model_usage() -> ModelUsageSummary:
+    return model_invocation_service.summary()
 
 
 @router.get("/alerts", response_model=OperationalAlertSummary)

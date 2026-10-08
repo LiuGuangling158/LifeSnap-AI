@@ -139,6 +139,21 @@ GET /observability/agent-traces and the monitoring summary through
 GET /observability/summary. Trace records store tool names, knowledge source
 IDs, step statuses, model strategy, and latency without persisting chat text.
 
+### Model resilience and cost
+
+All external LLM and compatible parsing calls pass through one synchronous
+invocation gateway. It retries only transient network, timeout, HTTP 408, HTTP
+429, and HTTP 5xx failures with capped exponential backoff. Consecutive final
+failures open a short-lived per-provider/model circuit breaker so the Agent
+falls back to local rules instead of amplifying an outage.
+
+`GET /observability/model-usage` returns privacy-safe aggregate calls, retries,
+failures, circuit rejections, token usage, and estimated USD cost. Raw prompts,
+responses, and credentials are never stored. The gateway uses provider-returned
+usage when available, otherwise it labels a length-based token approximation.
+Set `LIFESNAP_LLM_INPUT_COST_PER_MILLION_USD` and
+`LIFESNAP_LLM_OUTPUT_COST_PER_MILLION_USD` to enable cost estimates.
+
 ### Application alert state
 
 The service also evaluates a small set of privacy-safe, durable application
@@ -163,6 +178,9 @@ Configure the evaluator with these environment variables when deploying:
 - `LIFESNAP_ALERT_MINIMUM_AGENT_TRACE_COUNT` (default `10`)
 - `LIFESNAP_ALERT_HTTP_ERROR_RATE_THRESHOLD` (default `0.05`)
 - `LIFESNAP_ALERT_AGENT_P95_LATENCY_MS` (default `8000`)
+- `LIFESNAP_ALERT_MINIMUM_MODEL_CALL_COUNT` (default `10`)
+- `LIFESNAP_ALERT_MODEL_FAILURE_RATE_THRESHOLD` (default `0.2`)
+- `LIFESNAP_ALERT_MODEL_COST_THRESHOLD_USD` (default `0`, disabled)
 
 ## Error Responses
 

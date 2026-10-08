@@ -179,7 +179,6 @@ class AgentReleaseService:
         sqlite_state_store.save_json(
             self._namespace,
             {"releases": [item.model_dump(mode="json") for item in self._releases]},
-            settings.local_agent_release_path,
             owner_id=SYSTEM_OWNER_ID,
         )
 

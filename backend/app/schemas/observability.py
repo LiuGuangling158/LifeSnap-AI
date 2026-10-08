@@ -41,6 +41,38 @@ class MonitoringSummary(BaseModel):
     agent_outcomes: dict[str, int] = Field(default_factory=dict)
 
 
+class ModelUsageRecord(BaseModel):
+    provider: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=160)
+    request_count: int = Field(ge=0)
+    success_count: int = Field(ge=0)
+    failure_count: int = Field(ge=0)
+    retry_count: int = Field(ge=0)
+    circuit_rejection_count: int = Field(ge=0)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    estimated_usage_count: int = Field(ge=0)
+    estimated_cost_usd: float = Field(ge=0)
+    circuit_open: bool = False
+    updated_at: datetime
+
+
+class ModelUsageSummary(BaseModel):
+    generated_at: datetime
+    request_count: int = Field(ge=0)
+    success_count: int = Field(ge=0)
+    failure_count: int = Field(ge=0)
+    retry_count: int = Field(ge=0)
+    circuit_rejection_count: int = Field(ge=0)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    estimated_usage_count: int = Field(ge=0)
+    estimated_cost_usd: float = Field(ge=0)
+    price_configured: bool = False
+    active_circuit_count: int = Field(ge=0)
+    records: list[ModelUsageRecord] = Field(default_factory=list)
+
+
 class AlertSeverity(str, Enum):
     warning = "warning"
     critical = "critical"

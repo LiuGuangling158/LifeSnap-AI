@@ -3,15 +3,13 @@ from __future__ import annotations
 import base64
 import json
 import re
-import time
 from datetime import datetime, timezone
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 from uuid import UUID
 
 from app.core.config import settings
 from app.schemas.ocr import OcrRecognitionStatus, OcrRecognizeResponse
 from app.services.attachment_store import attachment_store
+from app.services.model_invocation_service import model_invocation_service
 from app.services.settings_store import settings_store
 
 
@@ -75,7 +73,7 @@ class ConfigurableOcrService:
                 content_type=attachment.content_type,
                 content=content,
             )
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
+        except (RuntimeError, TypeError, ValueError, json.JSONDecodeError):
             return self._manual_required(
                 attachment_id=attachment_id,
                 provider=settings.ocr_provider_name,
@@ -138,14 +136,18 @@ class ConfigurableOcrService:
         if settings.external_ocr_api_key:
             headers["Authorization"] = f"Bearer {settings.external_ocr_api_key}"
 
-        request = Request(
-            settings.external_ocr_endpoint or "",
-            data=json.dumps(payload).encode("utf-8"),
+        result = model_invocation_service.invoke_json(
+            provider=settings.external_ocr_provider,
+            model=settings.external_ocr_model,
+            endpoint=settings.external_ocr_endpoint or "",
             headers=headers,
-            method="POST",
+            request_body=payload,
+            timeout_seconds=settings.external_ocr_timeout_seconds,
+            estimate_usage=False,
         )
-        with urlopen(request, timeout=settings.external_ocr_timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8"))
+        if result.payload is None:
+            raise RuntimeError("External OCR request failed")
+        return result.payload
 
     def _call_kimi_vision_ocr(
         self,
@@ -174,29 +176,24 @@ class ConfigurableOcrService:
         if settings.external_ocr_api_key:
             headers["Authorization"] = f"Bearer {settings.external_ocr_api_key}"
 
-        for attempt in range(2):
-            try:
-                request = Request(
-                    settings.external_ocr_endpoint or "",
-                    data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
-                    headers=headers,
-                    method="POST",
-                )
-                with urlopen(request, timeout=settings.external_ocr_timeout_seconds) as response:
-                    response_body = json.loads(response.read().decode("utf-8"))
-                return self._kimi_vision_response_data(response_body)
-            except HTTPError as error:
-                if attempt or not self._retryable_kimi_status(error.code):
-                    raise
-            except (URLError, TimeoutError, OSError):
-                if attempt:
-                    raise
-            time.sleep(0.4)
-
-        raise RuntimeError("Kimi Vision OCR retry loop exited unexpectedly")
-
-    def _retryable_kimi_status(self, status_code: int) -> bool:
-        return status_code in {408, 409, 425, 429} or status_code >= 500
+        result = model_invocation_service.invoke_json(
+            provider=settings.external_ocr_provider,
+            model=settings.external_ocr_model or "kimi-k2.6",
+            endpoint=settings.external_ocr_endpoint or "",
+            headers=headers,
+            request_body=request_body,
+            timeout_seconds=settings.external_ocr_timeout_seconds,
+            estimate_usage=False,
+        )
+        if result.payload is None:
+            raise RuntimeError("Kimi Vision OCR request failed")
+        parsed = self._kimi_vision_response_data(result.payload)
+        if result.warnings:
+            parsed["warnings"] = list(dict.fromkeys([
+                *self._response_warnings(parsed),
+                *result.warnings,
+            ]))
+        return parsed
 
     def _kimi_vision_request_body(
         self,

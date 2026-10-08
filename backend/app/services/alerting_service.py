@@ -15,6 +15,7 @@ from app.schemas.observability import (
 from app.services.agent_quality_service import agent_quality_service
 from app.services.diagnostics_service import diagnostics_service
 from app.services.observability_service import observability_service
+from app.services.model_invocation_service import model_invocation_service
 from app.services.sqlite_state_store import sqlite_state_store
 
 
@@ -68,6 +69,7 @@ class AlertingService:
         monitoring = observability_service.summary(owner_id=owner_id)
         quality = agent_quality_service.summary()
         readiness = diagnostics_service.readiness()
+        model_usage = model_invocation_service.summary()
         candidates: list[dict] = []
 
         if (
@@ -109,6 +111,63 @@ class AlertingService:
                         "agent_p95_latency_ms": monitoring.agent_p95_latency_ms,
                         "trace_count": monitoring.agent_trace_count,
                         "threshold_ms": settings.alert_agent_p95_latency_ms,
+                    },
+                )
+            )
+
+        model_attempts = model_usage.success_count + model_usage.failure_count
+        if model_usage.active_circuit_count:
+            candidates.append(
+                self._candidate(
+                    rule_id="model_circuit_open",
+                    severity=AlertSeverity.warning,
+                    title="External model circuit is open",
+                    summary=(
+                        f"{model_usage.active_circuit_count} model circuit breaker(s) are open; "
+                        "the Agent is using its local fallback."
+                    ),
+                    metadata={"active_circuit_count": model_usage.active_circuit_count},
+                )
+            )
+
+        if (
+            model_attempts >= settings.alert_minimum_model_call_count
+            and model_usage.failure_count / model_attempts
+            >= settings.alert_model_failure_rate_threshold
+        ):
+            candidates.append(
+                self._candidate(
+                    rule_id="model_failure_rate_high",
+                    severity=AlertSeverity.warning,
+                    title="External model failure rate is high",
+                    summary=(
+                        f"Model failure rate is {model_usage.failure_count / model_attempts:.1%} "
+                        f"across {model_attempts} completed calls."
+                    ),
+                    metadata={
+                        "failure_count": model_usage.failure_count,
+                        "completed_call_count": model_attempts,
+                        "threshold": settings.alert_model_failure_rate_threshold,
+                    },
+                )
+            )
+
+        if (
+            settings.alert_model_cost_threshold_usd > 0
+            and model_usage.estimated_cost_usd >= settings.alert_model_cost_threshold_usd
+        ):
+            candidates.append(
+                self._candidate(
+                    rule_id="model_cost_threshold_exceeded",
+                    severity=AlertSeverity.warning,
+                    title="External model cost threshold exceeded",
+                    summary=(
+                        f"Estimated model cost is ${model_usage.estimated_cost_usd:.4f}, "
+                        "above the configured threshold."
+                    ),
+                    metadata={
+                        "estimated_cost_usd": model_usage.estimated_cost_usd,
+                        "threshold_usd": settings.alert_model_cost_threshold_usd,
                     },
                 )
             )

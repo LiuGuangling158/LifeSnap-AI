@@ -5,8 +5,6 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -25,6 +23,7 @@ from app.schemas.task import TaskPriority, TaskType
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_tool_registry import agent_tool_registry
 from app.services.bill_category_classifier import bill_category_classifier
+from app.services.model_invocation_service import model_invocation_service
 from app.services.settings_store import settings_store
 
 
@@ -224,25 +223,17 @@ class ExternalAiParserService:
         if settings.external_ai_parser_api_key:
             headers["Authorization"] = f"Bearer {settings.external_ai_parser_api_key}"
 
-        request = Request(
-            endpoint,
-            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        result = model_invocation_service.invoke_json(
+            provider=settings.external_ai_parser_provider,
+            model=None,
+            endpoint=endpoint,
             headers=headers,
-            method="POST",
+            request_body=request_body,
+            timeout_seconds=settings.external_ai_parser_timeout_seconds,
         )
-        try:
-            with urlopen(
-                request,
-                timeout=settings.external_ai_parser_timeout_seconds,
-            ) as response:
-                response_text = response.read().decode("utf-8")
-            response_body = json.loads(response_text)
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
-            return None, ["external_ai_parser_failed"]
-
-        if not isinstance(response_body, dict):
-            return None, ["external_ai_parser_invalid_response"]
-        return response_body, []
+        if result.payload is None:
+            return None, self._dedupe([*result.warnings, "external_ai_parser_failed"])
+        return result.payload, result.warnings
 
     def _request_llm_agent(
         self,
@@ -266,10 +257,20 @@ class ExternalAiParserService:
             },
         ]
         request_body = self._llm_request_body(kind, messages, include_tools=True)
-        response_body, request_warnings = self._post_llm_agent_json(endpoint, request_body, api_key)
+        response_body, request_warnings = self._post_llm_agent_json(
+            endpoint,
+            kind,
+            request_body,
+            api_key,
+        )
         if response_body is None and request_body.get("tools"):
             fallback_body = self._llm_request_body(kind, messages, include_tools=False)
-            response_body, fallback_warnings = self._post_llm_agent_json(endpoint, fallback_body, api_key)
+            response_body, fallback_warnings = self._post_llm_agent_json(
+                endpoint,
+                kind,
+                fallback_body,
+                api_key,
+            )
             if response_body is None:
                 return None, request_warnings or fallback_warnings
             request_warnings = ["llm_agent_function_calling_unavailable"]
@@ -336,6 +337,7 @@ class ExternalAiParserService:
     def _post_llm_agent_json(
         self,
         endpoint: str,
+        kind: str,
         request_body: dict[str, Any],
         api_key: str | None,
     ) -> tuple[dict[str, Any] | None, list[str]]:
@@ -346,22 +348,17 @@ class ExternalAiParserService:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        request = Request(
-            endpoint,
-            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        result = model_invocation_service.invoke_json(
+            provider=settings.llm_agent_provider_for_kind(kind),
+            model=settings.llm_agent_runtime_model_for_kind(kind),
+            endpoint=endpoint,
             headers=headers,
-            method="POST",
+            request_body=request_body,
+            timeout_seconds=settings.llm_agent_timeout_seconds,
         )
-        try:
-            with urlopen(request, timeout=settings.llm_agent_timeout_seconds) as response:
-                response_text = response.read().decode("utf-8")
-            response_body = json.loads(response_text)
-        except (HTTPError, URLError, TimeoutError, OSError, ValueError):
-            return None, ["llm_agent_failed", "external_ai_parser_failed"]
-
-        if not isinstance(response_body, dict):
-            return None, ["llm_agent_invalid_response", "external_ai_parser_invalid_response"]
-        return response_body, []
+        if result.payload is None:
+            return None, self._dedupe([*result.warnings, "external_ai_parser_failed"])
+        return result.payload, result.warnings
 
     def _complete_llm_tool_calls(
         self,
@@ -387,7 +384,12 @@ class ExternalAiParserService:
             *tool_messages,
         ]
         follow_up_body = self._llm_request_body(kind, follow_up_messages, include_tools=False)
-        follow_up_response, _ = self._post_llm_agent_json(endpoint, follow_up_body, api_key)
+        follow_up_response, _ = self._post_llm_agent_json(
+            endpoint,
+            kind,
+            follow_up_body,
+            api_key,
+        )
         if follow_up_response is None:
             raise ValueError("LLM tool-call follow-up failed.")
         return follow_up_response
