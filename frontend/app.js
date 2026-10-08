@@ -245,6 +245,8 @@ const state = {
   adminKnowledgeReindexing: false,
   adminKnowledgeRollingBack: "",
   adminQuality: null,
+  adminReleases: null,
+  adminReleaseAction: "",
   adminJobs: [],
   adminJobsLoading: false,
   adminJobActionId: "",
@@ -328,6 +330,18 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-admin-quality-live-run]")) {
     runAgentQualityEvaluation("live");
+    return;
+  }
+
+  const promoteReleaseButton = event.target.closest("[data-agent-release-promote]");
+  if (promoteReleaseButton) {
+    changeAgentRelease(promoteReleaseButton.dataset.agentReleasePromote, "promote");
+    return;
+  }
+
+  const rollbackReleaseButton = event.target.closest("[data-agent-release-rollback]");
+  if (rollbackReleaseButton) {
+    changeAgentRelease(rollbackReleaseButton.dataset.agentReleaseRollback, "rollback");
     return;
   }
 
@@ -1166,6 +1180,12 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-agent-release-form]")) {
+    event.preventDefault();
+    await submitAgentRelease(new FormData(event.target));
+    return;
+  }
+
   if (event.target.matches("[data-profile-form]")) {
     event.preventDefault();
     submitProfileSettings(new FormData(event.target));
@@ -1219,6 +1239,7 @@ async function loadData() {
       tagSettings,
       adminKnowledge,
       adminQuality,
+      adminReleases,
     ] = await Promise.all([
       api("/app/bootstrap?recent_bill_limit=6&candidate_limit=5"),
       api("/bills/statistics/overview?trend_months=6&top_merchant_limit=6"),
@@ -1234,6 +1255,7 @@ async function loadData() {
       api("/settings/tags"),
       api("/agent/knowledge/documents"),
       api("/quality/summary"),
+      api("/agent/releases"),
     ]);
     state.bootstrap = bootstrap;
     state.billOverview = billOverview;
@@ -1268,6 +1290,7 @@ async function loadData() {
     state.tagSettings = tagSettings;
     setAdminKnowledge(adminKnowledge);
     state.adminQuality = adminQuality;
+    state.adminReleases = adminReleases;
   } catch (error) {
     state.error = error.message || "后端连接失败";
   } finally {
@@ -1708,6 +1731,78 @@ async function runAgentQualityEvaluation(executionMode = "offline") {
   }
 }
 
+function currentAdminKey() {
+  const input = document.querySelector("#admin_key");
+  return String(input?.value || state.adminKnowledgeAdminKey || "").trim();
+}
+
+async function submitAgentRelease(formData) {
+  if (state.saving || state.adminReleaseAction) return;
+  const label = String(formData.get("label") || "").trim();
+  const note = String(formData.get("note") || "").trim();
+  const adminKey = currentAdminKey();
+  if (!label) {
+    showToast("请填写 Agent 版本名称。");
+    return;
+  }
+  if (!adminKey) {
+    showToast("请输入管理员密钥并先运行离线评测后，再创建候选版本。");
+    return;
+  }
+
+  state.saving = true;
+  state.adminReleaseAction = "create";
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    state.adminReleases = await api("/agent/releases", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ label, note: note || null }),
+    });
+    showToast("Agent 候选版本已创建。确认快照信息后即可发布。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    state.adminReleaseAction = "";
+    render();
+  }
+}
+
+async function changeAgentRelease(releaseId, action) {
+  const normalizedReleaseId = String(releaseId || "").trim();
+  if (!normalizedReleaseId || state.saving || state.adminReleaseAction) return;
+  const adminKey = currentAdminKey();
+  if (!adminKey) {
+    showToast("请输入管理员密钥后再发布或回滚 Agent 版本。");
+    return;
+  }
+  const message = action === "rollback"
+    ? "确认回滚到这个 Agent 版本吗？当前模型与 RAG 快照必须仍然一致。"
+    : "确认发布这个 Agent 候选版本吗？当前模型与 RAG 快照必须仍然一致。";
+  if (!window.confirm(message)) return;
+
+  state.saving = true;
+  state.adminReleaseAction = normalizedReleaseId;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    state.adminReleases = await api(
+      `/agent/releases/${encodeURIComponent(normalizedReleaseId)}/${action}`,
+      { method: "POST", headers },
+    );
+    await refreshAgentRuntimeProfile();
+    showToast(action === "rollback" ? "Agent 版本已回滚并生效。" : "Agent 版本已发布并生效。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    state.adminReleaseAction = "";
+    render();
+  }
+}
+
 async function loadAdminJobs({ showToastOnSuccess = false } = {}) {
   if (state.adminJobsLoading) return;
   const adminKey = state.adminKnowledgeAdminKey.trim();
@@ -1959,6 +2054,15 @@ function adminKnowledgeErrorMessage(error) {
   }
   if (message === "Knowledge version not found") {
     return "没有找到这个 RAG 知识库版本，请刷新后再试。";
+  }
+  if (message === "Agent release not found") {
+    return "没有找到这个 Agent 版本，请刷新后再试。";
+  }
+  if (message === "An admitted offline Agent evaluation is required before creating a release candidate") {
+    return "请先运行并通过离线 Agent 质量评测，再创建候选版本。";
+  }
+  if (message === "Current runtime or RAG knowledge differs from this release snapshot") {
+    return "当前运行模型或 RAG 知识已变化，请重新运行评测并创建新的候选版本。";
   }
   return message;
 }
@@ -6438,6 +6542,7 @@ function renderAdminPage() {
   const versions = Array.isArray(knowledge.versions) ? knowledge.versions : [];
   const searchResults = state.adminKnowledgeSearchResults ?? [];
   const quality = state.adminQuality ?? {};
+  const releases = state.adminReleases ?? { releases: [], active_release_id: null };
   return `
     <div class="simple-admin">
       <header class="simple-page-header">
@@ -6473,6 +6578,16 @@ function renderAdminPage() {
           </div>
         </div>
         ${renderAdminQualityGovernance(quality)}
+      </section>
+
+      <section class="surface admin-knowledge-version-panel">
+        <div class="simple-section-heading">
+          <div>
+            <h2>Agent 版本治理</h2>
+            <p>候选版本会锁定当前运行模型、RAG 知识版本和离线准入证据。发布或回滚前会再次校验快照，避免配置漂移。</p>
+          </div>
+        </div>
+        ${renderAgentReleaseGovernance(releases)}
       </section>
 
       ${renderAdminJobOperations()}
@@ -6639,6 +6754,89 @@ function renderRagEvaluationSummary(evaluation) {
       ? `RAG 关键失败：${escapeHtml(criticalFailures.join("、"))}`
       : "RAG 专项评测已覆盖召回、引用和无依据拒答。"}</p>
   `;
+}
+
+function renderAgentReleaseGovernance(data) {
+  const releases = Array.isArray(data?.releases) ? data.releases : [];
+  const activeReleaseId = String(data?.active_release_id || "");
+  const active = releases.find((release) => String(release.release_id) === activeReleaseId);
+  const latestQuality = state.adminQuality?.latest_evaluation;
+  const qualityReady = Boolean(latestQuality?.admission?.admitted);
+  return `
+    <div class="diagnostics-summary admin-summary-grid">
+      ${diagnosticMetric("当前 Agent 版本", active?.label || "未发布", active ? "ok" : "warning")}
+      ${diagnosticMetric("发布候选", releases.filter((release) => release?.state === "candidate").length, "info")}
+      ${diagnosticMetric("离线准入", qualityReady ? "已通过" : "未通过", qualityReady ? "ok" : "warning")}
+      ${diagnosticMetric("RAG 快照", active?.snapshot?.knowledge_version_id ? "已绑定" : "内置知识", "info")}
+    </div>
+    <form class="form-grid" data-agent-release-form>
+      <div class="field">
+        <label for="agent-release-label">版本名称</label>
+        <input id="agent-release-label" name="label" maxlength="80" placeholder="例如：2026.10 稳定版" required />
+      </div>
+      <div class="field">
+        <label for="agent-release-note">发布说明 <small>选填</small></label>
+        <input id="agent-release-note" name="note" maxlength="240" placeholder="例如：包含 RAG 专项评测与分类策略优化" />
+      </div>
+      <div class="form-actions">
+        <button class="button primary" type="submit" ${state.saving || !qualityReady ? "disabled" : ""}>
+          ${icon("plus")}${state.adminReleaseAction === "create" ? "创建中..." : "创建候选版本"}
+        </button>
+        <small class="form-hint">${qualityReady ? "将自动绑定最新离线准入和当前 RAG 快照。" : "请先运行并通过离线 Agent 质量评测。"}</small>
+      </div>
+    </form>
+    ${releases.length ? `
+      <div class="admin-version-list">
+        ${releases.map(renderAgentRelease).join("")}
+      </div>
+    ` : `<p class="form-hint">还没有 Agent 发布版本。通过离线评测后可创建第一个候选版本。</p>`}
+  `;
+}
+
+function renderAgentRelease(release) {
+  const stateValue = String(release?.state || "candidate");
+  const snapshot = release?.snapshot ?? {};
+  const releaseId = String(release?.release_id || "");
+  const isActive = stateValue === "active";
+  const isCandidate = stateValue === "candidate";
+  const actionPending = state.adminReleaseAction === releaseId;
+  const quality = `评测 ${String(snapshot.quality_dataset_version || "--")} · ${Math.round(Number(snapshot.quality_pass_rate ?? 0) * 100)}%`;
+  const rag = snapshot.knowledge_version_id ? "RAG 快照已绑定" : "RAG 使用内置知识";
+  return `
+    <article class="admin-version-card">
+      <div>
+        <strong>${escapeHtml(String(release?.label || "未命名版本"))}</strong>
+        <small>${escapeHtml(formatDate(release?.activated_at || release?.created_at))} · ${escapeHtml(agentReleaseStateLabel(stateValue))} · ${escapeHtml(releaseId.slice(0, 18))}</small>
+        <p>${escapeHtml(String(snapshot.model_provider || "未知模型"))} · ${escapeHtml(String(snapshot.runtime_model || snapshot.model_strategy || "本地规则"))}</p>
+        <div class="audit-detail-chips">
+          <span>${escapeHtml(quality)}</span>
+          <span>${escapeHtml(rag)}</span>
+        </div>
+        ${release?.note ? `<p>${escapeHtml(String(release.note))}</p>` : ""}
+      </div>
+      <div class="admin-job-actions">
+        ${isCandidate ? `
+          <button class="button compact-button" type="button" data-agent-release-promote="${escapeHtml(releaseId)}" ${actionPending || state.saving ? "disabled" : ""}>
+            ${icon("check")}${actionPending ? "发布中..." : "发布"}
+          </button>
+        ` : ""}
+        ${!isActive ? `
+          <button class="button ghost compact-button" type="button" data-agent-release-rollback="${escapeHtml(releaseId)}" ${actionPending || state.saving ? "disabled" : ""}>
+            ${icon("reset")}${actionPending ? "回滚中..." : "回滚到此版本"}
+          </button>
+        ` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function agentReleaseStateLabel(value) {
+  const labels = {
+    candidate: "候选版本",
+    active: "当前生效",
+    superseded: "已替换",
+  };
+  return labels[value] || value;
 }
 
 function renderAdminJobOperations() {

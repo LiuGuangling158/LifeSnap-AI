@@ -65,6 +65,13 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("feedback_count", response.json())
         self.assertIn("recent_evaluations", response.json())
 
+    def test_agent_release_catalog_contract_is_available_without_login(self) -> None:
+        response = self.client.get("/agent/releases")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("active_release_id", response.json())
+        self.assertIn("releases", response.json())
+
     def test_chat_response_includes_a_privacy_safe_agent_explanation(self) -> None:
         response = self.client.post(
             "/chat/messages",

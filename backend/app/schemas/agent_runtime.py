@@ -58,6 +58,9 @@ class AgentModelTrace(BaseModel):
     function_calling_mode: str = Field(default="local_trace_only", max_length=80)
     rag_enabled: bool = True
     function_calling_enabled: bool = True
+    release_id: str | None = Field(default=None, max_length=80)
+    release_label: str | None = Field(default=None, max_length=80)
+    release_state: str | None = Field(default=None, max_length=40)
 
 
 class AgentKnowledgeSource(BaseModel):

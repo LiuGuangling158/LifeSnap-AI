@@ -11,6 +11,7 @@ from app.schemas.agent_runtime import (
     AgentRuntimeProfile,
 )
 from app.services.agent_knowledge_base import agent_knowledge_base
+from app.services.agent_release_service import agent_release_service
 from app.services.agent_tool_registry import agent_tool_registry
 from app.services.bill_store import bill_store
 from app.services.diary_store import diary_store
@@ -73,6 +74,7 @@ class AgentRuntimeService:
             if llm_ready or (llm_configured and not external_parser_ready)
             else settings.ai_parser_provider_name
         )
+        release_id, release_label, release_state = agent_release_service.active_reference()
 
         return AgentModelTrace(
             provider=provider,
@@ -103,6 +105,9 @@ class AgentRuntimeService:
             function_calling_mode=self._function_calling_mode(llm_ready),
             rag_enabled=True,
             function_calling_enabled=True,
+            release_id=release_id,
+            release_label=release_label,
+            release_state=release_state,
         )
 
     def _privacy_blockers(self) -> list[str]:

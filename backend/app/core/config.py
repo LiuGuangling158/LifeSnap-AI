@@ -354,6 +354,7 @@ class Settings:
     local_audit_path: Path = DATA_DIR / "audit_events.json"
     local_idempotency_path: Path = DATA_DIR / "idempotency.json"
     local_agent_knowledge_path: Path = DATA_DIR / "agent_knowledge.json"
+    local_agent_release_path: Path = DATA_DIR / "agent_releases.json"
     local_rag_embedding_cache_path: Path = DATA_DIR / "rag_embedding_cache.json"
     local_database_path: Path = field(
         default_factory=lambda: Path(

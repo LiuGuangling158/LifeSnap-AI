@@ -94,6 +94,8 @@ class ObservabilityService:
                 "function_statuses": [call.status for call in response.function_calls[:12]],
                 "knowledge_source_ids": [hit.source_id for hit in response.knowledge_hits[:8]],
                 "agent_step_statuses": [step.status.value for step in response.agent_steps[:10]],
+                "agent_release_id": model.release_id if model else None,
+                "agent_release_label": model.release_label if model else None,
             },
         )
         sqlite_state_store.append_agent_trace(trace.model_dump(mode="json"), owner_id=owner_id)

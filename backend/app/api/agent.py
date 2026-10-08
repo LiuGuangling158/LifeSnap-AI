@@ -18,6 +18,11 @@ from app.schemas.agent_runtime import (
     AgentRagProfile,
     AgentRuntimeProfile,
 )
+from app.schemas.agent_release import (
+    AgentReleaseCreateRequest,
+    AgentReleaseListResponse,
+    AgentReleaseSnapshot,
+)
 from app.schemas.agent import (
     BillCandidateUpdate,
     BillCandidateListResponse,
@@ -36,7 +41,9 @@ from app.schemas.task import TaskRead
 from app.services.admin_auth_service import admin_auth_service
 from app.services.audit_log_store import audit_log_store
 from app.services.agent_knowledge_base import agent_knowledge_base
+from app.services.agent_release_service import agent_release_service
 from app.services.agent_runtime_service import agent_runtime_service
+from app.services.agent_quality_service import agent_quality_service
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.bill_parser import bill_parser
 from app.services.bill_store import bill_store
@@ -85,6 +92,128 @@ def require_local_key_reveal(request: Request) -> None:
 @router.get("/runtime", response_model=AgentRuntimeProfile)
 def get_agent_runtime() -> AgentRuntimeProfile:
     return agent_runtime_service.profile()
+
+
+@router.get("/releases", response_model=AgentReleaseListResponse)
+def list_agent_releases() -> AgentReleaseListResponse:
+    return agent_release_service.response()
+
+
+@router.post("/releases", response_model=AgentReleaseListResponse, status_code=status.HTTP_201_CREATED)
+def create_agent_release_candidate(
+    payload: AgentReleaseCreateRequest,
+    request: Request,
+    _: None = Depends(require_admin_api_key),
+) -> AgentReleaseListResponse:
+    snapshot = _release_snapshot_for_current_runtime()
+    release = agent_release_service.create_candidate(
+        label=payload.label,
+        note=payload.note,
+        snapshot=snapshot,
+    )
+    audit_log_store.record(
+        action="agent_release_candidate_created",
+        entity_type="agent_release",
+        entity_id=release.release_id,
+        request=request,
+        metadata={
+            "label": release.label,
+            "quality_run_id": snapshot.quality_run_id,
+            "quality_dataset_version": snapshot.quality_dataset_version,
+            "knowledge_version_id": snapshot.knowledge_version_id,
+        },
+    )
+    return agent_release_service.response()
+
+
+@router.post("/releases/{release_id}/promote", response_model=AgentReleaseListResponse)
+def promote_agent_release(
+    release_id: str,
+    request: Request,
+    _: None = Depends(require_admin_api_key),
+) -> AgentReleaseListResponse:
+    try:
+        release = agent_release_service.promote(
+            release_id,
+            current_fingerprint=_current_runtime_fingerprint(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="agent_release_promoted",
+        entity_type="agent_release",
+        entity_id=release.release_id,
+        request=request,
+        metadata={"label": release.label, "quality_run_id": release.snapshot.quality_run_id},
+    )
+    return agent_release_service.response()
+
+
+@router.post("/releases/{release_id}/rollback", response_model=AgentReleaseListResponse)
+def rollback_agent_release(
+    release_id: str,
+    request: Request,
+    _: None = Depends(require_admin_api_key),
+) -> AgentReleaseListResponse:
+    try:
+        release = agent_release_service.rollback(
+            release_id,
+            current_fingerprint=_current_runtime_fingerprint(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="agent_release_rolled_back",
+        entity_type="agent_release",
+        entity_id=release.release_id,
+        request=request,
+        metadata={"label": release.label, "quality_run_id": release.snapshot.quality_run_id},
+    )
+    return agent_release_service.response()
+
+
+def _release_snapshot_for_current_runtime() -> AgentReleaseSnapshot:
+    evaluation = agent_quality_service.summary().latest_evaluation
+    if evaluation is None or not evaluation.admission.admitted:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An admitted offline Agent evaluation is required before creating a release candidate",
+        )
+    model = agent_runtime_service.model_trace()
+    knowledge_version_id = agent_knowledge_base.latest_version_id()
+    rag = evaluation.rag_evaluation
+    return AgentReleaseSnapshot(
+        app_version=settings.app_version,
+        runtime_fingerprint=_runtime_fingerprint(model, knowledge_version_id),
+        model_provider=model.provider,
+        model_strategy=model.strategy,
+        runtime_model=model.runtime_model,
+        knowledge_version_id=knowledge_version_id,
+        quality_run_id=str(evaluation.run_id),
+        quality_dataset_version=evaluation.dataset_version,
+        quality_pass_rate=evaluation.pass_rate,
+        rag_dataset_version=rag.dataset_version if rag else None,
+        rag_recall_at_k=rag.recall_at_k if rag else None,
+        rag_citation_accuracy=rag.citation_accuracy if rag else None,
+        rag_abstention_accuracy=rag.abstention_accuracy if rag else None,
+    )
+
+
+def _current_runtime_fingerprint() -> str:
+    return _runtime_fingerprint(
+        agent_runtime_service.model_trace(),
+        agent_knowledge_base.latest_version_id(),
+    )
+
+
+def _runtime_fingerprint(model, knowledge_version_id: str | None) -> str:
+    return agent_release_service.runtime_fingerprint(
+        app_version=settings.app_version,
+        model_provider=model.provider,
+        model_strategy=model.strategy,
+        runtime_model=model.runtime_model,
+        knowledge_version_id=knowledge_version_id,
+    )
 
 
 @router.get("/knowledge/search", response_model=list[AgentKnowledgeHit])

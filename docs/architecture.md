@@ -167,3 +167,7 @@ The versioned suite at backend/evaluations/agent_admission_v2.json is the offlin
 - RAG admission measures recall@k, top-result citation accuracy, and abstention accuracy for unsupported questions. A failed RAG critical case or any metric below its declared threshold rejects release admission.
 
 - A same-dataset, same-mode baseline is selected from the latest prior run. Newly failed cases or a lower pass rate are quality regressions and reject admission when `require_no_regression` is enabled.
+
+## Agent Release Governance
+
+An Agent release is an immutable, administrator-managed snapshot of the deployed application version, model strategy, runtime model, active RAG knowledge version, and admitted offline evaluation evidence. Creating a candidate requires an admitted offline evaluation; promotion and rollback recheck a deterministic runtime fingerprint so a changed model configuration or RAG knowledge version cannot be mislabeled as a previously evaluated release. The active release identifier is attached to Agent runtime traces for production investigation.
