@@ -163,6 +163,7 @@ class ChatBillAnalysis(BaseModel):
 
 class ChatMessageResponse(BaseModel):
     message_id: UUID
+    trace_id: str | None = Field(default=None, max_length=80)
     reply: str
     intent: ChatIntent
     confidence: float = Field(ge=0, le=1)

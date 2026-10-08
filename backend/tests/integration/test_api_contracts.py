@@ -95,6 +95,14 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(explanation["guardrail"], "confirmation_required")
         self.assertNotIn("午餐", json.dumps(explanation, ensure_ascii=False))
 
+        feedback = self.client.post(
+            "/quality/feedback",
+            json={"message_id": payload["message_id"], "verdict": "corrected"},
+        )
+        self.assertEqual(feedback.status_code, 201)
+        self.assertTrue(feedback.json()["trace_id"])
+        self.assertEqual(feedback.json()["trace_snapshot"]["intent"], "create_bill")
+
     def test_admin_can_read_durable_async_job_events(self) -> None:
         now = datetime.now(timezone.utc)
         job = AsyncJobRead(

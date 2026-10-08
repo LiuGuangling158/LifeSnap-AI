@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from uuid import UUID
 
 from app.schemas.quality import (
     AgentQualityEvaluationRun,
     AgentQualityFeedbackCreate,
+    AgentQualityFeedbackListResponse,
     AgentQualityFeedbackRead,
+    AgentQualityFeedbackReviewRequest,
     AgentQualitySummary,
 )
 from app.services.admin_auth_service import admin_auth_service
@@ -45,6 +48,46 @@ def create_quality_feedback(
             "verdict": feedback.verdict,
             "has_expected_intent": bool(feedback.expected_intent),
             "has_expected_category": bool(feedback.expected_category),
+        },
+    )
+    return feedback
+
+
+@router.get("/feedback", response_model=AgentQualityFeedbackListResponse)
+def list_quality_feedback(
+    _: None = Depends(require_quality_admin_session),
+) -> AgentQualityFeedbackListResponse:
+    items = [
+        AgentQualityFeedbackRead.model_validate(item)
+        for item in agent_quality_service.list_feedback(limit=100)
+    ]
+    return AgentQualityFeedbackListResponse(
+        generated_at=agent_quality_service.now(),
+        total=len(items),
+        items=items,
+    )
+
+
+@router.post("/feedback/{feedback_id}/review", response_model=AgentQualityFeedbackRead)
+def review_quality_feedback(
+    feedback_id: UUID,
+    payload: AgentQualityFeedbackReviewRequest,
+    request: Request,
+    _: None = Depends(require_quality_admin_session),
+) -> AgentQualityFeedbackRead:
+    try:
+        feedback = agent_quality_service.review_feedback(feedback_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="agent_quality_feedback_reviewed",
+        entity_type="agent_quality_feedback",
+        entity_id=feedback.feedback_id,
+        request=request,
+        metadata={
+            "disposition": payload.disposition,
+            "review_status": feedback.review_status,
+            "promoted_case_id": feedback.promoted_case_id,
         },
     )
     return feedback

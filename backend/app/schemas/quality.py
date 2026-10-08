@@ -16,6 +16,26 @@ class AgentQualityFeedbackCreate(BaseModel):
 class AgentQualityFeedbackRead(AgentQualityFeedbackCreate):
     feedback_id: UUID
     created_at: datetime
+    trace_id: str | None = Field(default=None, max_length=80)
+    trace_snapshot: dict[str, str | None] = Field(default_factory=dict)
+    review_status: Literal["pending", "promoted", "dismissed"] = "pending"
+    review_note: str | None = Field(default=None, max_length=500)
+    reviewed_at: datetime | None = None
+    promoted_case_id: str | None = Field(default=None, max_length=80)
+
+
+class AgentQualityFeedbackReviewRequest(BaseModel):
+    disposition: Literal["promote", "dismiss"]
+    evaluation_prompt: str | None = Field(default=None, max_length=500)
+    expected_intent: str | None = Field(default=None, max_length=80)
+    expected_category: str | None = Field(default=None, max_length=80)
+    review_note: str | None = Field(default=None, max_length=500)
+
+
+class AgentQualityFeedbackListResponse(BaseModel):
+    generated_at: datetime
+    total: int = Field(ge=0)
+    items: list[AgentQualityFeedbackRead] = Field(default_factory=list)
 
 
 class AgentQualityAdmission(BaseModel):
@@ -113,6 +133,8 @@ class AgentQualitySummary(BaseModel):
     accepted_count: int
     corrected_count: int
     rejected_count: int
+    pending_feedback_count: int = Field(default=0, ge=0)
+    promoted_feedback_case_count: int = Field(default=0, ge=0)
     acceptance_rate: float | None = None
     correction_rate: float | None = None
     latest_evaluation: AgentQualityEvaluationRun | None = None

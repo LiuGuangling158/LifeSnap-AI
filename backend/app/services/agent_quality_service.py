@@ -9,12 +9,13 @@ from typing import Iterator, Literal
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
-from app.schemas.chat import ChatActionType, ChatMessageRequest
+from app.schemas.chat import ChatActionType, ChatIntent, ChatMessageRequest
 from app.schemas.quality import (
     AgentQualityAdmission,
     AgentQualityEvaluationCase,
     AgentQualityEvaluationRun,
     AgentQualityFeedbackCreate,
+    AgentQualityFeedbackReviewRequest,
     AgentQualityFeedbackRead,
     AgentQualityRegression,
     AgentQualitySummary,
@@ -37,13 +38,75 @@ class AgentQualityService:
     _rag_dataset_path = Path(__file__).resolve().parents[2] / "evaluations" / "rag_retrieval_v1.json"
 
     def record_feedback(self, payload: AgentQualityFeedbackCreate) -> AgentQualityFeedbackRead:
+        trace = sqlite_state_store.find_agent_trace_by_message_id(str(payload.message_id))
         record = AgentQualityFeedbackRead(
             feedback_id=uuid4(),
             created_at=datetime.now(timezone.utc),
+            trace_id=str(trace["trace_id"]) if trace else None,
+            trace_snapshot=self._feedback_trace_snapshot(trace),
             **payload.model_dump(),
         )
-        sqlite_state_store.append_agent_quality_feedback(record.model_dump(mode="json"))
-        return record
+        stored = sqlite_state_store.upsert_agent_quality_feedback(record.model_dump(mode="json"))
+        return AgentQualityFeedbackRead.model_validate(stored)
+
+    def review_feedback(
+        self,
+        feedback_id: UUID,
+        payload: AgentQualityFeedbackReviewRequest,
+    ) -> AgentQualityFeedbackRead:
+        feedback = sqlite_state_store.get_agent_quality_feedback(str(feedback_id))
+        if feedback is None:
+            raise ValueError("Feedback record was not found")
+
+        promoted_case_id: str | None = None
+        if payload.disposition == "promote":
+            evaluation_prompt = (payload.evaluation_prompt or "").strip()
+            expected_intent = (payload.expected_intent or feedback.get("expected_intent") or "").strip()
+            expected_category = (
+                payload.expected_category
+                if payload.expected_category is not None
+                else feedback.get("expected_category")
+            )
+            if not evaluation_prompt or not expected_intent:
+                raise ValueError(
+                    "Promoting feedback requires a sanitized evaluation prompt and expected intent"
+                )
+            if expected_intent not in {intent.value for intent in ChatIntent}:
+                raise ValueError("Expected intent is not supported by the Agent")
+            promoted_case_id = f"feedback_{str(feedback_id).replace('-', '')[:16]}"
+            sqlite_state_store.upsert_agent_quality_feedback_case(
+                str(feedback_id),
+                {
+                    "case_id": promoted_case_id,
+                    "message": evaluation_prompt,
+                    "intent": expected_intent,
+                    "category": (str(expected_category).strip() or None)
+                    if expected_category is not None
+                    else None,
+                    "tools": self._tools_for_intent(expected_intent),
+                    "critical": False,
+                    "need_user_confirmation": expected_intent
+                    in {"create_bill", "create_task", "create_diary"},
+                    "source": "reviewed_user_feedback",
+                },
+            )
+
+        reviewed = sqlite_state_store.review_agent_quality_feedback(
+            str(feedback_id),
+            review_status="promoted" if payload.disposition == "promote" else "dismissed",
+            review_note=(payload.review_note or "").strip() or None,
+            promoted_case_id=promoted_case_id,
+        )
+        if reviewed is None:
+            raise ValueError("Feedback record was not found")
+        return AgentQualityFeedbackRead.model_validate(reviewed)
+
+    def list_feedback(self, *, limit: int) -> list[dict]:
+        return sqlite_state_store.list_agent_quality_feedback(limit=limit)
+
+    @staticmethod
+    def now() -> datetime:
+        return datetime.now(timezone.utc)
 
     def summary(self) -> AgentQualitySummary:
         feedback = sqlite_state_store.list_agent_quality_feedback(limit=500)
@@ -53,6 +116,12 @@ class AgentQualityService:
             if verdict in counts:
                 counts[verdict] += 1
         feedback_count = len(feedback)
+        pending_feedback_count = sum(
+            1 for item in feedback if item.get("review_status", "pending") == "pending"
+        )
+        promoted_feedback_case_count = sum(
+            1 for item in feedback if item.get("review_status") == "promoted"
+        )
         recent_evaluations = [
             AgentQualityEvaluationRun.model_validate(item)
             for item in sqlite_state_store.list_agent_quality_evaluations(limit=10)
@@ -71,6 +140,8 @@ class AgentQualityService:
             accepted_count=counts["accepted"],
             corrected_count=counts["corrected"],
             rejected_count=counts["rejected"],
+            pending_feedback_count=pending_feedback_count,
+            promoted_feedback_case_count=promoted_feedback_case_count,
             acceptance_rate=round(counts["accepted"] / feedback_count, 4)
             if feedback_count
             else None,
@@ -243,14 +314,65 @@ class AgentQualityService:
         minimum_pass_rate = float(payload.get("minimum_pass_rate", 1.0))
         if not 0 <= minimum_pass_rate <= 1:
             raise ValueError("Agent admission minimum_pass_rate must be between 0 and 1")
+        feedback_cases = self._load_feedback_cases()
         return {
             "dataset_id": str(payload.get("dataset_id") or "agent-admission"),
-            "dataset_version": str(payload.get("dataset_version") or "v1"),
+            "dataset_version": (
+                f"{str(payload.get('dataset_version') or 'v1')}-feedback-{len(feedback_cases)}"
+            ),
             "policy_id": str(payload.get("policy_id") or "agent-admission-v1"),
             "minimum_pass_rate": minimum_pass_rate,
             "require_no_regression": bool(payload.get("require_no_regression", True)),
-            "cases": normalized_cases,
+            "cases": normalized_cases + feedback_cases,
         }
+
+    @staticmethod
+    def _feedback_trace_snapshot(trace: dict | None) -> dict[str, str | None]:
+        if trace is None:
+            return {}
+        payload = trace.get("payload") if isinstance(trace.get("payload"), dict) else {}
+        return {
+            "intent": str(trace.get("intent") or "") or None,
+            "action_type": str(trace.get("action_type") or "") or None,
+            "outcome": str(trace.get("outcome") or "") or None,
+            "model_provider": str(trace.get("model_provider") or "") or None,
+            "model_strategy": str(trace.get("model_strategy") or "") or None,
+            "agent_release_id": str(payload.get("agent_release_id") or "") or None,
+            "agent_release_label": str(payload.get("agent_release_label") or "") or None,
+        }
+
+    def _load_feedback_cases(self) -> list[dict]:
+        raw_cases = sqlite_state_store.list_agent_quality_feedback_cases()
+        normalized: list[dict] = []
+        for item in raw_cases:
+            case_id = str(item.get("case_id") or "").strip()
+            message = str(item.get("message") or "").strip()
+            intent = str(item.get("intent") or "").strip()
+            if not case_id or not message or intent not in {value.value for value in ChatIntent}:
+                continue
+            normalized.append(
+                {
+                    "case_id": case_id,
+                    "message": message,
+                    "intent": intent,
+                    "category": str(item.get("category") or "").strip() or None,
+                    "tools": [str(tool) for tool in item.get("tools", []) if str(tool).strip()],
+                    "critical": bool(item.get("critical", False)),
+                    "need_user_confirmation": item.get("need_user_confirmation"),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _tools_for_intent(intent: str) -> list[str]:
+        return {
+            "create_bill": ["bill_candidate"],
+            "create_task": ["task_candidate"],
+            "create_diary": ["diary_candidate"],
+            "diary_reflection": ["diary_reflection"],
+            "analyze_bills": ["bill_analysis"],
+            "knowledge_answer": ["knowledge_search"],
+        }.get(intent, [])
 
     def _load_rag_suite(self) -> dict:
         payload = json.loads(self._rag_dataset_path.read_text(encoding="utf-8"))

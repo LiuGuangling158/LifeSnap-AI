@@ -173,6 +173,7 @@ const state = {
   chatDraft: initialAssistantSession.chatDraft,
   chatAttachments: [],
   chatCandidateEditor: null,
+  feedbackReview: null,
   activeAssistantToolId: initialAssistantSession.activeAssistantToolId,
   voiceListening: false,
   billFilters: {
@@ -245,6 +246,8 @@ const state = {
   adminKnowledgeReindexing: false,
   adminKnowledgeRollingBack: "",
   adminQuality: null,
+  adminFeedback: [],
+  adminFeedbackLoading: false,
   adminReleases: null,
   adminReleaseAction: "",
   modelUsage: null,
@@ -480,6 +483,18 @@ document.addEventListener("click", (event) => {
       qualityFeedbackButton.dataset.messageId,
       qualityFeedbackButton.dataset.chatQualityFeedback,
     );
+    return;
+  }
+
+  const feedbackReviewButton = event.target.closest("[data-feedback-review]");
+  if (feedbackReviewButton) {
+    openFeedbackReview(feedbackReviewButton.dataset.feedbackReview);
+    return;
+  }
+
+  if (event.target.closest("[data-close-feedback-review]")) {
+    state.feedbackReview = null;
+    render();
     return;
   }
 
@@ -1045,6 +1060,7 @@ document.addEventListener("keydown", (event) => {
       || state.auditLogOpen
       || state.recycleBinOpen
       || state.chatCandidateEditor
+      || state.feedbackReview
     )
   ) {
     state.modalOpen = false;
@@ -1074,6 +1090,7 @@ document.addEventListener("keydown", (event) => {
     state.auditLogOpen = false;
     state.recycleBinOpen = false;
     state.chatCandidateEditor = null;
+    state.feedbackReview = null;
     render();
   }
 });
@@ -1184,6 +1201,12 @@ document.addEventListener("submit", async (event) => {
   if (event.target.matches("[data-agent-release-form]")) {
     event.preventDefault();
     await submitAgentRelease(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-feedback-review-form]")) {
+    event.preventDefault();
+    await submitFeedbackReview(new FormData(event.target));
     return;
   }
 
@@ -1735,6 +1758,68 @@ async function runAgentQualityEvaluation(executionMode = "offline") {
   }
 }
 
+async function loadAdminFeedback() {
+  if (state.adminFeedbackLoading || !adminSessionValid()) return;
+  state.adminFeedbackLoading = true;
+  try {
+    const result = await api("/quality/feedback", {
+      headers: { Authorization: `Bearer ${state.adminKnowledgeAdminToken}` },
+    });
+    state.adminFeedback = Array.isArray(result?.items) ? result.items : [];
+  } catch (error) {
+    state.adminFeedback = [];
+  } finally {
+    state.adminFeedbackLoading = false;
+    render();
+  }
+}
+
+function openFeedbackReview(feedbackId) {
+  const feedback = state.adminFeedback.find((item) => String(item.feedback_id) === String(feedbackId));
+  if (!feedback) return;
+  state.feedbackReview = feedback;
+  render();
+}
+
+async function submitFeedbackReview(formData) {
+  const feedback = state.feedbackReview;
+  const adminKey = currentAdminKey();
+  if (!feedback || !adminKey || state.saving) return;
+  const disposition = String(formData.get("disposition") || "dismiss");
+  const payload = {
+    disposition,
+    evaluation_prompt: String(formData.get("evaluation_prompt") || "").trim() || null,
+    expected_intent: String(formData.get("expected_intent") || "").trim() || null,
+    expected_category: String(formData.get("expected_category") || "").trim() || null,
+    review_note: String(formData.get("review_note") || "").trim() || null,
+  };
+  if (disposition === "promote" && (!payload.evaluation_prompt || !payload.expected_intent)) {
+    showToast("晋升为评测用例时，需要填写脱敏样例和预期意图。");
+    return;
+  }
+  state.saving = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    const updated = await api(`/quality/feedback/${encodeURIComponent(String(feedback.feedback_id))}/review`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    state.adminFeedback = state.adminFeedback.map((item) => (
+      String(item.feedback_id) === String(updated.feedback_id) ? updated : item
+    ));
+    state.feedbackReview = null;
+    state.adminQuality = await api("/quality/summary");
+    showToast(disposition === "promote" ? "反馈已晋升为回归评测用例。" : "反馈已完成复核并关闭。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 function currentAdminKey() {
   const input = document.querySelector("#admin_key");
   return String(input?.value || state.adminKnowledgeAdminKey || "").trim();
@@ -1923,6 +2008,7 @@ async function createAdminSession(adminKey) {
       throw new Error("未获取到管理员会话 token。");
     }
     scheduleAdminSessionExpiry();
+    void loadAdminFeedback();
     return state.adminKnowledgeAdminToken;
   } finally {
     state.adminSessionLoading = false;
@@ -4617,6 +4703,10 @@ function normalizeStoredChatResponse(response) {
   }
   return {
     message_id: response.message_id ? String(response.message_id) : null,
+    trace_id: response.trace_id ? String(response.trace_id) : null,
+    feedback_verdict: ["accepted", "corrected", "rejected"].includes(response.feedback_verdict)
+      ? response.feedback_verdict
+      : null,
     reply: String(response.reply ?? "").slice(0, 5000),
     intent: String(response.intent ?? "unsupported"),
     confidence: Number.isFinite(Number(response.confidence)) ? Number(response.confidence) : 0,
@@ -4855,7 +4945,13 @@ async function submitChatQualityFeedback(messageId, verdict) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message_id: messageId, verdict }),
     });
-    showToast("已记录本次 AI 反馈。");
+    state.chatMessages = state.chatMessages.map((message) => (
+      String(message.response?.message_id || "") === String(messageId)
+        ? { ...message, response: { ...message.response, feedback_verdict: verdict } }
+        : message
+    ));
+    saveAssistantSession();
+    showToast("已记录本次 AI 反馈，管理员会结合运行链路复核。 ");
   } catch (error) {
     showToast(error.message || "反馈暂未保存。");
   }
@@ -4963,6 +5059,7 @@ function render() {
       ${state.auditLogOpen ? renderAuditLogModal() : ""}
       ${state.recycleBinOpen ? renderRecycleBinModal() : ""}
       ${state.chatCandidateEditor ? renderChatCandidateEditorModal() : ""}
+      ${state.feedbackReview ? renderFeedbackReviewModal() : ""}
       ${state.toast ? renderToast() : ""}
     </div>
   `;
@@ -6588,6 +6685,16 @@ function renderAdminPage() {
       <section class="surface admin-knowledge-version-panel">
         <div class="simple-section-heading">
           <div>
+            <h2>用户反馈闭环</h2>
+            <p>先由用户标记结果，再由管理员复核运行链路。只有人工填写的脱敏样例才会晋升为回归评测用例。</p>
+          </div>
+        </div>
+        ${renderAdminFeedbackLoop(quality, state.adminFeedback)}
+      </section>
+
+      <section class="surface admin-knowledge-version-panel">
+        <div class="simple-section-heading">
+          <div>
             <h2>Agent 版本治理</h2>
             <p>候选版本会锁定当前运行模型、RAG 知识版本和离线准入证据。发布或回滚前会再次校验快照，避免配置漂移。</p>
           </div>
@@ -6745,6 +6852,70 @@ function renderAdminQualityGovernance(summary) {
     <div class="admin-version-list">
       ${recent.map(renderAdminQualityRun).join("")}
     </div>
+  `;
+}
+
+function renderAdminFeedbackLoop(summary, feedback) {
+  const items = Array.isArray(feedback) ? feedback : [];
+  const pending = Number(summary?.pending_feedback_count ?? 0);
+  const promoted = Number(summary?.promoted_feedback_case_count ?? 0);
+  if (!adminSessionValid()) {
+    return `
+      <div class="diagnostics-summary admin-summary-grid">
+        ${diagnosticMetric("待复核", pending, pending ? "warning" : "ok")}
+        ${diagnosticMetric("已晋升用例", promoted, "info")}
+      </div>
+      <p class="admin-note">建立管理员会话后可查看并复核反馈。反馈绑定运行 Trace，但不会自动保留用户原始对话。</p>
+    `;
+  }
+  return `
+    <div class="diagnostics-summary admin-summary-grid">
+      ${diagnosticMetric("待复核", pending, pending ? "warning" : "ok")}
+      ${diagnosticMetric("已晋升用例", promoted, "info")}
+      ${diagnosticMetric("本次加载", items.length, "info")}
+      ${diagnosticMetric("反馈总量", Number(summary?.feedback_count ?? 0), "info")}
+    </div>
+    ${state.adminFeedbackLoading
+      ? `<p class="admin-note">正在读取反馈队列...</p>`
+      : items.length
+        ? `<div class="admin-version-list">${items.slice(0, 12).map(renderAdminFeedbackItem).join("")}</div>`
+        : `<p class="admin-note">目前没有可复核的用户反馈。</p>`}
+  `;
+}
+
+function renderAdminFeedbackItem(feedback) {
+  const snapshot = feedback?.trace_snapshot || {};
+  const status = {
+    pending: "待复核",
+    promoted: "已晋升",
+    dismissed: "已关闭",
+  }[feedback?.review_status] || "待复核";
+  const verdict = {
+    accepted: "准确",
+    corrected: "需修正",
+    rejected: "不正确",
+  }[feedback?.verdict] || "未知";
+  const details = [
+    chatIntentDisplay(snapshot.intent),
+    chatActionDisplay(snapshot.action_type),
+    snapshot.model_provider,
+    snapshot.agent_release_label,
+  ].filter(Boolean).join(" · ") || "未找到可关联的运行 Trace";
+  return `
+    <article class="admin-version-card">
+      <div>
+        <strong>${escapeHtml(verdict)} · ${escapeHtml(status)}</strong>
+        <p>${escapeHtml(details)}</p>
+        ${feedback?.expected_intent ? `<small>期望意图：${escapeHtml(chatIntentDisplay(feedback.expected_intent) || feedback.expected_intent)}</small>` : ""}
+        ${feedback?.expected_category ? `<small>期望分类：${escapeHtml(feedback.expected_category)}</small>` : ""}
+        ${feedback?.review_note ? `<small>复核说明：${escapeHtml(feedback.review_note)}</small>` : ""}
+      </div>
+      ${feedback?.review_status === "pending"
+        ? `<button class="button ghost" type="button" data-feedback-review="${escapeHtml(feedback.feedback_id)}">复核</button>`
+        : feedback?.promoted_case_id
+          ? `<span class="release-state active">${escapeHtml(feedback.promoted_case_id)}</span>`
+          : ""}
+    </article>
   `;
 }
 
@@ -8583,13 +8754,22 @@ function renderChatMessage(message, index) {
 function renderChatQualityFeedback(response) {
   const messageId = String(response?.message_id || "");
   if (!messageId) return "";
+  const verdict = response?.feedback_verdict;
+  if (verdict) {
+    const text = {
+      accepted: "已标记为准确",
+      corrected: "已标记为需修正",
+      rejected: "已标记为不正确",
+    }[verdict] || "已记录反馈";
+    return `<div class="chat-selected-tool"><small>${escapeHtml(text)}</small></div>`;
+  }
   const escapedMessageId = escapeHtml(messageId);
   return [
     '<div class="chat-selected-tool" aria-label="AI quality feedback">',
-    "<small>Was this result accurate?</small>",
-    '<button class="icon-button" type="button" data-chat-quality-feedback="accepted" data-message-id="' + escapedMessageId + '" title="Accurate">' + icon("check-circle") + "</button>",
-    '<button class="icon-button" type="button" data-chat-quality-feedback="corrected" data-message-id="' + escapedMessageId + '" title="Needs correction">' + icon("edit") + "</button>",
-    '<button class="icon-button" type="button" data-chat-quality-feedback="rejected" data-message-id="' + escapedMessageId + '" title="Incorrect">' + icon("x-circle") + "</button>",
+    "<small>这次结果准确吗？</small>",
+    '<button class="icon-button" type="button" data-chat-quality-feedback="accepted" data-message-id="' + escapedMessageId + '" title="准确">' + icon("check-circle") + "</button>",
+    '<button class="icon-button" type="button" data-chat-quality-feedback="corrected" data-message-id="' + escapedMessageId + '" title="需要修正">' + icon("edit") + "</button>",
+    '<button class="icon-button" type="button" data-chat-quality-feedback="rejected" data-message-id="' + escapedMessageId + '" title="不正确">' + icon("x-circle") + "</button>",
     "</div>",
   ].join("");
 }
@@ -9239,6 +9419,86 @@ function renderChatCandidateEditorModal() {
       </section>
     </div>
   `;
+}
+
+function renderFeedbackReviewModal() {
+  const feedback = state.feedbackReview || {};
+  const snapshot = feedback.trace_snapshot || {};
+  const expectedIntent = feedback.expected_intent || snapshot.intent || "";
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="feedback-review-title">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title" id="feedback-review-title">复核用户反馈</h2>
+            <p class="section-note">请仅填写已脱敏、可公开用于回归测试的样例，不要复制用户原始对话。</p>
+          </div>
+          <button class="button ghost" type="button" data-close-feedback-review aria-label="关闭">
+            ${icon("close")}
+          </button>
+        </div>
+        <form class="form" data-feedback-review-form>
+          <div class="form-grid">
+            <div class="field full">
+              <label>运行关联</label>
+              <p class="form-hint">${escapeHtml([
+                chatIntentDisplay(snapshot.intent),
+                chatActionDisplay(snapshot.action_type),
+                snapshot.model_provider,
+                snapshot.agent_release_label,
+              ].filter(Boolean).join(" · ") || "未找到运行 Trace")}</p>
+            </div>
+            <div class="field">
+              <label for="feedback_disposition">处理结果</label>
+              <select id="feedback_disposition" name="disposition">
+                <option value="promote">晋升为回归用例</option>
+                <option value="dismiss">关闭，不纳入评测</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="feedback_expected_intent">预期意图</label>
+              <select id="feedback_expected_intent" name="expected_intent">
+                ${renderFeedbackIntentOptions(expectedIntent)}
+              </select>
+            </div>
+            <div class="field full">
+              <label for="feedback_evaluation_prompt">脱敏评测样例</label>
+              <textarea id="feedback_evaluation_prompt" name="evaluation_prompt" maxlength="500" placeholder="例如：午餐 28 元，用微信支付"></textarea>
+            </div>
+            <div class="field">
+              <label for="feedback_expected_category">预期分类 <small>选填</small></label>
+              <input id="feedback_expected_category" name="expected_category" maxlength="80" value="${escapeHtml(feedback.expected_category || "")}" />
+            </div>
+            <div class="field full">
+              <label for="feedback_review_note">复核说明 <small>选填</small></label>
+              <textarea id="feedback_review_note" name="review_note" maxlength="500">${escapeHtml(feedback.note || "")}</textarea>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="button ghost" type="button" data-close-feedback-review>取消</button>
+            <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+              ${icon("save")}${state.saving ? "保存中..." : "保存复核"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderFeedbackIntentOptions(selected) {
+  const options = [
+    ["create_bill", "记账"],
+    ["create_task", "提醒"],
+    ["create_diary", "日记"],
+    ["diary_reflection", "日记追问"],
+    ["analyze_bills", "账单分析"],
+    ["knowledge_answer", "知识问答"],
+    ["unsupported", "未支持"],
+  ];
+  return options.map(([value, label]) => (
+    `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`
+  )).join("");
 }
 
 function renderChatCandidateEditorFields(actionType, data) {

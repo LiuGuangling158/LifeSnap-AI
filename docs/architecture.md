@@ -172,6 +172,15 @@ The versioned suite at backend/evaluations/agent_admission_v2.json is the offlin
 
 An Agent release is an immutable, administrator-managed snapshot of the deployed application version, model strategy, runtime model, active RAG knowledge version, and admitted offline evaluation evidence. Creating a candidate requires an admitted offline evaluation; promotion and rollback recheck a deterministic runtime fingerprint so a changed model configuration or RAG knowledge version cannot be mislabeled as a previously evaluated release. The active release identifier is attached to Agent runtime traces for production investigation.
 
+## User Feedback Loop
+
+Feedback is attached to the privacy-safe Agent trace for the corresponding
+message rather than to chat text. Administrators can triage the feedback and
+only promote an explicitly sanitized example with an expected intent into the
+offline regression suite. Promoted cases participate in later admission runs,
+which closes the loop from production signal to release governance without
+turning private conversations into evaluation data.
+
 ## Model Resilience and Cost
 
 External LLM and compatible parser calls share an invocation gateway with bounded retries for transient network, timeout, HTTP 408, HTTP 429, and HTTP 5xx errors. Consecutive final failures open a temporary provider/model circuit breaker and the Agent uses its local fallback. `/observability/model-usage` and Prometheus expose aggregate calls, failures, retries, circuit rejections, tokens, and estimated cost without storing prompts, responses, or credentials. Cost is calculated from provider usage when available and marked as estimated when length-based token approximation is used.

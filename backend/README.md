@@ -1411,3 +1411,18 @@ Delete one task:
 ```text
 DELETE /tasks/{task_id}
 ```
+
+## User Feedback Loop
+
+Users can mark an Agent answer as accurate, needing correction, or incorrect.
+The feedback record is linked to the privacy-safe execution trace for the same
+message, including intent, action type, model strategy, and release label; it
+does not persist the original chat content. Administrators review the queue in
+the Admin page and may either close an item or promote it to a regression case.
+
+Promotion requires an administrator-written, sanitized sample prompt and an
+expected intent. Only that reviewed sample is added to the offline Agent
+evaluation suite; it becomes part of later admission runs and release evidence.
+The workflow APIs are `POST /quality/feedback`, `GET /quality/feedback`, and
+`POST /quality/feedback/{feedback_id}/review`. The latter two require an
+administrator session.

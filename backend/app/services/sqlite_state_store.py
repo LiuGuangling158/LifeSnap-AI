@@ -21,7 +21,7 @@ class SQLiteStateStore:
     database. Legacy files are read only once, on first access to a namespace.
     """
 
-    _migration_version = 10
+    _migration_version = 11
     _collection_tables = {
         "bills": ("bills", "id"),
         "tasks": ("tasks", "id"),
@@ -260,6 +260,35 @@ class SQLiteStateStore:
             finally:
                 connection.close()
 
+    def find_agent_trace_by_message_id(
+        self,
+        message_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    """
+                    SELECT trace_id, occurred_at, request_id, message_id, intent,
+                           action_type, model_provider, model_strategy, outcome,
+                           latency_ms, function_call_count, knowledge_hit_count,
+                           warning_count, payload
+                    FROM agent_execution_traces
+                    WHERE owner_id = ? AND message_id = ?
+                    ORDER BY occurred_at DESC
+                    LIMIT 1
+                    """,
+                    (owner_id, message_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                return {**dict(row), "payload": json.loads(str(row["payload"]))}
+            finally:
+                connection.close()
+
     def agent_trace_summary(self, *, owner_id: str | None = None) -> dict[str, Any]:
         traces = self.list_agent_traces(owner_id=owner_id, limit=200)
         latencies = sorted(float(trace["latency_ms"]) for trace in traces)
@@ -275,32 +304,75 @@ class SQLiteStateStore:
             "p95_latency_ms": round(latencies[percentile_index], 2) if latencies else 0.0,
         }
 
-    def append_agent_quality_feedback(self, feedback: dict[str, Any], *, owner_id: str | None = None) -> None:
+    def upsert_agent_quality_feedback(
+        self,
+        feedback: dict[str, Any],
+        *,
+        owner_id: str | None = None,
+    ) -> dict[str, Any]:
         owner_id = owner_id or current_owner_id()
         with self._lock:
             connection = self._connect()
             try:
-                connection.execute(
+                existing = connection.execute(
                     """
-                    INSERT INTO agent_quality_feedback(
-                        feedback_id, owner_id, message_id, verdict, expected_intent,
-                        expected_category, note, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    SELECT feedback_id FROM agent_quality_feedback
+                    WHERE owner_id = ? AND message_id = ?
+                    ORDER BY created_at DESC LIMIT 1
                     """,
-                    (
-                        str(feedback["feedback_id"]),
-                        owner_id,
-                        str(feedback["message_id"]),
-                        str(feedback["verdict"]),
-                        feedback.get("expected_intent"),
-                        feedback.get("expected_category"),
-                        feedback.get("note"),
-                        str(feedback["created_at"]),
-                    ),
-                )
+                    (owner_id, str(feedback["message_id"])),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        """
+                        INSERT INTO agent_quality_feedback(
+                            feedback_id, owner_id, message_id, verdict, expected_intent,
+                            expected_category, note, created_at, trace_id, trace_snapshot,
+                            review_status, review_note, reviewed_at, promoted_case_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        self._feedback_values(feedback, owner_id),
+                    )
+                    feedback_id = str(feedback["feedback_id"])
+                else:
+                    feedback_id = str(existing["feedback_id"])
+                    connection.execute(
+                        """
+                        UPDATE agent_quality_feedback_cases
+                        SET enabled = 0, updated_at = ?
+                        WHERE feedback_id = ? AND owner_id = ?
+                        """,
+                        (self._now(), feedback_id, owner_id),
+                    )
+                    connection.execute(
+                        """
+                        UPDATE agent_quality_feedback
+                        SET verdict = ?, expected_intent = ?, expected_category = ?, note = ?,
+                            created_at = ?, trace_id = ?, trace_snapshot = ?,
+                            review_status = 'pending', review_note = NULL, reviewed_at = NULL,
+                            promoted_case_id = NULL
+                        WHERE feedback_id = ? AND owner_id = ?
+                        """,
+                        (
+                            str(feedback["verdict"]),
+                            feedback.get("expected_intent"),
+                            feedback.get("expected_category"),
+                            feedback.get("note"),
+                            str(feedback["created_at"]),
+                            feedback.get("trace_id"),
+                            json.dumps(feedback.get("trace_snapshot", {}), ensure_ascii=False),
+                            feedback_id,
+                            owner_id,
+                        ),
+                    )
                 connection.commit()
+                return self._agent_quality_feedback_row(connection, feedback_id, owner_id)
             finally:
                 connection.close()
+
+    def append_agent_quality_feedback(self, feedback: dict[str, Any], *, owner_id: str | None = None) -> None:
+        """Backward-compatible wrapper for older callers."""
+        self.upsert_agent_quality_feedback(feedback, owner_id=owner_id)
 
     def list_agent_quality_feedback(self, *, owner_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
         owner_id = owner_id or current_owner_id()
@@ -310,7 +382,8 @@ class SQLiteStateStore:
                 rows = connection.execute(
                     """
                     SELECT feedback_id, message_id, verdict, expected_intent,
-                           expected_category, note, created_at
+                           expected_category, note, created_at, trace_id, trace_snapshot,
+                           review_status, review_note, reviewed_at, promoted_case_id
                     FROM agent_quality_feedback
                     WHERE owner_id = ?
                     ORDER BY created_at DESC
@@ -318,9 +391,171 @@ class SQLiteStateStore:
                     """,
                     (owner_id, max(1, min(limit, 1000))),
                 ).fetchall()
-                return [dict(row) for row in rows]
+                return [self._serialize_feedback_row(row) for row in rows]
             finally:
                 connection.close()
+
+    def get_agent_quality_feedback(
+        self,
+        feedback_id: str,
+        *,
+        owner_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    """
+                    SELECT feedback_id, message_id, verdict, expected_intent,
+                           expected_category, note, created_at, trace_id, trace_snapshot,
+                           review_status, review_note, reviewed_at, promoted_case_id
+                    FROM agent_quality_feedback
+                    WHERE feedback_id = ? AND owner_id = ?
+                    """,
+                    (feedback_id, owner_id),
+                ).fetchone()
+                return self._serialize_feedback_row(row) if row else None
+            finally:
+                connection.close()
+
+    def review_agent_quality_feedback(
+        self,
+        feedback_id: str,
+        *,
+        review_status: str,
+        review_note: str | None,
+        promoted_case_id: str | None = None,
+        owner_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                cursor = connection.execute(
+                    """
+                    UPDATE agent_quality_feedback
+                    SET review_status = ?, review_note = ?, reviewed_at = ?, promoted_case_id = ?
+                    WHERE feedback_id = ? AND owner_id = ?
+                    """,
+                    (
+                        review_status,
+                        review_note,
+                        self._now(),
+                        promoted_case_id,
+                        feedback_id,
+                        owner_id,
+                    ),
+                )
+                connection.commit()
+                if cursor.rowcount == 0:
+                    return None
+                return self._agent_quality_feedback_row(connection, feedback_id, owner_id)
+            finally:
+                connection.close()
+
+    def upsert_agent_quality_feedback_case(
+        self,
+        feedback_id: str,
+        payload: dict[str, Any],
+        *,
+        owner_id: str | None = None,
+    ) -> None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO agent_quality_feedback_cases(
+                        feedback_id, owner_id, case_id, payload, created_at, updated_at, enabled
+                    ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                    ON CONFLICT(feedback_id) DO UPDATE SET
+                        case_id = excluded.case_id, payload = excluded.payload,
+                        updated_at = excluded.updated_at, enabled = 1
+                    """,
+                    (
+                        feedback_id,
+                        owner_id,
+                        str(payload["case_id"]),
+                        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                        self._now(),
+                        self._now(),
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+    def list_agent_quality_feedback_cases(
+        self,
+        *,
+        owner_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT payload FROM agent_quality_feedback_cases
+                    WHERE owner_id = ? AND enabled = 1
+                    ORDER BY created_at ASC
+                    """,
+                    (owner_id,),
+                ).fetchall()
+                return [json.loads(str(row["payload"])) for row in rows]
+            finally:
+                connection.close()
+
+    @staticmethod
+    def _feedback_values(feedback: dict[str, Any], owner_id: str) -> tuple[Any, ...]:
+        return (
+            str(feedback["feedback_id"]),
+            owner_id,
+            str(feedback["message_id"]),
+            str(feedback["verdict"]),
+            feedback.get("expected_intent"),
+            feedback.get("expected_category"),
+            feedback.get("note"),
+            str(feedback["created_at"]),
+            feedback.get("trace_id"),
+            json.dumps(feedback.get("trace_snapshot", {}), ensure_ascii=False),
+            str(feedback.get("review_status") or "pending"),
+            feedback.get("review_note"),
+            feedback.get("reviewed_at"),
+            feedback.get("promoted_case_id"),
+        )
+
+    def _agent_quality_feedback_row(
+        self,
+        connection: sqlite3.Connection,
+        feedback_id: str,
+        owner_id: str,
+    ) -> dict[str, Any]:
+        row = connection.execute(
+            """
+            SELECT feedback_id, message_id, verdict, expected_intent,
+                   expected_category, note, created_at, trace_id, trace_snapshot,
+                   review_status, review_note, reviewed_at, promoted_case_id
+            FROM agent_quality_feedback
+            WHERE feedback_id = ? AND owner_id = ?
+            """,
+            (feedback_id, owner_id),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Agent quality feedback was not persisted")
+        return self._serialize_feedback_row(row)
+
+    @staticmethod
+    def _serialize_feedback_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        raw_snapshot = item.pop("trace_snapshot", None)
+        try:
+            item["trace_snapshot"] = json.loads(str(raw_snapshot or "{}"))
+        except json.JSONDecodeError:
+            item["trace_snapshot"] = {}
+        return item
 
     def append_agent_quality_evaluation(self, run: dict[str, Any], *, owner_id: str | None = None) -> None:
         owner_id = owner_id or current_owner_id()
@@ -1159,6 +1394,7 @@ class SQLiteStateStore:
                 self._apply_operational_alert_migration(connection)
                 self._apply_async_job_reliability_migration(connection)
                 self._apply_async_job_event_migration(connection)
+                self._apply_feedback_loop_migration(connection)
                 connection.commit()
             finally:
                 connection.close()
@@ -1593,6 +1829,49 @@ class SQLiteStateStore:
         connection.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
             (10, self._now()),
+        )
+
+    def _apply_feedback_loop_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (11,),
+        ).fetchone()
+        if applied is not None:
+            return
+        connection.execute("ALTER TABLE agent_quality_feedback ADD COLUMN trace_id TEXT")
+        connection.execute(
+            "ALTER TABLE agent_quality_feedback ADD COLUMN trace_snapshot TEXT NOT NULL DEFAULT '{}'"
+        )
+        connection.execute(
+            "ALTER TABLE agent_quality_feedback ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pending'"
+        )
+        connection.execute("ALTER TABLE agent_quality_feedback ADD COLUMN review_note TEXT")
+        connection.execute("ALTER TABLE agent_quality_feedback ADD COLUMN reviewed_at TEXT")
+        connection.execute("ALTER TABLE agent_quality_feedback ADD COLUMN promoted_case_id TEXT")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_quality_feedback_owner_status_created "
+            "ON agent_quality_feedback(owner_id, review_status, created_at DESC)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_quality_feedback_cases (
+                feedback_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                case_id TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_quality_feedback_cases_owner_created "
+            "ON agent_quality_feedback_cases(owner_id, created_at ASC)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (11, self._now()),
         )
 
     def _write_collection(

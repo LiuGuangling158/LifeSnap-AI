@@ -44,12 +44,13 @@ def send_message(payload: ChatMessageRequest, request: Request) -> ChatMessageRe
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except CandidateSessionConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    observability_service.record_agent_response(
+    trace = observability_service.record_agent_response(
         response,
         request_id=getattr(request.state, "request_id", None),
         owner_id=current_owner_id(),
         duration_ms=(perf_counter() - started) * 1000,
     )
+    response.trace_id = trace.trace_id
     audit_log_store.record(
         action="chat_message_processed",
         entity_type="chat",
