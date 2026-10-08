@@ -54,6 +54,30 @@ class HybridRagRetriever:
     _chunk_size = 420
     _chunk_overlap = 60
     _embedding_batch_size = 16
+    _semantic_evidence_floor = 0.62
+    _generic_chinese_phrases = frozenset(
+        {
+            "什么",
+            "怎么",
+            "如何",
+            "是否",
+            "能否",
+            "可以",
+            "规则",
+            "问题",
+            "内容",
+            "一下",
+            "请问",
+            "这个",
+            "那个",
+            "关于",
+            "以及",
+            "还是",
+            "不是",
+            "没有",
+            "为什么",
+        }
+    )
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -78,6 +102,15 @@ class HybridRagRetriever:
         for chunk in chunks:
             lexical_score = lexical.get(chunk.chunk_id, 0.0)
             semantic_score = semantic.get(chunk.chunk_id)
+            has_lexical_evidence = self._has_lexical_evidence(query, chunk)
+            has_semantic_evidence = bool(
+                semantic_score is not None
+                and semantic_score >= self._semantic_evidence_floor
+            )
+            # BM25 normalizes the strongest document to 1.0 even when every
+            # overlap is generic. Do not turn that relative rank into a fact.
+            if not has_lexical_evidence and not has_semantic_evidence:
+                continue
             score = (
                 lexical_score
                 if semantic_score is None
@@ -101,6 +134,30 @@ class HybridRagRetriever:
                 )
             )
         return self._select_diverse(results, limit)
+
+    def _has_lexical_evidence(self, query: str, chunk: RagChunk) -> bool:
+        query_folded = query.casefold()
+        searchable_text = self._embed_text(chunk).casefold()
+        if any(
+            len(keyword.strip()) >= 2
+            and keyword.casefold() in query_folded
+            for keyword in chunk.keywords
+        ):
+            return True
+
+        for run in re.findall(r"[\u4e00-\u9fff]+", query):
+            for index in range(len(run) - 1):
+                phrase = run[index : index + 2]
+                if (
+                    phrase not in self._generic_chinese_phrases
+                    and phrase in searchable_text
+                ):
+                    return True
+
+        return any(
+            term in searchable_text
+            for term in re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", query_folded)
+        )
 
     def reindex(self, documents: Iterable[RagDocument]) -> dict[str, object]:
         chunks = self.chunks(documents)

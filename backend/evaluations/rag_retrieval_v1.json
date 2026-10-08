@@ -1,0 +1,45 @@
+{
+  "dataset_id": "rag-retrieval",
+  "dataset_version": "v1",
+  "policy_id": "rag-retrieval-v1",
+  "top_k": 3,
+  "minimum_recall_at_k": 1.0,
+  "minimum_citation_accuracy": 1.0,
+  "minimum_abstention_accuracy": 1.0,
+  "cases": [
+    {
+      "case_id": "rag_required_fields",
+      "query": "账单保存时商家是不是必填？",
+      "expected_source_ids": ["bill_required_fields"],
+      "expected_top_source_id": "bill_required_fields",
+      "critical": true
+    },
+    {
+      "case_id": "rag_confirmation_conflict",
+      "query": "不确认能不能自动写入账单？",
+      "expected_source_ids": ["candidate_confirmation_policy"],
+      "expected_top_source_id": "candidate_confirmation_policy",
+      "critical": true
+    },
+    {
+      "case_id": "rag_fine_tuning_policy",
+      "query": "模型微调后会优先使用什么？",
+      "expected_source_ids": ["fine_tuning_policy"],
+      "expected_top_source_id": "fine_tuning_policy",
+      "critical": false
+    },
+    {
+      "case_id": "rag_category_explicit_priority",
+      "query": "分类优先听用户明确说出的类别吗？",
+      "expected_source_ids": ["bill_category_policy"],
+      "expected_top_source_id": "bill_category_policy",
+      "critical": true
+    },
+    {
+      "case_id": "rag_unsupported_abstention",
+      "query": "量子纠缠的税务抵扣规则是什么？",
+      "expect_no_hit": true,
+      "critical": true
+    }
+  ]
+}

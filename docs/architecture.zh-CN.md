@@ -115,7 +115,7 @@ Prometheus 会导出持久化任务状态计数和最早队列任务等待时间
 
 ## 混合 RAG 检索
 
-知识库会先按段落和句子切分为可追溯的片段，再以 BM25 进行本地关键词检索。配置 OpenAI-compatible Embeddings 服务，并关闭 local-only 模式后，系统会对查询和知识片段生成向量，以 BM25 与余弦相似度融合排序。
+知识库会先按段落和句子切分为可追溯的片段，再以 BM25 进行本地关键词检索。配置 OpenAI-compatible Embeddings 服务，并关闭 local-only 模式后，系统会对查询和知识片段生成向量，以 BM25 与余弦相似度融合排序。检索结果必须具有有效的词法证据或足够强的语义分数，避免把泛化措辞带来的相对 BM25 排名误当作有依据的知识。
 
 - GET /agent/knowledge/search 返回命中的 chunk_id、检索方式、BM25 分数和向量分数。
 - POST /agent/knowledge/reindex 需要管理员会话，用于预构建当前知识片段的向量缓存。
@@ -126,12 +126,13 @@ Prometheus 会导出持久化任务状态计数和最早队列任务等待时间
 
 ## Agent 评测准入
 
-项目使用版本化评测集 backend/evaluations/agent_admission_v1.json 作为离线发布门禁。评测覆盖账单分类、候选确认、待办、日记、消费分析、RAG 工具调用和危险请求拒绝。
+项目使用版本化评测集 backend/evaluations/agent_admission_v2.json 作为离线发布门禁。评测覆盖账单分类、候选确认、待办、日记、消费分析、RAG 工具调用和危险请求拒绝；独立的 backend/evaluations/rag_retrieval_v1.json 用于检索专项评测。
 
 - 最低通过率由评测集声明；当前基线为 100%。
 - 标记为 critical 的用例任意失败，即使总通过率达标也会拒绝准入。
 - 离线模式会绕过 LLM 和 Embedding 服务，避免 CI 使用真实密钥、泄露评测文本或产生外部调用费用。
 - 执行 backend/scripts/agent_eval_gate.py；准入失败时脚本以非零退出码结束，并被 GitHub Actions 阻止合并。
 - 管理员可运行质量评测；结果会保存评测集版本、模式、关键失败项和准入结论。
+- RAG 准入会度量 Recall@K、首条引用准确率与无依据问题的拒答准确率。任一 RAG 关键用例失败或指标低于数据集阈值，都会拒绝发布准入。
 
 - 系统会选择同评测集、同模式的最近一次结果作为基线。开启 `require_no_regression` 后，新增失败用例或通过率下降都会被视为质量回归，并拒绝准入。

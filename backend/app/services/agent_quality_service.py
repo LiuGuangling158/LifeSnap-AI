@@ -18,7 +18,10 @@ from app.schemas.quality import (
     AgentQualityFeedbackRead,
     AgentQualityRegression,
     AgentQualitySummary,
+    RagQualityEvaluationCase,
+    RagQualityEvaluationSummary,
 )
+from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.bill_candidate_store import bill_candidate_store
 from app.services.chat_service import chat_service
 from app.services.diary_candidate_store import diary_candidate_store
@@ -30,7 +33,8 @@ from app.services.task_candidate_store import task_candidate_store
 
 
 class AgentQualityService:
-    _dataset_path = Path(__file__).resolve().parents[2] / "evaluations" / "agent_admission_v1.json"
+    _dataset_path = Path(__file__).resolve().parents[2] / "evaluations" / "agent_admission_v2.json"
+    _rag_dataset_path = Path(__file__).resolve().parents[2] / "evaluations" / "rag_retrieval_v1.json"
 
     def record_feedback(self, payload: AgentQualityFeedbackCreate) -> AgentQualityFeedbackRead:
         record = AgentQualityFeedbackRead(
@@ -87,6 +91,7 @@ class AgentQualityService:
         execution_mode: Literal["offline", "live"] = "offline",
     ) -> AgentQualityEvaluationRun:
         suite = self._load_suite()
+        rag_suite = self._load_rag_suite()
         model_trace = agent_runtime_service.model_trace()
         if execution_mode == "live" and not model_trace.external_model_ready:
             raise RuntimeError(
@@ -154,11 +159,19 @@ class AgentQualityService:
                     response.action_type,
                     response.candidate_id,
                 )
+            rag_evaluation = self._run_rag_evaluation(rag_suite)
 
         passed_cases = sum(1 for item in results if item.passed)
         pass_rate = round(passed_cases / len(results), 4) if results else 0.0
         regression = self._regression(baseline, results, pass_rate)
-        admission = self._admission(suite, results, pass_rate, regression)
+        admission = self._admission(
+            suite,
+            results,
+            pass_rate,
+            regression,
+            rag_evaluation=rag_evaluation,
+            rag_suite=rag_suite,
+        )
         run = AgentQualityEvaluationRun(
             run_id=uuid4(),
             created_at=datetime.now(timezone.utc),
@@ -180,6 +193,7 @@ class AgentQualityService:
             online_model=(model_trace.runtime_model if execution_mode == "live" else None),
             admission=admission,
             regression=regression,
+            rag_evaluation=rag_evaluation,
         )
         sqlite_state_store.append_agent_quality_evaluation(run.model_dump(mode="json"))
         return run
@@ -238,12 +252,162 @@ class AgentQualityService:
             "cases": normalized_cases,
         }
 
+    def _load_rag_suite(self) -> dict:
+        payload = json.loads(self._rag_dataset_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("RAG retrieval dataset must be an object")
+        cases = payload.get("cases")
+        if not isinstance(cases, list) or not cases:
+            raise ValueError("RAG retrieval dataset must include cases")
+
+        normalized_cases: list[dict] = []
+        ids: set[str] = set()
+        for item in cases:
+            if not isinstance(item, dict):
+                raise ValueError("RAG retrieval case must be an object")
+            case_id = str(item.get("case_id") or "").strip()
+            query = str(item.get("query") or "").strip()
+            expected_source_ids = [
+                str(source_id).strip()
+                for source_id in item.get("expected_source_ids", [])
+                if str(source_id).strip()
+            ]
+            expected_top_source_id = (
+                str(item["expected_top_source_id"]).strip()
+                if item.get("expected_top_source_id") is not None
+                else None
+            )
+            expect_no_hit = bool(item.get("expect_no_hit", False))
+            if (
+                not case_id
+                or not query
+                or case_id in ids
+                or (expect_no_hit and expected_source_ids)
+                or (not expect_no_hit and not expected_source_ids)
+                or (
+                    expected_top_source_id is not None
+                    and expected_top_source_id not in expected_source_ids
+                )
+            ):
+                raise ValueError("RAG retrieval dataset has an invalid case")
+            ids.add(case_id)
+            normalized_cases.append(
+                {
+                    "case_id": case_id,
+                    "query": query,
+                    "expected_source_ids": expected_source_ids,
+                    "expected_top_source_id": expected_top_source_id,
+                    "expect_no_hit": expect_no_hit,
+                    "critical": bool(item.get("critical", False)),
+                }
+            )
+
+        top_k = int(payload.get("top_k", 3))
+        if not 1 <= top_k <= 10:
+            raise ValueError("RAG retrieval top_k must be between 1 and 10")
+        thresholds = {
+            name: float(payload.get(name, 1.0))
+            for name in (
+                "minimum_recall_at_k",
+                "minimum_citation_accuracy",
+                "minimum_abstention_accuracy",
+            )
+        }
+        if any(not 0 <= value <= 1 for value in thresholds.values()):
+            raise ValueError("RAG retrieval thresholds must be between 0 and 1")
+        return {
+            "dataset_id": str(payload.get("dataset_id") or "rag-retrieval"),
+            "dataset_version": str(payload.get("dataset_version") or "v1"),
+            "policy_id": str(payload.get("policy_id") or "rag-retrieval-v1"),
+            "top_k": top_k,
+            **thresholds,
+            "cases": normalized_cases,
+        }
+
+    def _run_rag_evaluation(self, suite: dict) -> RagQualityEvaluationSummary:
+        results: list[RagQualityEvaluationCase] = []
+        for fixture in suite["cases"]:
+            started_at = time.perf_counter()
+            hits = agent_knowledge_base.search(fixture["query"], limit=suite["top_k"])
+            actual_source_ids = [hit.source_id for hit in hits]
+            actual_top_source_id = actual_source_ids[0] if actual_source_ids else None
+            expected_source_ids = fixture["expected_source_ids"]
+            recall_at_k = (
+                round(
+                    len(set(expected_source_ids) & set(actual_source_ids))
+                    / len(expected_source_ids),
+                    4,
+                )
+                if expected_source_ids
+                else None
+            )
+            citation_correct = (
+                actual_top_source_id == fixture["expected_top_source_id"]
+                if fixture["expected_top_source_id"] is not None
+                else None
+            )
+            abstention_correct = (
+                not actual_source_ids if fixture["expect_no_hit"] else None
+            )
+            passed = (
+                bool(abstention_correct)
+                if fixture["expect_no_hit"]
+                else recall_at_k == 1.0 and citation_correct is not False
+            )
+            methods = sorted({hit.retrieval_method for hit in hits})
+            results.append(
+                RagQualityEvaluationCase(
+                    case_id=fixture["case_id"],
+                    passed=passed,
+                    expected_source_ids=expected_source_ids,
+                    actual_source_ids=actual_source_ids,
+                    expected_top_source_id=fixture["expected_top_source_id"],
+                    actual_top_source_id=actual_top_source_id,
+                    expected_no_hit=fixture["expect_no_hit"],
+                    recall_at_k=recall_at_k,
+                    citation_correct=citation_correct,
+                    abstention_correct=abstention_correct,
+                    critical=fixture["critical"],
+                    retrieval_method=",".join(methods) if methods else "no_hit",
+                    latency_ms=round((time.perf_counter() - started_at) * 1000, 2),
+                )
+            )
+
+        recalled = [case.recall_at_k for case in results if case.recall_at_k is not None]
+        citations = [case.citation_correct for case in results if case.citation_correct is not None]
+        abstentions = [case.abstention_correct for case in results if case.abstention_correct is not None]
+        passed_cases = sum(1 for case in results if case.passed)
+        return RagQualityEvaluationSummary(
+            dataset_id=suite["dataset_id"],
+            dataset_version=suite["dataset_version"],
+            policy_id=suite["policy_id"],
+            top_k=suite["top_k"],
+            total_cases=len(results),
+            passed_cases=passed_cases,
+            pass_rate=round(passed_cases / len(results), 4) if results else 0.0,
+            recall_at_k=round(sum(recalled) / len(recalled), 4) if recalled else None,
+            citation_accuracy=(
+                round(sum(citations) / len(citations), 4) if citations else None
+            ),
+            abstention_accuracy=(
+                round(sum(abstentions) / len(abstentions), 4) if abstentions else None
+            ),
+            critical_case_count=sum(1 for case in results if case.critical),
+            failed_critical_case_ids=[
+                case.case_id for case in results if case.critical and not case.passed
+            ],
+            cases=results,
+        )
+
     def _admission(
         self,
         suite: dict,
         cases: list[AgentQualityEvaluationCase],
         pass_rate: float,
         regression: AgentQualityRegression | None = None,
+        *,
+        rag_evaluation: RagQualityEvaluationSummary | None = None,
+        rag_suite: dict | None = None,
     ) -> AgentQualityAdmission:
         failed_critical = [
             case.case_id
@@ -264,6 +428,24 @@ class AgentQualityService:
             reasons.append(
                 "quality_regression:" + ",".join(regression.newly_failed_case_ids)
             )
+        if rag_evaluation and rag_suite:
+            if rag_evaluation.failed_critical_case_ids:
+                reasons.append(
+                    "rag_critical_cases_failed:"
+                    + ",".join(rag_evaluation.failed_critical_case_ids)
+                )
+            for metric, threshold_name in (
+                ("recall_at_k", "minimum_recall_at_k"),
+                ("citation_accuracy", "minimum_citation_accuracy"),
+                ("abstention_accuracy", "minimum_abstention_accuracy"),
+            ):
+                value = getattr(rag_evaluation, metric)
+                threshold = rag_suite[threshold_name]
+                if value is None or value < threshold:
+                    reasons.append(
+                        f"rag_{metric}_below_threshold:"
+                        f"{(value or 0):.4f}<{threshold:.4f}"
+                    )
         return AgentQualityAdmission(
             policy_id=suite["policy_id"],
             dataset_version=suite["dataset_version"],

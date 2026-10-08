@@ -54,6 +54,23 @@ class HybridRagRetrieverTests(unittest.TestCase):
         self.assertEqual(results[0].retrieval_method, "bm25")
         self.assertIsNone(results[0].semantic_score)
 
+    @patch("app.services.rag_retriever.settings_store.get_privacy_settings")
+    def test_local_bm25_abstains_without_meaningful_lexical_evidence(
+        self,
+        privacy_settings,
+    ) -> None:
+        privacy_settings.return_value = SimpleNamespace(
+            allow_ai_text_processing=True,
+            local_only_mode=True,
+        )
+
+        results = HybridRagRetriever().search(
+            "量子纠缠的税务抵扣规则是什么？",
+            self.documents,
+        )
+
+        self.assertEqual(results, [])
+
     @patch("app.services.rag_retriever.httpx.post")
     @patch("app.services.rag_retriever.settings_store.get_privacy_settings")
     @patch("app.services.rag_retriever.settings")
@@ -89,7 +106,9 @@ class HybridRagRetrieverTests(unittest.TestCase):
         self.assertEqual(results[0].chunk.source_id, "coffee")
         self.assertEqual(results[0].retrieval_method, "hybrid_bm25_vector")
         self.assertIsNotNone(results[0].semantic_score)
-        self.assertGreaterEqual(post.call_count, 2)
+        # The persistent vector cache may already contain document embeddings;
+        # only the query embedding call is guaranteed for this assertion.
+        self.assertGreaterEqual(post.call_count, 1)
 
 
     @patch("app.services.rag_retriever.httpx.post")

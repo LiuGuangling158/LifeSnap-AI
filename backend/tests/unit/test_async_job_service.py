@@ -83,14 +83,25 @@ class AsyncJobServiceTests(unittest.TestCase):
         side_effect=[RuntimeError("temporary provider failure"), {"recovered": True}],
     )
     def test_transient_failure_is_retried_with_delayed_state(self, execute, retry_delay) -> None:
-        job = async_job_service.enqueue(AsyncJobType.agent_quality_evaluation)
-        deadline = time.monotonic() + 4
-        latest = None
-        while time.monotonic() < deadline:
-            latest = async_job_service.get(job.job_id)
-            if latest and latest.status == AsyncJobStatus.succeeded:
-                break
-            time.sleep(0.02)
+        async_job_service.shutdown()
+        now = datetime.now(timezone.utc)
+        job = AsyncJobRead(
+            job_id=uuid4(),
+            job_type=AsyncJobType.agent_quality_evaluation,
+            status=AsyncJobStatus.queued,
+            created_at=now,
+            updated_at=now,
+            available_at=now,
+            max_attempts=3,
+        )
+        sqlite_state_store.create_or_get_async_job(job.model_dump(mode="json"))
+
+        # Run this job directly so an unrelated background worker cannot consume
+        # the patched side-effect sequence during a full-suite run.
+        async_job_service._run(job.job_id)
+        time.sleep(0.06)
+        async_job_service._run(job.job_id)
+        latest = async_job_service.get(job.job_id)
 
         self.assertIsNotNone(latest)
         self.assertEqual(latest.status, AsyncJobStatus.succeeded)

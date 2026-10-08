@@ -55,6 +55,38 @@ class AgentQualityEvaluationCase(BaseModel):
     external_model_ready: bool | None = None
 
 
+class RagQualityEvaluationCase(BaseModel):
+    case_id: str
+    passed: bool
+    expected_source_ids: list[str] = Field(default_factory=list)
+    actual_source_ids: list[str] = Field(default_factory=list)
+    expected_top_source_id: str | None = None
+    actual_top_source_id: str | None = None
+    expected_no_hit: bool = False
+    recall_at_k: float | None = Field(default=None, ge=0, le=1)
+    citation_correct: bool | None = None
+    abstention_correct: bool | None = None
+    critical: bool = False
+    retrieval_method: str | None = Field(default=None, max_length=120)
+    latency_ms: float | None = Field(default=None, ge=0)
+
+
+class RagQualityEvaluationSummary(BaseModel):
+    dataset_id: str = Field(default="rag-retrieval", min_length=1, max_length=80)
+    dataset_version: str = Field(default="v1", min_length=1, max_length=40)
+    policy_id: str = Field(default="rag-retrieval-v1", min_length=1, max_length=80)
+    top_k: int = Field(default=3, ge=1, le=10)
+    total_cases: int = Field(default=0, ge=0)
+    passed_cases: int = Field(default=0, ge=0)
+    pass_rate: float = Field(default=0, ge=0, le=1)
+    recall_at_k: float | None = Field(default=None, ge=0, le=1)
+    citation_accuracy: float | None = Field(default=None, ge=0, le=1)
+    abstention_accuracy: float | None = Field(default=None, ge=0, le=1)
+    critical_case_count: int = Field(default=0, ge=0)
+    failed_critical_case_ids: list[str] = Field(default_factory=list)
+    cases: list[RagQualityEvaluationCase] = Field(default_factory=list)
+
+
 class AgentQualityEvaluationRun(BaseModel):
     run_id: UUID
     created_at: datetime
@@ -72,6 +104,7 @@ class AgentQualityEvaluationRun(BaseModel):
     online_model: str | None = Field(default=None, max_length=160)
     admission: AgentQualityAdmission = Field(default_factory=AgentQualityAdmission)
     regression: AgentQualityRegression = Field(default_factory=AgentQualityRegression)
+    rag_evaluation: RagQualityEvaluationSummary | None = None
 
 
 class AgentQualitySummary(BaseModel):

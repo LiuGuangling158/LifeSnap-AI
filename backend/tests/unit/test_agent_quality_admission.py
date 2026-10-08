@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import uuid4
 
-from app.schemas.quality import AgentQualityEvaluationCase, AgentQualityEvaluationRun
+from app.schemas.quality import (
+    AgentQualityEvaluationCase,
+    AgentQualityEvaluationRun,
+    RagQualityEvaluationSummary,
+)
 from app.services.agent_quality_service import agent_quality_service
 
 
@@ -22,6 +26,12 @@ class AgentQualityAdmissionTests(unittest.TestCase):
         self.assertEqual(run.total_cases, 8)
         self.assertEqual(run.passed_cases, 8)
         self.assertEqual(run.admission.critical_case_count, 7)
+        self.assertIsNotNone(run.rag_evaluation)
+        self.assertEqual(run.rag_evaluation.total_cases, 5)
+        self.assertEqual(run.rag_evaluation.passed_cases, 5)
+        self.assertEqual(run.rag_evaluation.recall_at_k, 1.0)
+        self.assertEqual(run.rag_evaluation.citation_accuracy, 1.0)
+        self.assertEqual(run.rag_evaluation.abstention_accuracy, 1.0)
         embedding_post.assert_not_called()
 
     def test_failed_critical_case_rejects_admission(self) -> None:
@@ -45,6 +55,43 @@ class AgentQualityAdmissionTests(unittest.TestCase):
         self.assertFalse(admission.admitted)
         self.assertEqual(admission.failed_critical_case_ids, ["critical_bill"])
         self.assertIn("critical_cases_failed:critical_bill", admission.failure_reasons)
+
+    def test_rag_failure_rejects_admission(self) -> None:
+        rag_evaluation = RagQualityEvaluationSummary(
+            total_cases=1,
+            passed_cases=0,
+            pass_rate=0.0,
+            recall_at_k=0.0,
+            citation_accuracy=0.0,
+            abstention_accuracy=1.0,
+            critical_case_count=1,
+            failed_critical_case_ids=["rag_required_fields"],
+        )
+        admission = agent_quality_service._admission(
+            {
+                "policy_id": "test-policy",
+                "dataset_version": "test",
+                "minimum_pass_rate": 0.0,
+            },
+            [],
+            1.0,
+            rag_evaluation=rag_evaluation,
+            rag_suite={
+                "minimum_recall_at_k": 1.0,
+                "minimum_citation_accuracy": 1.0,
+                "minimum_abstention_accuracy": 1.0,
+            },
+        )
+
+        self.assertFalse(admission.admitted)
+        self.assertIn(
+            "rag_critical_cases_failed:rag_required_fields",
+            admission.failure_reasons,
+        )
+        self.assertIn(
+            "rag_recall_at_k_below_threshold:0.0000<1.0000",
+            admission.failure_reasons,
+        )
 
 
     def test_newly_failed_case_rejects_non_regression_policy(self) -> None:

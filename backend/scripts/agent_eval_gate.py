@@ -30,6 +30,19 @@ def main() -> int:
         ),
         "pass_rate_delta": run.regression.pass_rate_delta,
         "newly_failed_case_ids": run.regression.newly_failed_case_ids,
+        "rag_evaluation": (
+            {
+                "dataset_version": run.rag_evaluation.dataset_version,
+                "passed_cases": run.rag_evaluation.passed_cases,
+                "total_cases": run.rag_evaluation.total_cases,
+                "recall_at_k": run.rag_evaluation.recall_at_k,
+                "citation_accuracy": run.rag_evaluation.citation_accuracy,
+                "abstention_accuracy": run.rag_evaluation.abstention_accuracy,
+                "failed_critical_case_ids": run.rag_evaluation.failed_critical_case_ids,
+            }
+            if run.rag_evaluation
+            else None
+        ),
     }
     print(json.dumps(summary, ensure_ascii=False))
     return 0 if run.admission.admitted else 1

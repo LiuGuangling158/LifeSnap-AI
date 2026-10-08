@@ -146,7 +146,7 @@ lifecycle transition, and active counts are exported as
 
 ## Hybrid RAG Retrieval
 
-Knowledge documents are split into traceable chunks and retrieved with local BM25 first. When an OpenAI-compatible Embeddings provider is configured and local-only mode is disabled, query and chunk vectors are generated and fused with BM25 using cosine similarity.
+Knowledge documents are split into traceable chunks and retrieved with local BM25 first. When an OpenAI-compatible Embeddings provider is configured and local-only mode is disabled, query and chunk vectors are generated and fused with BM25 using cosine similarity. Results require meaningful lexical evidence or a sufficiently strong semantic score, so a relative BM25 rank from generic wording is not presented as grounded knowledge.
 
 - GET /agent/knowledge/search returns the matched chunk_id, retrieval method, BM25 score, and vector score.
 - POST /agent/knowledge/reindex requires an administrator session and prebuilds the vector cache for active knowledge chunks.
@@ -157,12 +157,13 @@ See .env.example for LIFESNAP_RAG_EMBEDDING_BASE_URL, LIFESNAP_RAG_EMBEDDING_MOD
 
 ## Agent Evaluation Admission
 
-The versioned suite at backend/evaluations/agent_admission_v1.json is the offline release gate. It covers bill classification, candidate confirmation, tasks, diaries, spending analysis, RAG tool invocation, and rejection of unsafe requests.
+The versioned suite at backend/evaluations/agent_admission_v2.json is the offline release gate. It covers bill classification, candidate confirmation, tasks, diaries, spending analysis, RAG tool invocation, and rejection of unsafe requests. The dedicated `backend/evaluations/rag_retrieval_v1.json` suite validates retrieval independently.
 
 - The dataset declares the minimum pass rate; the current baseline is 100 percent.
 - Any failed critical case rejects admission even when the aggregate pass rate is met.
 - Offline mode bypasses LLM and Embedding providers so CI does not use production credentials, expose evaluation prompts, or consume external quota.
 - Run backend/scripts/agent_eval_gate.py. A rejected admission exits non-zero and GitHub Actions blocks the change.
 - Administrators can run quality evaluation; stored results include dataset version, mode, critical failures, and the admission decision.
+- RAG admission measures recall@k, top-result citation accuracy, and abstention accuracy for unsupported questions. A failed RAG critical case or any metric below its declared threshold rejects release admission.
 
 - A same-dataset, same-mode baseline is selected from the latest prior run. Newly failed cases or a lower pass rate are quality regressions and reject admission when `require_no_regression` is enabled.

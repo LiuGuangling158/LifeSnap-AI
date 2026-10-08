@@ -6610,10 +6610,34 @@ function renderAdminQualityGovernance(summary) {
     <p class="admin-note">${issueText
       ? `需要处理：${escapeHtml(issueText)}`
       : "当前版本未发现关键失败或质量回归。"}</p>
+    ${renderRagEvaluationSummary(latest.rag_evaluation)}
     <p class="admin-note">${renderOnlineEvaluationSummary(latestLive)}</p>
     <div class="admin-version-list">
       ${recent.map(renderAdminQualityRun).join("")}
     </div>
+  `;
+}
+
+function renderRagEvaluationSummary(evaluation) {
+  if (!evaluation) {
+    return `<p class="admin-note">RAG 专项评测：历史记录未包含检索专项指标。</p>`;
+  }
+  const percent = (value) => value === null || value === undefined
+    ? "--"
+    : `${Math.round(Number(value) * 100)}%`;
+  const criticalFailures = Array.isArray(evaluation.failed_critical_case_ids)
+    ? evaluation.failed_critical_case_ids
+    : [];
+  return `
+    <div class="diagnostics-summary admin-summary-grid">
+      ${diagnosticMetric("RAG 专项评测", `${Number(evaluation.passed_cases ?? 0)}/${Number(evaluation.total_cases ?? 0)}`, Number(evaluation.pass_rate ?? 0) === 1 ? "ok" : "error")}
+      ${diagnosticMetric("RAG 召回率", percent(evaluation.recall_at_k), Number(evaluation.recall_at_k ?? 0) === 1 ? "ok" : "warning")}
+      ${diagnosticMetric("引用准确率", percent(evaluation.citation_accuracy), Number(evaluation.citation_accuracy ?? 0) === 1 ? "ok" : "warning")}
+      ${diagnosticMetric("拒答准确率", percent(evaluation.abstention_accuracy), Number(evaluation.abstention_accuracy ?? 0) === 1 ? "ok" : "warning")}
+    </div>
+    <p class="admin-note">${criticalFailures.length
+      ? `RAG 关键失败：${escapeHtml(criticalFailures.join("、"))}`
+      : "RAG 专项评测已覆盖召回、引用和无依据拒答。"}</p>
   `;
 }
 
