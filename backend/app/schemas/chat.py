@@ -57,6 +57,44 @@ class ChatAgentStep(BaseModel):
     status: ChatAgentStepStatus = ChatAgentStepStatus.completed
 
 
+class ChatAgentDecision(str, Enum):
+    candidate_ready = "candidate_ready"
+    analysis_ready = "analysis_ready"
+    answer_ready = "answer_ready"
+    reflection_ready = "reflection_ready"
+    clarification_needed = "clarification_needed"
+    privacy_blocked = "privacy_blocked"
+    candidate_updated = "candidate_updated"
+    candidate_discarded = "candidate_discarded"
+    record_saved = "record_saved"
+
+
+class ChatAgentReasoningBasis(str, Enum):
+    rag_retrieval = "rag_retrieval"
+    function_tools = "function_tools"
+    external_model = "external_model"
+    local_rules = "local_rules"
+    privacy_guard = "privacy_guard"
+    human_confirmation = "human_confirmation"
+
+
+class ChatAgentGuardrail(str, Enum):
+    confirmation_required = "confirmation_required"
+    read_only_response = "read_only_response"
+    privacy_blocked = "privacy_blocked"
+    local_fallback = "local_fallback"
+
+
+class ChatAgentExplanation(BaseModel):
+    """Privacy-safe, user-facing summary of the Agent's decision path."""
+
+    decision: ChatAgentDecision
+    reasoning_basis: list[ChatAgentReasoningBasis] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+    requires_confirmation: bool
+    guardrail: ChatAgentGuardrail
+
+
 class ChatMessageRequest(BaseModel):
     message: str = Field(min_length=1, max_length=5000)
     context_action_type: ChatActionType | None = None
@@ -136,6 +174,7 @@ class ChatMessageResponse(BaseModel):
     analysis: ChatBillAnalysis | None = None
     warnings: list[str] = []
     agent_steps: list[ChatAgentStep] = Field(default_factory=list)
+    explanation: ChatAgentExplanation | None = None
     knowledge_hits: list[AgentKnowledgeHit] = Field(default_factory=list)
     function_calls: list[AgentFunctionCallTrace] = Field(default_factory=list)
     model_trace: AgentModelTrace | None = None

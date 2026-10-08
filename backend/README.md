@@ -736,9 +736,12 @@ Direct LLM calls receive retrieved knowledge snippets in the user payload under
 read-only tool schemas for knowledge search, bill category classification, and
 bill analysis; if the provider returns `tool_calls`, the backend executes those
 local tools and asks the model for the final strict JSON. Chat responses include
-`knowledge_hits`, `function_calls`, and `model_trace`, so the UI can show the
-RAG evidence, called tools, and whether the runtime is using a base model, a
-configured fine-tuned model, an external parser, or the local rule fallback.
+`knowledge_hits`, `function_calls`, `model_trace`, and a privacy-safe
+`explanation`, so the UI can show the RAG evidence, called tools, decision
+basis, confirmation guardrail, and whether the runtime is using a base model,
+a configured fine-tuned model, an external parser, or the local rule fallback.
+The explanation contains decision codes and execution metadata only; it never
+duplicates the user's message or raw function arguments.
 `model_trace` separates configured state from ready state with fields such as
 `external_model_configured`, `external_model_ready`, `local_fallback_active`,
 `privacy_blockers`, `credential_blockers`, `function_calling_mode`, and

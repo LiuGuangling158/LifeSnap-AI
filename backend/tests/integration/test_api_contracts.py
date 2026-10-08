@@ -1,4 +1,5 @@
 import unittest
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -63,6 +64,21 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("feedback_count", response.json())
         self.assertIn("recent_evaluations", response.json())
+
+    def test_chat_response_includes_a_privacy_safe_agent_explanation(self) -> None:
+        response = self.client.post(
+            "/chat/messages",
+            json={"message": "午餐花了 23 元"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        explanation = payload["explanation"]
+        self.assertEqual(explanation["decision"], "candidate_ready")
+        self.assertIn("rag_retrieval", explanation["reasoning_basis"])
+        self.assertIn("function_tools", explanation["reasoning_basis"])
+        self.assertEqual(explanation["guardrail"], "confirmation_required")
+        self.assertNotIn("午餐", json.dumps(explanation, ensure_ascii=False))
 
     def test_admin_can_read_durable_async_job_events(self) -> None:
         now = datetime.now(timezone.utc)

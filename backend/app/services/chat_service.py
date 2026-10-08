@@ -19,6 +19,10 @@ from app.schemas.bill import BillSource, TransactionType
 from app.schemas.chat import (
     CandidateSessionStatus,
     ChatActionType,
+    ChatAgentDecision,
+    ChatAgentExplanation,
+    ChatAgentGuardrail,
+    ChatAgentReasoningBasis,
     ChatAgentStep,
     ChatAgentStepStatus,
     ChatBillAnalysis,
@@ -339,7 +343,78 @@ class RuleBasedChatService:
                 )
         response.function_calls = function_session.traces
         response.model_trace = agent_runtime_service.model_trace()
+        response.explanation = self._build_explanation(response, knowledge_hits, function_session)
         return response
+
+    @staticmethod
+    def _build_explanation(
+        response: ChatMessageResponse,
+        knowledge_hits: list[AgentKnowledgeHit],
+        function_session: AgentFunctionCallSession,
+    ) -> ChatAgentExplanation:
+        """Summarize execution metadata without echoing a chat message or tool arguments."""
+        model = response.model_trace
+        basis: list[ChatAgentReasoningBasis] = []
+        if knowledge_hits:
+            basis.append(ChatAgentReasoningBasis.rag_retrieval)
+        if function_session.traces:
+            basis.append(ChatAgentReasoningBasis.function_tools)
+        if model and model.external_model_ready:
+            basis.append(ChatAgentReasoningBasis.external_model)
+        elif model and model.local_fallback_active:
+            basis.append(ChatAgentReasoningBasis.local_rules)
+        if "ai_text_processing_disabled" in response.warnings:
+            basis.append(ChatAgentReasoningBasis.privacy_guard)
+        if response.need_user_confirmation:
+            basis.append(ChatAgentReasoningBasis.human_confirmation)
+
+        if "ai_text_processing_disabled" in response.warnings:
+            decision = ChatAgentDecision.privacy_blocked
+            guardrail = ChatAgentGuardrail.privacy_blocked
+        elif response.discarded:
+            decision = ChatAgentDecision.candidate_discarded
+            guardrail = ChatAgentGuardrail.read_only_response
+        elif response.created_bill or response.created_task or response.created_diary:
+            decision = ChatAgentDecision.record_saved
+            guardrail = ChatAgentGuardrail.read_only_response
+        elif response.updated_existing_candidate:
+            decision = ChatAgentDecision.candidate_updated
+            guardrail = (
+                ChatAgentGuardrail.confirmation_required
+                if response.need_user_confirmation
+                else ChatAgentGuardrail.read_only_response
+            )
+        elif response.candidate is not None:
+            decision = ChatAgentDecision.candidate_ready
+            guardrail = ChatAgentGuardrail.confirmation_required
+        elif response.analysis is not None:
+            decision = ChatAgentDecision.analysis_ready
+            guardrail = (
+                ChatAgentGuardrail.local_fallback
+                if model and model.local_fallback_active
+                else ChatAgentGuardrail.read_only_response
+            )
+        elif response.intent == ChatIntent.knowledge_answer:
+            decision = ChatAgentDecision.answer_ready
+            guardrail = ChatAgentGuardrail.read_only_response
+        elif response.intent == ChatIntent.diary_reflection:
+            decision = ChatAgentDecision.reflection_ready
+            guardrail = ChatAgentGuardrail.read_only_response
+        else:
+            decision = ChatAgentDecision.clarification_needed
+            guardrail = (
+                ChatAgentGuardrail.local_fallback
+                if model and model.local_fallback_active
+                else ChatAgentGuardrail.read_only_response
+            )
+
+        return ChatAgentExplanation(
+            decision=decision,
+            reasoning_basis=basis,
+            confidence=response.confidence,
+            requires_confirmation=response.need_user_confirmation,
+            guardrail=guardrail,
+        )
 
     def _route_trace_message(
         self,

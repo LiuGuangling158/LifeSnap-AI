@@ -8298,6 +8298,7 @@ function renderChatMessage(message, index) {
       <div>
         <p>${escapeHtml(role === "assistant" ? friendlyAssistantText(message.text ?? "") : message.text ?? "")}</p>
         ${renderChatMessageAttachments(message.attachments)}
+        ${role === "assistant" ? renderChatDecisionExplanation(message.response) : ""}
         ${role === "assistant" ? renderChatSelectedTool(message.response) : ""}
         ${role === "assistant" ? renderChatAgentSteps(message.response?.agent_steps) : ""}
         ${role === "assistant" ? renderChatAnalysis(message.response) : ""}
@@ -8377,6 +8378,65 @@ function chatAgentStepIcon(status) {
     return "alert-circle";
   }
   return "check-circle";
+}
+
+function renderChatDecisionExplanation(response) {
+  const explanation = response?.explanation;
+  if (!explanation) {
+    return "";
+  }
+  const basis = Array.isArray(explanation.reasoning_basis)
+    ? explanation.reasoning_basis.filter(Boolean)
+    : [];
+  const confidence = Math.round(Number(explanation.confidence ?? response?.confidence ?? 0) * 100);
+  return `
+    <section class="chat-decision-explanation" aria-label="本次判断依据">
+      <div class="chat-decision-heading">
+        <span>${icon("shield")}</span>
+        <strong>本次判断依据</strong>
+        <small>置信度 ${escapeHtml(String(confidence))}%</small>
+      </div>
+      <p>${escapeHtml(agentDecisionLabel(explanation.decision))}</p>
+      ${basis.length ? `<div class="chat-decision-basis">${basis.map((item) => `<span>${escapeHtml(agentReasoningBasisLabel(item))}</span>`).join("")}</div>` : ""}
+      <small class="chat-decision-guardrail">${escapeHtml(agentGuardrailLabel(explanation.guardrail, explanation.requires_confirmation))}</small>
+    </section>
+  `;
+}
+
+function agentDecisionLabel(decision) {
+  return {
+    candidate_ready: "已整理为待确认记录，确认前不会写入正式数据。",
+    analysis_ready: "已基于本地统计完成分析，金额和趋势不由模型编造。",
+    answer_ready: "已结合知识库和当前能力范围给出回答。",
+    reflection_ready: "已完成只读整理，不会自动创建生活记录。",
+    clarification_needed: "当前信息不足，先给出可继续补充的方向。",
+    privacy_blocked: "隐私设置阻止了本次 AI 文本处理。",
+    candidate_updated: "已更新待确认记录，仍需要你最终确认。",
+    candidate_discarded: "已按你的要求丢弃待确认记录。",
+    record_saved: "已在确认后保存正式记录。",
+  }[String(decision)] || "已按当前能力和安全规则完成处理。";
+}
+
+function agentReasoningBasisLabel(basis) {
+  return {
+    rag_retrieval: "RAG 知识",
+    function_tools: "函数工具",
+    external_model: "外部模型",
+    local_rules: "本地规则",
+    privacy_guard: "隐私检查",
+    human_confirmation: "人工确认",
+  }[String(basis)] || String(basis);
+}
+
+function agentGuardrailLabel(guardrail, requiresConfirmation) {
+  if (requiresConfirmation || guardrail === "confirmation_required") {
+    return "安全护栏：涉及写入的操作需要你确认后才会执行。";
+  }
+  return {
+    read_only_response: "安全护栏：本次为只读回答，不会修改你的数据。",
+    privacy_blocked: "安全护栏：已遵守隐私设置，未向外部模型发送文本。",
+    local_fallback: "安全护栏：当前使用本地规则或确定性计算作为降级策略。",
+  }[String(guardrail)] || "安全护栏：本次处理受现有数据和权限边界约束。";
 }
 
 function renderChatRuntimeTrace(response) {
@@ -8464,8 +8524,21 @@ function renderFunctionCall(call) {
 function functionCallArgumentsText(args = {}) {
   return Object.entries(args)
     .slice(0, 3)
-    .map(([key, value]) => `${key}: ${String(value ?? "null").slice(0, 36)}`)
+    .map(([key]) => functionCallArgumentLabel(key))
     .join("，");
+}
+
+function functionCallArgumentLabel(key) {
+  return {
+    query: "检索请求已脱敏",
+    message: "输入文本已脱敏",
+    text: "输入文本已脱敏",
+    content: "内容已脱敏",
+    updates: "更新字段已脱敏",
+    candidate_id: "候选记录引用",
+    action_type: "操作类型",
+    limit: "返回数量",
+  }[String(key)] || "受控参数";
 }
 
 function modelStrategyLabel(strategy) {

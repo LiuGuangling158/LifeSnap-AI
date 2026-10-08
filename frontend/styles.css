@@ -6448,6 +6448,66 @@ td {
   justify-self: start;
 }
 
+.chat-decision-explanation {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+  border-left: 3px solid #5aa982;
+  background: #f4faf6;
+  padding: 9px 10px;
+}
+
+.chat-decision-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: #24553a;
+}
+
+.chat-decision-heading .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.chat-decision-heading strong {
+  font-size: 12px;
+}
+
+.chat-decision-heading small {
+  margin-left: auto;
+  color: #5b7566;
+  font-size: 11px;
+}
+
+.chat-decision-explanation > p,
+.chat-decision-guardrail {
+  margin: 0;
+  color: #405b4b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.chat-decision-basis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chat-decision-basis span {
+  border: 1px solid #c8dfcf;
+  border-radius: 999px;
+  background: #fff;
+  color: #34634a;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.chat-decision-guardrail {
+  color: #587062;
+}
+
 .chat-runtime-trace {
   margin-top: 8px;
   border: 1px solid #d9e5df;
