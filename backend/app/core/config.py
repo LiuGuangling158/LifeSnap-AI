@@ -473,6 +473,16 @@ class Settings:
     async_job_retry_base_seconds: float = field(
         default_factory=lambda: min(300.0, max(0.1, _env_float("LIFESNAP_ASYNC_JOB_RETRY_BASE_SECONDS", 2.0)))
     )
+    async_queue_backend: str = field(
+        default_factory=lambda: os.getenv("LIFESNAP_ASYNC_QUEUE_BACKEND", "database").strip().casefold()
+    )
+    redis_url: str | None = field(
+        default_factory=lambda: _env_optional_str("LIFESNAP_REDIS_URL")
+    )
+    async_redis_queue_name: str = field(
+        default_factory=lambda: os.getenv("LIFESNAP_ASYNC_REDIS_QUEUE", "lifesnap:async-jobs").strip()
+        or "lifesnap:async-jobs"
+    )
     alert_evaluation_interval_seconds: int = field(
         default_factory=lambda: max(0, min(_env_int("LIFESNAP_ALERT_EVALUATION_INTERVAL_SECONDS", 60), 3600))
     )
@@ -615,6 +625,10 @@ class Settings:
             and self.rag_embedding_api_key
             and self.rag_embedding_model
         )
+
+    @property
+    def redis_async_queue_enabled(self) -> bool:
+        return self.async_queue_backend == "redis" and bool(self.redis_url)
 
 
 settings = Settings()

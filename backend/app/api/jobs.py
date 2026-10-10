@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
-from app.schemas.async_job import AsyncJobEventRead, AsyncJobRead, AsyncJobType
+from app.schemas.async_job import AsyncJobEventRead, AsyncJobQueueStatus, AsyncJobRead, AsyncJobType
 from app.services.admin_auth_service import admin_auth_service
 from app.services.async_job_service import async_job_service
 from app.services.audit_log_store import audit_log_store
@@ -24,6 +24,13 @@ def list_async_jobs(
     _: None = Depends(require_job_admin_session),
 ) -> list[AsyncJobRead]:
     return async_job_service.list_recent()
+
+
+@router.get("/queue-status", response_model=AsyncJobQueueStatus)
+def get_async_job_queue_status(
+    _: None = Depends(require_job_admin_session),
+) -> AsyncJobQueueStatus:
+    return async_job_service.queue_status()
 
 
 @router.post(

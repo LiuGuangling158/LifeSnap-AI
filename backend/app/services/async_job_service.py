@@ -8,9 +8,16 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from app.core.config import settings
-from app.schemas.async_job import AsyncJobEventRead, AsyncJobRead, AsyncJobStatus, AsyncJobType
+from app.schemas.async_job import (
+    AsyncJobEventRead,
+    AsyncJobQueueStatus,
+    AsyncJobRead,
+    AsyncJobStatus,
+    AsyncJobType,
+)
 from app.services.agent_knowledge_base import agent_knowledge_base
 from app.services.agent_quality_service import agent_quality_service
+from app.services.distributed_job_signal_bus import RedisJobSignalBus
 from app.services.observability_service import observability_service
 from app.services.sqlite_state_store import sqlite_state_store
 
@@ -19,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncJobService:
-    """Single-node durable worker with leases, heartbeats, and delayed retries."""
+    """Durable database jobs with optional Redis cross-instance wake-up signals."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -29,6 +36,11 @@ class AsyncJobService:
         self._wake_event = threading.Event()
         self._submitted: dict[UUID, Future[None]] = {}
         self._worker_id = f"lifesnap-{uuid4().hex[:12]}"
+        self._signal_bus = RedisJobSignalBus(
+            redis_url=settings.redis_url,
+            queue_name=settings.async_redis_queue_name,
+            enabled=settings.async_queue_backend == "redis",
+        )
 
     def start(self) -> None:
         with self._lock:
@@ -85,6 +97,7 @@ class AsyncJobService:
         )
         raw, created = sqlite_state_store.create_or_get_async_job(job.model_dump(mode="json"))
         if created:
+            self._signal_bus.publish(job.job_id)
             self._wake_event.set()
         return AsyncJobRead.model_validate(raw)
 
@@ -109,8 +122,10 @@ class AsyncJobService:
         raw = sqlite_state_store.retry_async_job(job_id)
         if raw is None:
             return None
+        updated = AsyncJobRead.model_validate(raw)
+        self._signal_bus.publish(updated.job_id)
         self._wake_event.set()
-        return AsyncJobRead.model_validate(raw)
+        return updated
 
     def cancel(self, job_id: UUID) -> AsyncJobRead | None:
         raw = sqlite_state_store.cancel_async_job(job_id)
@@ -121,8 +136,21 @@ class AsyncJobService:
         raw = sqlite_state_store.redrive_async_job(job_id)
         if raw is None:
             return None
+        updated = AsyncJobRead.model_validate(raw)
+        self._signal_bus.publish(updated.job_id)
         self._wake_event.set()
-        return AsyncJobRead.model_validate(raw)
+        return updated
+
+    def queue_status(self) -> AsyncJobQueueStatus:
+        status = self._signal_bus.status()
+        return AsyncJobQueueStatus(
+            backend=status.backend,
+            configured=status.configured,
+            queue_name=status.queue_name,
+            redis_available=status.redis_available,
+            publish_failure_count=status.publish_failure_count,
+            last_error=status.last_error,
+        )
 
     def _scheduler_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -139,8 +167,17 @@ class AsyncJobService:
             capacity = settings.async_job_worker_count - len(self._submitted)
         if executor is None or capacity <= 0:
             return
-        for raw in sqlite_state_store.list_dispatchable_async_jobs(limit=capacity):
-            self._dispatch(UUID(str(raw["job_id"])))
+        dispatched: set[UUID] = set()
+        for job_id in self._signal_bus.consume(capacity):
+            self._dispatch(job_id)
+            dispatched.add(job_id)
+        remaining = max(0, capacity - len(dispatched))
+        if remaining <= 0:
+            return
+        for raw in sqlite_state_store.list_dispatchable_async_jobs(limit=remaining):
+            job_id = UUID(str(raw["job_id"]))
+            if job_id not in dispatched:
+                self._dispatch(job_id)
 
     def _dispatch(self, job_id: UUID) -> None:
         with self._lock:
@@ -221,6 +258,7 @@ class AsyncJobService:
         finally:
             heartbeat_stop.set()
             heartbeat.join(timeout=1)
+            self._signal_bus.publish(job.job_id)
             self._wake_event.set()
 
     def _heartbeat_loop(

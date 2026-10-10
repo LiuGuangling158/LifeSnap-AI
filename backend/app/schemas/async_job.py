@@ -48,3 +48,12 @@ class AsyncJobEventRead(BaseModel):
     attempt: int = Field(ge=0)
     error_code: str | None = Field(default=None, max_length=80)
 
+
+class AsyncJobQueueStatus(BaseModel):
+    backend: str = Field(min_length=1, max_length=40)
+    configured: bool
+    queue_name: str | None = Field(default=None, max_length=160)
+    redis_available: bool | None = None
+    publish_failure_count: int = Field(ge=0)
+    last_error: str | None = Field(default=None, max_length=240)
+
