@@ -252,6 +252,7 @@ const state = {
   adminReleaseAction: "",
   modelUsage: null,
   adminJobs: [],
+  adminQueueStatus: null,
   adminJobsLoading: false,
   adminJobActionId: "",
   adminJobEvents: {},
@@ -1903,7 +1904,12 @@ async function loadAdminJobs({ showToastOnSuccess = false } = {}) {
   render();
   try {
     const headers = await adminKnowledgeHeaders(adminKey);
-    state.adminJobs = await api("/jobs", { headers });
+    const [jobs, queueStatus] = await Promise.all([
+      api("/jobs", { headers }),
+      api("/jobs/queue-status", { headers }),
+    ]);
+    state.adminJobs = jobs;
+    state.adminQueueStatus = queueStatus;
     if (showToastOnSuccess) {
       showToast(`已读取 ${state.adminJobs.length} 个异步任务。`);
     }
@@ -7060,6 +7066,7 @@ function renderModelUsage(usage) {
 function renderAdminJobOperations() {
   const jobs = Array.isArray(state.adminJobs) ? state.adminJobs : [];
   const hasAdminKey = Boolean(state.adminKnowledgeAdminKey.trim());
+  const queueStatus = state.adminQueueStatus;
   return `
     <section class="surface admin-job-operations-panel">
       <div class="simple-section-heading">
@@ -7071,10 +7078,36 @@ function renderAdminJobOperations() {
           ${icon("refresh")}${state.adminJobsLoading ? "读取中..." : "读取任务"}
         </button>
       </div>
+      ${renderAdminQueueStatus(queueStatus, hasAdminKey)}
       ${jobs.length
         ? `<div class="admin-job-list">${jobs.map(renderAdminJob).join("")}</div>`
         : `<p class="form-hint">${hasAdminKey ? "尚未读取任务，点击“读取任务”查看最近执行情况。" : "输入管理员密钥并建立会话后，可查看异步任务。"}</p>`}
     </section>
+  `;
+}
+
+function renderAdminQueueStatus(queueStatus, hasAdminKey) {
+  if (!queueStatus) {
+    return `<p class="form-hint">${hasAdminKey ? "读取任务后可查看当前分发后端状态。" : "建立管理员会话后可查看任务分发状态。"}</p>`;
+  }
+  const isRedis = String(queueStatus.backend) === "redis";
+  const available = queueStatus.redis_available;
+  const transport = !isRedis
+    ? "数据库轮询（单节点开发模式）"
+    : available === true
+      ? `Redis 已连接 · ${String(queueStatus.queue_name || "lifesnap:async-jobs")}`
+      : available === false
+        ? "Redis 不可用，已回退到数据库轮询"
+        : "Redis 等待首次连接检查";
+  const healthClass = !isRedis || available === true ? "ok" : available === false ? "error" : "warning";
+  const failureCount = Number(queueStatus.publish_failure_count || 0);
+  return `
+    <div class="diagnostic-metrics admin-queue-status" aria-label="任务分发状态">
+      ${diagnosticMetric("分发后端", isRedis ? "Redis + 数据库租约" : "数据库租约", isRedis ? "info" : "ok")}
+      ${diagnosticMetric("分发状态", transport, healthClass)}
+      ${diagnosticMetric("信号失败", String(failureCount), failureCount ? "error" : "ok")}
+    </div>
+    ${isRedis && available === false && queueStatus.last_error ? `<p class="form-hint admin-job-error">${escapeHtml(String(queueStatus.last_error))}</p>` : ""}
   `;
 }
 

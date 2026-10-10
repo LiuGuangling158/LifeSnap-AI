@@ -52,6 +52,7 @@ class AsyncJobService:
                 self._stop_event.clear()
                 self._wake_event.clear()
                 sqlite_state_store.recover_async_jobs()
+                self._record_queue_status()
                 self._scheduler_thread = threading.Thread(
                     target=self._scheduler_loop,
                     name="lifesnap-job-scheduler",
@@ -98,6 +99,7 @@ class AsyncJobService:
         raw, created = sqlite_state_store.create_or_get_async_job(job.model_dump(mode="json"))
         if created:
             self._signal_bus.publish(job.job_id)
+            self._record_queue_status()
             self._wake_event.set()
         return AsyncJobRead.model_validate(raw)
 
@@ -124,6 +126,7 @@ class AsyncJobService:
             return None
         updated = AsyncJobRead.model_validate(raw)
         self._signal_bus.publish(updated.job_id)
+        self._record_queue_status()
         self._wake_event.set()
         return updated
 
@@ -138,6 +141,7 @@ class AsyncJobService:
             return None
         updated = AsyncJobRead.model_validate(raw)
         self._signal_bus.publish(updated.job_id)
+        self._record_queue_status()
         self._wake_event.set()
         return updated
 
@@ -171,6 +175,7 @@ class AsyncJobService:
         for job_id in self._signal_bus.consume(capacity):
             self._dispatch(job_id)
             dispatched.add(job_id)
+        self._record_queue_status()
         remaining = max(0, capacity - len(dispatched))
         if remaining <= 0:
             return
@@ -258,8 +263,16 @@ class AsyncJobService:
         finally:
             heartbeat_stop.set()
             heartbeat.join(timeout=1)
-            self._signal_bus.publish(job.job_id)
             self._wake_event.set()
+
+    def _record_queue_status(self) -> None:
+        status = self._signal_bus.status()
+        observability_service.record_async_queue_status(
+            backend=status.backend,
+            configured=status.configured,
+            redis_available=status.redis_available,
+            publish_failure_count=status.publish_failure_count,
+        )
 
     def _heartbeat_loop(
         self,
