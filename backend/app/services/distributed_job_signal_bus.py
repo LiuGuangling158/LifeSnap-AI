@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
 from uuid import UUID
@@ -24,7 +25,7 @@ class DistributedQueueStatus:
     configured: bool
     queue_name: str | None
     redis_available: bool | None
-    publish_failure_count: int
+    signal_failure_count: int
     last_error: str | None
 
 
@@ -51,8 +52,9 @@ class RedisJobSignalBus:
         self._lock = threading.RLock()
         self._client: RedisListClient | None = None
         self._redis_available: bool | None = None
-        self._publish_failure_count = 0
+        self._signal_failure_count = 0
         self._last_error: str | None = None
+        self._last_failure_logged_at = 0.0
 
     @property
     def configured(self) -> bool:
@@ -111,7 +113,7 @@ class RedisJobSignalBus:
                 configured=self.configured,
                 queue_name=self._queue_name if self._enabled else None,
                 redis_available=self._redis_available,
-                publish_failure_count=self._publish_failure_count,
+                signal_failure_count=self._signal_failure_count,
                 last_error=self._last_error,
             )
 
@@ -129,11 +131,20 @@ class RedisJobSignalBus:
             self._last_error = None
 
     def _record_error(self, error: Exception) -> None:
+        should_log = False
         with self._lock:
+            now = time.monotonic()
+            should_log = (
+                self._redis_available is not False
+                or now - self._last_failure_logged_at >= 60
+            )
             self._redis_available = False
-            self._publish_failure_count += 1
+            self._signal_failure_count += 1
             self._last_error = str(error)[:240] or error.__class__.__name__
-        logger.warning("Redis async-job signal unavailable; using database polling: %s", error)
+            if should_log:
+                self._last_failure_logged_at = now
+        if should_log:
+            logger.warning("Redis async-job signal unavailable; using database polling: %s", error)
 
     @staticmethod
     def _default_client_factory(redis_url: str) -> RedisListClient:

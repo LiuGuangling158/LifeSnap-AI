@@ -152,7 +152,7 @@ class AsyncJobService:
             configured=status.configured,
             queue_name=status.queue_name,
             redis_available=status.redis_available,
-            publish_failure_count=status.publish_failure_count,
+            signal_failure_count=status.signal_failure_count,
             last_error=status.last_error,
         )
 
@@ -271,7 +271,7 @@ class AsyncJobService:
             backend=status.backend,
             configured=status.configured,
             redis_available=status.redis_available,
-            publish_failure_count=status.publish_failure_count,
+            signal_failure_count=status.signal_failure_count,
         )
 
     def _heartbeat_loop(

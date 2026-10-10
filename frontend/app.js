@@ -7100,7 +7100,7 @@ function renderAdminQueueStatus(queueStatus, hasAdminKey) {
         ? "Redis 不可用，已回退到数据库轮询"
         : "Redis 等待首次连接检查";
   const healthClass = !isRedis || available === true ? "ok" : available === false ? "error" : "warning";
-  const failureCount = Number(queueStatus.publish_failure_count || 0);
+  const failureCount = Number(queueStatus.signal_failure_count || 0);
   return `
     <div class="diagnostic-metrics admin-queue-status" aria-label="任务分发状态">
       ${diagnosticMetric("分发后端", isRedis ? "Redis + 数据库租约" : "数据库租约", isRedis ? "info" : "ok")}

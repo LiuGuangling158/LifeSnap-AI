@@ -82,14 +82,21 @@ messages, OCR text, attachment bytes, and credentials.
 
 ## Asynchronous jobs
 
-Long-running administrative work uses a SQLite-backed durable job queue instead
-of a request-bound background callback. Jobs survive request completion and
+Long-running administrative work uses a durable database job queue instead of a
+request-bound background callback. Jobs survive request completion and
 retain their state, result, attempt count, and safe error details for audit.
 Workers claim jobs with a database lease, renew that lease while executing, and
 recover only expired work after a restart. Transient execution failures enter a
 `retry_scheduled` state and use bounded exponential backoff before the final
 failure state. Lifecycle transitions are emitted as privacy-safe `async_job`
 JSON log events without task input, result payloads, or credentials.
+
+For a multi-node deployment, set `LIFESNAP_ASYNC_QUEUE_BACKEND=redis` and
+`LIFESNAP_REDIS_URL`. Redis carries bounded, duplicate-safe wake-up signals so
+another application instance can dispatch newly submitted work promptly. The
+database remains the source of truth for task state and leases; polling still
+recovers delayed or missed signals. This requires a shared relational database
+such as PostgreSQL. SQLite remains suitable only for a single host.
 
 The worker provides at-least-once delivery. A late worker cannot commit after
 losing its lease, but a process failure can still cause an expired job to run

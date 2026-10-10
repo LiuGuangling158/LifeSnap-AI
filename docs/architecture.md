@@ -59,7 +59,7 @@ personal records.
 ## Durable asynchronous jobs
 
 Administrative work that can take longer than an HTTP request is submitted to a
-SQLite-backed queue. The in-process worker has bounded concurrency and the job
+durable database queue. The in-process worker has bounded concurrency and the job
 record captures queued, retry-scheduled, running, succeeded, failed, or
 cancelled state, result, attempt count, and safe error details. Claims use a
 database lease and a periodic heartbeat. On restart, only jobs with an expired
@@ -79,11 +79,15 @@ idempotent. The current evaluation and RAG reindex handlers are safe to repeat.
 
 The first handlers are the offline Agent admission evaluation and RAG semantic
 reindex. They are submitted through `/jobs`, protected by the existing short
-administrator bearer session, and are polled by the administrator UI. This is a
-single-process deployment pattern; a distributed deployment should replace the
-worker implementation with a shared queue and worker fleet while retaining the
-job API contract. Prometheus exports durable job state counts and oldest queue
-lag, with a starter backlog rule in `monitoring/alerts.yml`.
+administrator bearer session, and are polled by the administrator UI. For a
+multi-node deployment, set `LIFESNAP_ASYNC_QUEUE_BACKEND=redis` plus
+`LIFESNAP_REDIS_URL`: Redis carries bounded, duplicate-safe wake-up signals,
+while the database remains authoritative for state and lease claims. Periodic
+database scanning recovers missed signals and delayed retries, including while
+Redis is unavailable. This mode requires a shared relational database such as
+PostgreSQL; SQLite remains single-host only. Prometheus exports task backlog,
+dispatch backend, Redis transport health, and publish failures; `monitoring/alerts.yml`
+provides starter rules for queue backlog and unavailable Redis dispatch.
 
 ## Online Agent shadow evaluation
 

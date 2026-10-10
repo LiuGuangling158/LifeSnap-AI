@@ -27,3 +27,10 @@ groups:
           severity: warning
         annotations:
           summary: LifeSnap durable asynchronous job queue is backlogged.
+      - alert: LifeSnapRedisAsyncDispatchUnavailable
+        expr: lifesnap_async_queue_backend_info{backend="redis",configured="true"} == 1 and lifesnap_async_queue_redis_available == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: LifeSnap Redis async dispatch is unavailable; database polling is handling recovery.

@@ -54,6 +54,6 @@ class AsyncJobQueueStatus(BaseModel):
     configured: bool
     queue_name: str | None = Field(default=None, max_length=160)
     redis_available: bool | None = None
-    publish_failure_count: int = Field(ge=0)
+    signal_failure_count: int = Field(ge=0)
     last_error: str | None = Field(default=None, max_length=240)
 

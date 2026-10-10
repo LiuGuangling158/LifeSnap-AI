@@ -48,6 +48,8 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("lifesnap_operational_alerts_active", response.text)
         self.assertIn("lifesnap_async_jobs", response.text)
         self.assertIn("lifesnap_async_job_queue_lag_seconds", response.text)
+        self.assertIn("lifesnap_async_queue_backend_info", response.text)
+        self.assertIn("lifesnap_async_queue_signal_failures_total", response.text)
         self.assertIn("lifesnap_model_invocations_total", response.text)
 
     def test_operational_alert_contract_evaluates_and_returns_history(self) -> None:
@@ -127,8 +129,11 @@ class ApiContractTests(unittest.TestCase):
             self.assertEqual(session.status_code, 200)
             headers = {"Authorization": f"Bearer {session.json()['token']}"}
             response = self.client.get(f"/jobs/{job.job_id}/events", headers=headers)
+            queue_status = self.client.get("/jobs/queue-status", headers=headers)
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(queue_status.status_code, 200)
+        self.assertIn(queue_status.json()["backend"], {"database", "redis"})
         events = response.json()
         self.assertTrue(events)
         self.assertIn("created", [event["event_type"] for event in events])

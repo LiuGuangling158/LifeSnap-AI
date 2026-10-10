@@ -79,6 +79,13 @@ def _env_optional_str(name: str) -> str | None:
     return value or None
 
 
+def _async_queue_backend() -> str:
+    backend = os.getenv("LIFESNAP_ASYNC_QUEUE_BACKEND", "database").strip().casefold()
+    if backend in {"database", "redis"}:
+        return backend
+    raise ValueError("LIFESNAP_ASYNC_QUEUE_BACKEND must be either 'database' or 'redis'")
+
+
 def _env_first_optional_str(*names: str) -> str | None:
     for name in names:
         value = _env_optional_str(name)
@@ -474,7 +481,7 @@ class Settings:
         default_factory=lambda: min(300.0, max(0.1, _env_float("LIFESNAP_ASYNC_JOB_RETRY_BASE_SECONDS", 2.0)))
     )
     async_queue_backend: str = field(
-        default_factory=lambda: os.getenv("LIFESNAP_ASYNC_QUEUE_BACKEND", "database").strip().casefold()
+        default_factory=_async_queue_backend
     )
     redis_url: str | None = field(
         default_factory=lambda: _env_optional_str("LIFESNAP_REDIS_URL")

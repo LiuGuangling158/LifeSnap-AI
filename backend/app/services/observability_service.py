@@ -33,7 +33,7 @@ class ObservabilityService:
         self._async_queue_backend = "database"
         self._async_queue_configured = True
         self._async_queue_redis_available: bool | None = None
-        self._async_queue_publish_failure_count = 0
+        self._async_queue_signal_failure_count = 0
         self._logger = logging.getLogger("lifesnap.observability")
         if not self._logger.handlers:
             handler = logging.StreamHandler()
@@ -175,14 +175,14 @@ class ObservabilityService:
         backend: str,
         configured: bool,
         redis_available: bool | None,
-        publish_failure_count: int,
+        signal_failure_count: int,
     ) -> None:
         """Keep queue transport health visible without logging task payloads."""
         with self._lock:
             self._async_queue_backend = backend
             self._async_queue_configured = configured
             self._async_queue_redis_available = redis_available
-            self._async_queue_publish_failure_count = publish_failure_count
+            self._async_queue_signal_failure_count = signal_failure_count
 
     def summary(self, *, owner_id: str) -> MonitoringSummary:
         with self._lock:
@@ -322,7 +322,7 @@ class ObservabilityService:
             queue_backend = self._metric_label(self._async_queue_backend)
             queue_configured = self._async_queue_configured
             redis_available = self._async_queue_redis_available
-            publish_failures = self._async_queue_publish_failure_count
+            signal_failures = self._async_queue_signal_failure_count
         redis_availability = 1 if redis_available is True else 0 if redis_available is False else -1
         lines.extend(
             [
@@ -332,9 +332,9 @@ class ObservabilityService:
                 "# HELP lifesnap_async_queue_redis_available Redis signal transport health; -1 means not enabled or not yet probed.",
                 "# TYPE lifesnap_async_queue_redis_available gauge",
                 f"lifesnap_async_queue_redis_available {redis_availability}",
-                "# HELP lifesnap_async_queue_publish_failures_total Redis signal publish or consume failures.",
-                "# TYPE lifesnap_async_queue_publish_failures_total counter",
-                f"lifesnap_async_queue_publish_failures_total {publish_failures}",
+                "# HELP lifesnap_async_queue_signal_failures_total Redis signal publish or consume failures.",
+                "# TYPE lifesnap_async_queue_signal_failures_total counter",
+                f"lifesnap_async_queue_signal_failures_total {signal_failures}",
             ]
         )
         model_usage = model_invocation_service.summary()

@@ -35,7 +35,7 @@ the operational path after a model responds:
 | Quality governance | Offline admission evaluation, RAG-specific evaluation, live shadow evaluation, regression comparison, release snapshots, and rollback controls |
 | Feedback loop | User verdicts link to execution traces; administrators review them and promote sanitized examples into regression cases |
 | Reliability | Bounded retries, per-provider/model circuit breakers, local fallback, Token and estimated-cost aggregation, and model health alerts |
-| Operations | SQLite transactions, durable leased jobs, idempotency controls, audit events, diagnostics, Prometheus metrics, alert state, and layered tests |
+| Operations | SQLite transactions, durable leased jobs, optional Redis multi-node dispatch signals, idempotency controls, audit events, diagnostics, Prometheus metrics, alert state, and layered tests |
 
 ## Agent Execution Flow
 
@@ -128,6 +128,21 @@ circuit breaker after consecutive final failures, and falls back to local rules
 where the workflow supports it. Model usage records are aggregated by provider
 and model; prompts, responses, images, and keys are not stored in these
 metrics.
+
+## Distributed Async Dispatch
+
+The default `database` mode is deliberately simple and is appropriate for one
+application node. For multiple application instances, first move application
+state from SQLite to a shared relational database such as PostgreSQL, then set:
+
+```dotenv
+LIFESNAP_ASYNC_QUEUE_BACKEND=redis
+LIFESNAP_REDIS_URL=redis://redis.example.internal:6379/0
+```
+
+Redis carries bounded wake-up signals only. Database leases remain the durable
+source of truth, and periodic scans recover delayed or missed signals. The
+Admin page and `/metrics` expose the backend, Redis health, and signal failures.
 
 ## Administration And Quality Loop
 
