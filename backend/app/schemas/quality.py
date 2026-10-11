@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -36,6 +36,81 @@ class AgentQualityFeedbackListResponse(BaseModel):
     generated_at: datetime
     total: int = Field(ge=0)
     items: list[AgentQualityFeedbackRead] = Field(default_factory=list)
+
+
+class EvaluationDatasetSnapshot(BaseModel):
+    snapshot_id: UUID
+    dataset_id: str = Field(min_length=1, max_length=80)
+    source_version: str = Field(min_length=1, max_length=80)
+    content_hash: str = Field(min_length=12, max_length=128)
+    case_count: int = Field(ge=0)
+    status: Literal["draft", "approved", "superseded"] = "draft"
+    created_at: datetime
+    approved_at: datetime | None = None
+    approval_note: str | None = Field(default=None, max_length=500)
+
+
+class EvaluationDatasetSnapshotCreate(BaseModel):
+    approval_note: str | None = Field(default=None, max_length=500)
+
+
+class EvaluationDatasetApprovalRequest(BaseModel):
+    approval_note: str | None = Field(default=None, max_length=500)
+
+
+class OnlineEvaluationSample(BaseModel):
+    sample_id: UUID
+    trace_id: str = Field(min_length=1, max_length=80)
+    sampled_at: datetime
+    snapshot: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "labeled"] = "pending"
+    annotation_count: int = Field(default=0, ge=0)
+
+
+class OnlineEvaluationSampleCollection(BaseModel):
+    requested_count: int = Field(default=10, ge=1, le=50)
+
+
+class OnlineEvaluationAnnotationCreate(BaseModel):
+    annotator_id: str = Field(min_length=2, max_length=80)
+    verdict: Literal["pass", "fail", "uncertain"]
+    note: str | None = Field(default=None, max_length=500)
+
+
+class OnlineEvaluationAnnotation(OnlineEvaluationAnnotationCreate):
+    annotation_id: UUID
+    sample_id: UUID
+    annotated_at: datetime
+
+
+class AnnotationConsistencySummary(BaseModel):
+    generated_at: datetime
+    dual_annotated_samples: int = Field(ge=0)
+    agreement_count: int = Field(ge=0)
+    disagreement_count: int = Field(ge=0)
+    agreement_rate: float | None = Field(default=None, ge=0, le=1)
+    cohens_kappa: float | None = Field(default=None, ge=-1, le=1)
+
+
+class EvaluationComparisonRequest(BaseModel):
+    baseline_run_id: UUID
+    candidate_run_id: UUID
+
+
+class EvaluationComparisonReport(BaseModel):
+    baseline_run_id: UUID
+    candidate_run_id: UUID
+    baseline_dataset_version: str
+    candidate_dataset_version: str
+    baseline_execution_mode: Literal["offline", "live"]
+    candidate_execution_mode: Literal["offline", "live"]
+    pass_rate_delta: float = Field(ge=-1, le=1)
+    passed_case_delta: int
+    newly_failed_case_ids: list[str] = Field(default_factory=list)
+    resolved_case_ids: list[str] = Field(default_factory=list)
+    rag_recall_at_k_delta: float | None = Field(default=None, ge=-1, le=1)
+    rag_citation_accuracy_delta: float | None = Field(default=None, ge=-1, le=1)
+    rag_abstention_accuracy_delta: float | None = Field(default=None, ge=-1, le=1)
 
 
 class AgentQualityAdmission(BaseModel):
