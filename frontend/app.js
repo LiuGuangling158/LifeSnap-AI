@@ -248,6 +248,13 @@ const state = {
   adminQuality: null,
   adminFeedback: [],
   adminFeedbackLoading: false,
+  evaluationGovernance: {
+    datasets: [],
+    samples: [],
+    consistency: null,
+    comparison: null,
+    loading: false,
+  },
   adminReleases: null,
   adminReleaseAction: "",
   modelUsage: null,
@@ -352,6 +359,22 @@ document.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-admin-jobs-refresh]")) {
     loadAdminJobs({ showToastOnSuccess: true });
+    return;
+  }
+
+  if (event.target.closest("[data-evaluation-dataset-snapshot]")) {
+    createEvaluationDatasetSnapshot();
+    return;
+  }
+
+  const datasetApproveButton = event.target.closest("[data-evaluation-dataset-approve]");
+  if (datasetApproveButton) {
+    approveEvaluationDatasetSnapshot(datasetApproveButton.dataset.evaluationDatasetApprove);
+    return;
+  }
+
+  if (event.target.closest("[data-online-evaluation-sample-collect]")) {
+    collectOnlineEvaluationSamples();
     return;
   }
 
@@ -1211,6 +1234,18 @@ document.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (event.target.matches("[data-online-evaluation-annotation-form]")) {
+    event.preventDefault();
+    await submitOnlineEvaluationAnnotation(new FormData(event.target));
+    return;
+  }
+
+  if (event.target.matches("[data-evaluation-comparison-form]")) {
+    event.preventDefault();
+    await submitEvaluationComparison(new FormData(event.target));
+    return;
+  }
+
   if (event.target.matches("[data-profile-form]")) {
     event.preventDefault();
     submitProfileSettings(new FormData(event.target));
@@ -1775,6 +1810,160 @@ async function loadAdminFeedback() {
   }
 }
 
+async function loadEvaluationGovernance() {
+  if (state.evaluationGovernance.loading || !adminSessionValid()) return;
+  state.evaluationGovernance.loading = true;
+  try {
+    const headers = { Authorization: `Bearer ${state.adminKnowledgeAdminToken}` };
+    const [datasets, samples, consistency] = await Promise.all([
+      api("/quality/datasets", { headers }),
+      api("/quality/online-samples", { headers }),
+      api("/quality/online-samples/consistency", { headers }),
+    ]);
+    state.evaluationGovernance = {
+      ...state.evaluationGovernance,
+      datasets: Array.isArray(datasets) ? datasets : [],
+      samples: Array.isArray(samples) ? samples : [],
+      consistency: consistency || null,
+    };
+  } catch (_error) {
+    state.evaluationGovernance = {
+      ...state.evaluationGovernance,
+      datasets: [],
+      samples: [],
+      consistency: null,
+    };
+  } finally {
+    state.evaluationGovernance.loading = false;
+    render();
+  }
+}
+
+async function createEvaluationDatasetSnapshot() {
+  const adminKey = currentAdminKey();
+  if (!adminKey || state.saving) return;
+  state.saving = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    await api("/quality/datasets/snapshots", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ approval_note: "Awaiting reviewer approval." }),
+    });
+    await loadEvaluationGovernance();
+    showToast("已创建评测集快照，等待审批后作为受控版本留档。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function approveEvaluationDatasetSnapshot(snapshotId) {
+  const adminKey = currentAdminKey();
+  if (!adminKey || !snapshotId || state.saving) return;
+  state.saving = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    await api(`/quality/datasets/${encodeURIComponent(String(snapshotId))}/approve`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ approval_note: "Approved by administrator." }),
+    });
+    await loadEvaluationGovernance();
+    showToast("评测集版本已审批；同一数据集的旧审批版本已标记为历史版本。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function collectOnlineEvaluationSamples() {
+  const adminKey = currentAdminKey();
+  if (!adminKey || state.saving) return;
+  state.saving = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    const samples = await api("/quality/online-samples/collect", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requested_count: 10 }),
+    });
+    await loadEvaluationGovernance();
+    showToast(`已抽取 ${Array.isArray(samples) ? samples.length : 0} 条脱敏线上评测样本。`);
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function submitOnlineEvaluationAnnotation(formData) {
+  const adminKey = currentAdminKey();
+  const sampleId = String(formData.get("sample_id") || "");
+  const annotatorId = String(formData.get("annotator_id") || "").trim();
+  if (!adminKey || !sampleId || annotatorId.length < 2 || state.saving) {
+    showToast("请填写至少两个字符的标注者标识后再提交。");
+    return;
+  }
+  state.saving = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    await api(`/quality/online-samples/${encodeURIComponent(sampleId)}/annotations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        annotator_id: annotatorId,
+        verdict: String(formData.get("verdict") || "uncertain"),
+        note: String(formData.get("note") || "").trim() || null,
+      }),
+    });
+    await loadEvaluationGovernance();
+    showToast("人工标注已保存；同一标注者提交同一样本会更新原标注。");
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+async function submitEvaluationComparison(formData) {
+  const adminKey = currentAdminKey();
+  const baselineRunId = String(formData.get("baseline_run_id") || "");
+  const candidateRunId = String(formData.get("candidate_run_id") || "");
+  if (!adminKey || !baselineRunId || !candidateRunId || baselineRunId === candidateRunId || state.saving) {
+    showToast("请选择两次不同的评测运行进行对比。");
+    return;
+  }
+  state.saving = true;
+  render();
+  try {
+    const headers = await adminKnowledgeHeaders(adminKey);
+    state.evaluationGovernance = {
+      ...state.evaluationGovernance,
+      comparison: await api("/quality/comparisons", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ baseline_run_id: baselineRunId, candidate_run_id: candidateRunId }),
+      }),
+    };
+  } catch (error) {
+    showToast(adminKnowledgeErrorMessage(error));
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
 function openFeedbackReview(feedbackId) {
   const feedback = state.adminFeedback.find((item) => String(item.feedback_id) === String(feedbackId));
   if (!feedback) return;
@@ -2015,6 +2204,7 @@ async function createAdminSession(adminKey) {
     }
     scheduleAdminSessionExpiry();
     void loadAdminFeedback();
+    void loadEvaluationGovernance();
     return state.adminKnowledgeAdminToken;
   } finally {
     state.adminSessionLoading = false;
@@ -6691,6 +6881,16 @@ function renderAdminPage() {
       <section class="surface admin-knowledge-version-panel">
         <div class="simple-section-heading">
           <div>
+            <h2>评测数据与线上抽样</h2>
+            <p>评测集先创建快照再审批；线上样本只保留隐私安全的运行元数据，可由两位或更多标注者独立复核。</p>
+          </div>
+        </div>
+        ${renderEvaluationGovernance(quality, state.evaluationGovernance)}
+      </section>
+
+      <section class="surface admin-knowledge-version-panel">
+        <div class="simple-section-heading">
+          <div>
             <h2>用户反馈闭环</h2>
             <p>先由用户标记结果，再由管理员复核运行链路。只有人工填写的脱敏样例才会晋升为回归评测用例。</p>
           </div>
@@ -6858,6 +7058,101 @@ function renderAdminQualityGovernance(summary) {
     <div class="admin-version-list">
       ${recent.map(renderAdminQualityRun).join("")}
     </div>
+  `;
+}
+
+function renderEvaluationGovernance(summary, governance) {
+  const data = governance || {};
+  const datasets = Array.isArray(data.datasets) ? data.datasets : [];
+  const samples = Array.isArray(data.samples) ? data.samples : [];
+  const consistency = data.consistency || {};
+  const recentRuns = Array.isArray(summary?.recent_evaluations) ? summary.recent_evaluations.slice(0, 8) : [];
+  const approvedCount = datasets.filter((item) => item.status === "approved").length;
+  const draftCount = datasets.filter((item) => item.status === "draft").length;
+  const percent = (value) => value === null || value === undefined ? "--" : `${Math.round(Number(value) * 100)}%`;
+  if (!adminSessionValid()) {
+    return `<p class="admin-note">建立管理员会话后可创建和审批评测集快照，并对脱敏线上样本进行独立标注。</p>`;
+  }
+  return `
+    <div class="diagnostics-summary admin-summary-grid">
+      ${diagnosticMetric("已审批评测集", approvedCount, approvedCount ? "ok" : "warning")}
+      ${diagnosticMetric("待审批快照", draftCount, draftCount ? "warning" : "ok")}
+      ${diagnosticMetric("双标注样本", Number(consistency.dual_annotated_samples ?? 0), "info")}
+      ${diagnosticMetric("标注一致性", percent(consistency.agreement_rate), Number(consistency.agreement_rate ?? 0) >= 0.8 ? "ok" : "warning")}
+      ${diagnosticMetric("Cohen's kappa", consistency.cohens_kappa === null || consistency.cohens_kappa === undefined ? "--" : Number(consistency.cohens_kappa).toFixed(2), Number(consistency.cohens_kappa ?? 0) >= 0.6 ? "ok" : "warning")}
+    </div>
+    <div class="action-row">
+      <button class="button ghost" type="button" data-evaluation-dataset-snapshot ${state.saving ? "disabled" : ""}>${icon("save")}创建评测集快照</button>
+      <button class="button ghost" type="button" data-online-evaluation-sample-collect ${state.saving ? "disabled" : ""}>${icon("activity")}抽取线上样本</button>
+    </div>
+    <p class="admin-note">抽样不会保存用户消息、图片或提示词，仅保留可复核的 Agent 执行信号。两个不同标注者对同一样本完成标注后，系统会计算一致率与 Cohen's kappa。</p>
+    ${datasets.length ? `
+      <div class="admin-version-list">
+        ${datasets.slice(0, 6).map((dataset) => `
+          <article class="admin-version-card">
+            <div>
+              <strong>${escapeHtml(String(dataset.dataset_id || "评测集"))} · ${escapeHtml(String(dataset.source_version || "--"))}</strong>
+              <small>${escapeHtml(formatDate(dataset.created_at))} · ${Number(dataset.case_count ?? 0)} 条用例 · ${escapeHtml(String(dataset.content_hash || "").slice(0, 12))}</small>
+              ${dataset.approval_note ? `<p>${escapeHtml(String(dataset.approval_note))}</p>` : ""}
+            </div>
+            <div class="admin-job-actions">
+              <span class="knowledge-source-badge ${dataset.status === "approved" ? "builtin" : dataset.status === "draft" ? "admin" : ""}">${escapeHtml(dataset.status === "approved" ? "已审批" : dataset.status === "draft" ? "待审批" : "已替换")}</span>
+              ${dataset.status === "draft" ? `<button class="button compact-button" type="button" data-evaluation-dataset-approve="${escapeHtml(String(dataset.snapshot_id))}" ${state.saving ? "disabled" : ""}>${icon("check")}审批</button>` : ""}
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    ` : `<p class="form-hint">尚未创建评测集快照。创建后需人工审批，才会形成可追溯的受控版本。</p>`}
+    ${samples.length ? `
+      <div class="admin-version-list">
+        ${samples.slice(0, 6).map((sample) => renderOnlineEvaluationSample(sample)).join("")}
+      </div>
+    ` : `<p class="form-hint">当前没有可供人工复核的线上样本。系统会从最近的 Agent Trace 中去重抽取。</p>`}
+    ${recentRuns.length >= 2 ? renderEvaluationComparisonForm(recentRuns, data.comparison) : `<p class="form-hint">至少运行两次质量评测后，才能生成模型版本对比报表。</p>`}
+  `;
+}
+
+function renderOnlineEvaluationSample(sample) {
+  const snapshot = sample?.snapshot || {};
+  const details = [snapshot.intent, snapshot.action_type, snapshot.model_provider, snapshot.outcome].filter(Boolean).join(" · ") || "执行元数据不可用";
+  return `
+    <article class="admin-version-card">
+      <div>
+        <strong>${escapeHtml(details)}</strong>
+        <small>${escapeHtml(formatDate(sample.sampled_at))} · 工具 ${Number(snapshot.function_call_count ?? 0)} · 检索 ${Number(snapshot.knowledge_hit_count ?? 0)} · ${Number(sample.annotation_count ?? 0)} 位标注者</small>
+        <p>${escapeHtml(sample.status === "labeled" ? "已有人工标注，可由另一位标注者独立复核。" : "等待人工标注。")}</p>
+      </div>
+      <form class="form-grid admin-inline-form" data-online-evaluation-annotation-form>
+        <input type="hidden" name="sample_id" value="${escapeHtml(String(sample.sample_id))}" />
+        <div class="field"><label>标注者</label><input name="annotator_id" maxlength="80" placeholder="例如：reviewer-a" required /></div>
+        <div class="field"><label>结论</label><select name="verdict"><option value="pass">通过</option><option value="fail">失败</option><option value="uncertain">不确定</option></select></div>
+        <div class="field full"><label>说明 <small>选填</small></label><input name="note" maxlength="500" placeholder="只记录可公开的评测理由" /></div>
+        <div class="form-actions"><button class="button compact-button" type="submit" ${state.saving ? "disabled" : ""}>${icon("check")}保存标注</button></div>
+      </form>
+    </article>
+  `;
+}
+
+function renderEvaluationComparisonForm(runs, comparison) {
+  const runOption = (run, selected = false) => `<option value="${escapeHtml(String(run.run_id))}" ${selected ? "selected" : ""}>${escapeHtml(formatDate(run.created_at))} · ${escapeHtml(String(run.execution_mode || "offline"))} · ${Math.round(Number(run.pass_rate ?? 0) * 100)}%</option>`;
+  const baselineOptions = runs.map((run, index) => runOption(run, index === 0)).join("");
+  const candidateOptions = runs.map((run, index) => runOption(run, index === 1)).join("");
+  const percentDelta = (value) => value === null || value === undefined ? "--" : `${Number(value) > 0 ? "+" : ""}${Math.round(Number(value) * 100)}%`;
+  return `
+    <form class="form-grid" data-evaluation-comparison-form>
+      <div class="field"><label>基线运行</label><select name="baseline_run_id">${baselineOptions}</select></div>
+      <div class="field"><label>候选运行</label><select name="candidate_run_id">${candidateOptions}</select></div>
+      <div class="form-actions"><button class="button ghost" type="submit" ${state.saving ? "disabled" : ""}>${icon("activity")}生成版本对比</button></div>
+    </form>
+    ${comparison ? `
+      <div class="diagnostics-summary admin-summary-grid">
+        ${diagnosticMetric("通过率变化", percentDelta(comparison.pass_rate_delta), Number(comparison.pass_rate_delta ?? 0) >= 0 ? "ok" : "error")}
+        ${diagnosticMetric("通过用例变化", String(comparison.passed_case_delta ?? 0), Number(comparison.passed_case_delta ?? 0) >= 0 ? "ok" : "error")}
+        ${diagnosticMetric("新增失败", Number(comparison.newly_failed_case_ids?.length ?? 0), comparison.newly_failed_case_ids?.length ? "error" : "ok")}
+        ${diagnosticMetric("已修复", Number(comparison.resolved_case_ids?.length ?? 0), "ok")}
+      </div>
+      <p class="admin-note">RAG 指标变化：召回 ${percentDelta(comparison.rag_recall_at_k_delta)}，引用 ${percentDelta(comparison.rag_citation_accuracy_delta)}，拒答 ${percentDelta(comparison.rag_abstention_accuracy_delta)}。${comparison.newly_failed_case_ids?.length ? ` 新增失败：${escapeHtml(comparison.newly_failed_case_ids.join("、"))}` : ""}</p>
+    ` : ""}
   `;
 }
 
@@ -7217,7 +7512,7 @@ function renderAdminQualityRun(run) {
     <article class="admin-version-card">
       <div>
         <strong>${admitted ? "准入通过" : "准入拒绝"} · ${escapeHtml(String(run.passed_cases ?? 0))}/${escapeHtml(String(run.total_cases ?? 0))}</strong>
-        <small>${escapeHtml(formatDate(run.created_at))} · ${escapeHtml(String(run.dataset_version ?? "v1"))} · ${escapeHtml(String(run.execution_mode ?? "offline"))}</small>
+        <small>${escapeHtml(formatDate(run.created_at))} · ${escapeHtml(String(run.dataset_version ?? "v1"))} · ${escapeHtml(String(run.execution_mode ?? "offline"))} · ${run.dataset_snapshot_id ? "已绑定审批评测集" : "未绑定审批快照"}</small>
         <p>${failures.length ? escapeHtml(failures.join("；")) : escapeHtml(deltaText)}</p>
       </div>
       <span class="knowledge-source-badge ${admitted ? "builtin" : "admin"}">${admitted ? "可发布" : "需处理"}</span>

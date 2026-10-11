@@ -98,6 +98,24 @@ runtime strategy, provider and model metadata. They establish their own live
 baseline and regression history, but never replace the latest offline admission
 decision used by production readiness.
 
+## Evaluation governance
+
+Evaluation source files remain versioned in the repository, while administrators
+can create immutable database snapshots containing the source version, case
+count, and content digest. A snapshot starts as a draft; approval promotes it
+to the one approved snapshot for that dataset and marks the prior approval as
+superseded. This creates an auditable review boundary without allowing the
+administrator UI to alter test fixtures directly.
+
+Online quality sampling selects recent Agent execution traces, but stores only
+privacy-safe execution metadata: intent, action type, model/release identity,
+latency, tool and retrieval counts, outcome, and warnings. It does not copy a
+user message, attachment, prompt, model response, or secret. Multiple
+annotators can independently label a sample as pass, fail, or uncertain; the
+service reports observed agreement and Cohen's kappa over double-annotated
+samples. Administrators can also compare two persisted evaluation runs for
+pass-rate, case-regression, and RAG metric deltas before promotion.
+
 Each chat candidate is paired with a persisted server-side session containing
 an action type, candidate ID, lifecycle status and monotonically increasing
 revision. Edit, confirm and discard requests carry the expected revision and

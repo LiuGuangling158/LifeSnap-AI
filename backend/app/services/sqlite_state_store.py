@@ -21,7 +21,7 @@ class SQLiteStateStore:
     database. Legacy files are read only once, on first access to a namespace.
     """
 
-    _migration_version = 11
+    _migration_version = 12
     _collection_tables = {
         "bills": ("bills", "id"),
         "tasks": ("tasks", "id"),
@@ -622,6 +622,225 @@ class SQLiteStateStore:
                 return [json.loads(str(row["payload"])) for row in rows]
             finally:
                 connection.close()
+
+    def get_agent_quality_evaluation(self, run_id: str, *, owner_id: str | None = None) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT payload FROM agent_quality_evaluation_runs WHERE owner_id = ? AND run_id = ?",
+                    (owner_id, run_id),
+                ).fetchone()
+                return json.loads(str(row["payload"])) if row else None
+            finally:
+                connection.close()
+
+    def create_quality_dataset_snapshot(self, snapshot: dict[str, Any], *, owner_id: str | None = None) -> dict[str, Any]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO quality_dataset_snapshots(
+                        snapshot_id, owner_id, dataset_id, source_version, content_hash,
+                        case_count, status, created_at, approved_at, approval_note
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(snapshot["snapshot_id"]), owner_id, str(snapshot["dataset_id"]),
+                        str(snapshot["source_version"]), str(snapshot["content_hash"]),
+                        int(snapshot["case_count"]), str(snapshot["status"]), str(snapshot["created_at"]),
+                        snapshot.get("approved_at"), snapshot.get("approval_note"),
+                    ),
+                )
+                connection.commit()
+                return self._quality_dataset_snapshot_row(connection, str(snapshot["snapshot_id"]), owner_id)
+            finally:
+                connection.close()
+
+    def list_quality_dataset_snapshots(self, *, owner_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT snapshot_id, dataset_id, source_version, content_hash, case_count,
+                           status, created_at, approved_at, approval_note
+                    FROM quality_dataset_snapshots
+                    WHERE owner_id = ?
+                    ORDER BY created_at DESC LIMIT ?
+                    """,
+                    (owner_id, max(1, min(limit, 100))),
+                ).fetchall()
+                return [dict(row) for row in rows]
+            finally:
+                connection.close()
+
+    def approve_quality_dataset_snapshot(self, snapshot_id: str, *, approval_note: str | None, owner_id: str | None = None) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                snapshot = connection.execute(
+                    "SELECT dataset_id FROM quality_dataset_snapshots WHERE snapshot_id = ? AND owner_id = ?",
+                    (snapshot_id, owner_id),
+                ).fetchone()
+                if snapshot is None:
+                    return None
+                connection.execute(
+                    "UPDATE quality_dataset_snapshots SET status = 'superseded' WHERE owner_id = ? AND dataset_id = ? AND status = 'approved'",
+                    (owner_id, str(snapshot["dataset_id"])),
+                )
+                connection.execute(
+                    """
+                    UPDATE quality_dataset_snapshots
+                    SET status = 'approved', approved_at = ?, approval_note = ?
+                    WHERE snapshot_id = ? AND owner_id = ?
+                    """,
+                    (self._now(), approval_note, snapshot_id, owner_id),
+                )
+                connection.commit()
+                return self._quality_dataset_snapshot_row(connection, snapshot_id, owner_id)
+            finally:
+                connection.close()
+
+    def create_online_evaluation_samples(self, samples: list[dict[str, Any]], *, owner_id: str | None = None) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        created: list[dict[str, Any]] = []
+        with self._lock:
+            connection = self._connect()
+            try:
+                for sample in samples:
+                    cursor = connection.execute(
+                        """
+                        INSERT OR IGNORE INTO online_evaluation_samples(
+                            sample_id, owner_id, trace_id, sampled_at, snapshot, status
+                        ) VALUES (?, ?, ?, ?, ?, 'pending')
+                        """,
+                        (
+                            str(sample["sample_id"]), owner_id, str(sample["trace_id"]),
+                            str(sample["sampled_at"]),
+                            json.dumps(sample.get("snapshot", {}), ensure_ascii=False, separators=(",", ":")),
+                        ),
+                    )
+                    if cursor.rowcount:
+                        created.append(self._online_evaluation_sample_row(connection, str(sample["sample_id"]), owner_id))
+                connection.commit()
+                return created
+            finally:
+                connection.close()
+
+    def list_online_evaluation_samples(self, *, owner_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT sample_id, trace_id, sampled_at, snapshot, status,
+                           (SELECT COUNT(*) FROM online_evaluation_annotations annotation
+                            WHERE annotation.owner_id = sample.owner_id AND annotation.sample_id = sample.sample_id) AS annotation_count
+                    FROM online_evaluation_samples sample
+                    WHERE owner_id = ?
+                    ORDER BY sampled_at DESC LIMIT ?
+                    """,
+                    (owner_id, max(1, min(limit, 200))),
+                ).fetchall()
+                return [self._serialize_online_evaluation_sample(row) for row in rows]
+            finally:
+                connection.close()
+
+    def upsert_online_evaluation_annotation(self, annotation: dict[str, Any], *, owner_id: str | None = None) -> dict[str, Any] | None:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                exists = connection.execute(
+                    "SELECT 1 FROM online_evaluation_samples WHERE sample_id = ? AND owner_id = ?",
+                    (str(annotation["sample_id"]), owner_id),
+                ).fetchone()
+                if exists is None:
+                    return None
+                connection.execute(
+                    """
+                    INSERT INTO online_evaluation_annotations(
+                        annotation_id, owner_id, sample_id, annotator_id, verdict, note, annotated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(owner_id, sample_id, annotator_id) DO UPDATE SET
+                        annotation_id = excluded.annotation_id, verdict = excluded.verdict,
+                        note = excluded.note, annotated_at = excluded.annotated_at
+                    """,
+                    (
+                        str(annotation["annotation_id"]), owner_id, str(annotation["sample_id"]),
+                        str(annotation["annotator_id"]), str(annotation["verdict"]), annotation.get("note"),
+                        str(annotation["annotated_at"]),
+                    ),
+                )
+                connection.execute(
+                    "UPDATE online_evaluation_samples SET status = 'labeled' WHERE sample_id = ? AND owner_id = ?",
+                    (str(annotation["sample_id"]), owner_id),
+                )
+                connection.commit()
+                row = connection.execute(
+                    "SELECT annotation_id, sample_id, annotator_id, verdict, note, annotated_at FROM online_evaluation_annotations WHERE owner_id = ? AND sample_id = ? AND annotator_id = ?",
+                    (owner_id, str(annotation["sample_id"]), str(annotation["annotator_id"])),
+                ).fetchone()
+                return dict(row) if row else None
+            finally:
+                connection.close()
+
+    def list_online_evaluation_annotations(self, *, owner_id: str | None = None) -> list[dict[str, Any]]:
+        owner_id = owner_id or current_owner_id()
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    "SELECT annotation_id, sample_id, annotator_id, verdict, note, annotated_at FROM online_evaluation_annotations WHERE owner_id = ? ORDER BY sample_id, annotator_id, annotated_at",
+                    (owner_id,),
+                ).fetchall()
+                return [dict(row) for row in rows]
+            finally:
+                connection.close()
+
+    @staticmethod
+    def _serialize_online_evaluation_sample(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        try:
+            item["snapshot"] = json.loads(str(item.get("snapshot") or "{}"))
+        except json.JSONDecodeError:
+            item["snapshot"] = {}
+        return item
+
+    @staticmethod
+    def _quality_dataset_snapshot_row(connection: sqlite3.Connection, snapshot_id: str, owner_id: str) -> dict[str, Any]:
+        row = connection.execute(
+            """
+            SELECT snapshot_id, dataset_id, source_version, content_hash, case_count,
+                   status, created_at, approved_at, approval_note
+            FROM quality_dataset_snapshots WHERE snapshot_id = ? AND owner_id = ?
+            """,
+            (snapshot_id, owner_id),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Quality dataset snapshot was not persisted")
+        return dict(row)
+
+    def _online_evaluation_sample_row(self, connection: sqlite3.Connection, sample_id: str, owner_id: str) -> dict[str, Any]:
+        row = connection.execute(
+            """
+            SELECT sample_id, trace_id, sampled_at, snapshot, status,
+                   (SELECT COUNT(*) FROM online_evaluation_annotations annotation
+                    WHERE annotation.owner_id = sample.owner_id AND annotation.sample_id = sample.sample_id) AS annotation_count
+            FROM online_evaluation_samples sample WHERE sample_id = ? AND owner_id = ?
+            """,
+            (sample_id, owner_id),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("Online evaluation sample was not persisted")
+        return self._serialize_online_evaluation_sample(row)
 
     def create_or_get_async_job(
         self,
@@ -1395,6 +1614,7 @@ class SQLiteStateStore:
                 self._apply_async_job_reliability_migration(connection)
                 self._apply_async_job_event_migration(connection)
                 self._apply_feedback_loop_migration(connection)
+                self._apply_evaluation_governance_migration(connection)
                 connection.commit()
             finally:
                 connection.close()
@@ -1872,6 +2092,74 @@ class SQLiteStateStore:
         connection.execute(
             "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
             (11, self._now()),
+        )
+
+    def _apply_evaluation_governance_migration(self, connection: sqlite3.Connection) -> None:
+        applied = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (12,),
+        ).fetchone()
+        if applied is not None:
+            return
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS quality_dataset_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                dataset_id TEXT NOT NULL,
+                source_version TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                case_count INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                approved_at TEXT,
+                approval_note TEXT
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_quality_dataset_snapshots_owner_dataset_created "
+            "ON quality_dataset_snapshots(owner_id, dataset_id, created_at DESC)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS online_evaluation_samples (
+                sample_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                trace_id TEXT NOT NULL,
+                sampled_at TEXT NOT NULL,
+                snapshot TEXT NOT NULL,
+                status TEXT NOT NULL,
+                UNIQUE(owner_id, trace_id)
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_online_evaluation_samples_owner_sampled "
+            "ON online_evaluation_samples(owner_id, sampled_at DESC)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS online_evaluation_annotations (
+                annotation_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                sample_id TEXT NOT NULL,
+                annotator_id TEXT NOT NULL,
+                verdict TEXT NOT NULL,
+                note TEXT,
+                annotated_at TEXT NOT NULL,
+                UNIQUE(owner_id, sample_id, annotator_id),
+                FOREIGN KEY(sample_id) REFERENCES online_evaluation_samples(sample_id) ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_online_evaluation_annotations_owner_sample "
+            "ON online_evaluation_annotations(owner_id, sample_id, annotated_at ASC)"
+        )
+        connection.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (12, self._now()),
         )
 
     def _write_collection(

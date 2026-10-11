@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from uuid import UUID
 
 from app.schemas.quality import (
@@ -8,6 +8,16 @@ from app.schemas.quality import (
     AgentQualityFeedbackRead,
     AgentQualityFeedbackReviewRequest,
     AgentQualitySummary,
+    AnnotationConsistencySummary,
+    EvaluationComparisonReport,
+    EvaluationComparisonRequest,
+    EvaluationDatasetApprovalRequest,
+    EvaluationDatasetSnapshot,
+    EvaluationDatasetSnapshotCreate,
+    OnlineEvaluationAnnotation,
+    OnlineEvaluationAnnotationCreate,
+    OnlineEvaluationSample,
+    OnlineEvaluationSampleCollection,
 )
 from app.services.admin_auth_service import admin_auth_service
 from app.services.agent_quality_service import agent_quality_service
@@ -91,6 +101,131 @@ def review_quality_feedback(
         },
     )
     return feedback
+
+
+@router.get("/datasets", response_model=list[EvaluationDatasetSnapshot])
+def list_quality_datasets(
+    limit: int = Query(default=50, ge=1, le=100),
+    _: None = Depends(require_quality_admin_session),
+) -> list[EvaluationDatasetSnapshot]:
+    return agent_quality_service.list_dataset_snapshots(limit=limit)
+
+
+@router.post("/datasets/snapshots", response_model=EvaluationDatasetSnapshot, status_code=status.HTTP_201_CREATED)
+def create_quality_dataset_snapshot(
+    payload: EvaluationDatasetSnapshotCreate,
+    request: Request,
+    _: None = Depends(require_quality_admin_session),
+) -> EvaluationDatasetSnapshot:
+    snapshot = agent_quality_service.create_dataset_snapshot(approval_note=payload.approval_note)
+    audit_log_store.record(
+        action="evaluation_dataset_snapshot_created",
+        entity_type="evaluation_dataset_snapshot",
+        entity_id=snapshot.snapshot_id,
+        request=request,
+        metadata={"dataset_id": snapshot.dataset_id, "source_version": snapshot.source_version},
+    )
+    return snapshot
+
+
+@router.post("/datasets/{snapshot_id}/approve", response_model=EvaluationDatasetSnapshot)
+def approve_quality_dataset_snapshot(
+    snapshot_id: UUID,
+    payload: EvaluationDatasetApprovalRequest,
+    request: Request,
+    _: None = Depends(require_quality_admin_session),
+) -> EvaluationDatasetSnapshot:
+    try:
+        snapshot = agent_quality_service.approve_dataset_snapshot(
+            snapshot_id,
+            approval_note=payload.approval_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="evaluation_dataset_snapshot_approved",
+        entity_type="evaluation_dataset_snapshot",
+        entity_id=snapshot.snapshot_id,
+        request=request,
+        metadata={"dataset_id": snapshot.dataset_id, "source_version": snapshot.source_version},
+    )
+    return snapshot
+
+
+@router.get("/online-samples", response_model=list[OnlineEvaluationSample])
+def list_online_evaluation_samples(
+    limit: int = Query(default=100, ge=1, le=200),
+    _: None = Depends(require_quality_admin_session),
+) -> list[OnlineEvaluationSample]:
+    return agent_quality_service.list_online_samples(limit=limit)
+
+
+@router.post("/online-samples/collect", response_model=list[OnlineEvaluationSample], status_code=status.HTTP_201_CREATED)
+def collect_online_evaluation_samples(
+    payload: OnlineEvaluationSampleCollection,
+    request: Request,
+    _: None = Depends(require_quality_admin_session),
+) -> list[OnlineEvaluationSample]:
+    samples = agent_quality_service.collect_online_samples(requested_count=payload.requested_count)
+    audit_log_store.record(
+        action="online_evaluation_samples_collected",
+        entity_type="online_evaluation_sample_batch",
+        entity_id="latest",
+        request=request,
+        metadata={"requested_count": payload.requested_count, "created_count": len(samples)},
+    )
+    return samples
+
+
+@router.post("/online-samples/{sample_id}/annotations", response_model=OnlineEvaluationAnnotation)
+def annotate_online_evaluation_sample(
+    sample_id: UUID,
+    payload: OnlineEvaluationAnnotationCreate,
+    request: Request,
+    _: None = Depends(require_quality_admin_session),
+) -> OnlineEvaluationAnnotation:
+    try:
+        annotation = agent_quality_service.annotate_online_sample(sample_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="online_evaluation_sample_annotated",
+        entity_type="online_evaluation_sample",
+        entity_id=sample_id,
+        request=request,
+        metadata={"annotator_id": annotation.annotator_id, "verdict": annotation.verdict},
+    )
+    return annotation
+
+
+@router.get("/online-samples/consistency", response_model=AnnotationConsistencySummary)
+def get_online_evaluation_annotation_consistency(
+    _: None = Depends(require_quality_admin_session),
+) -> AnnotationConsistencySummary:
+    return agent_quality_service.annotation_consistency()
+
+
+@router.post("/comparisons", response_model=EvaluationComparisonReport)
+def compare_quality_evaluations(
+    payload: EvaluationComparisonRequest,
+    request: Request,
+    _: None = Depends(require_quality_admin_session),
+) -> EvaluationComparisonReport:
+    try:
+        report = agent_quality_service.compare_evaluations(
+            payload.baseline_run_id,
+            payload.candidate_run_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    audit_log_store.record(
+        action="agent_quality_evaluations_compared",
+        entity_type="agent_quality_evaluation_comparison",
+        entity_id=payload.candidate_run_id,
+        request=request,
+        metadata={"baseline_run_id": str(payload.baseline_run_id), "candidate_run_id": str(payload.candidate_run_id)},
+    )
+    return report
 
 
 @router.post("/evaluations/run", response_model=AgentQualityEvaluationRun)

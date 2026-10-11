@@ -192,6 +192,7 @@ class AgentQualityEvaluationRun(BaseModel):
     cases: list[AgentQualityEvaluationCase] = Field(default_factory=list)
     dataset_id: str = Field(default="agent-admission", min_length=1, max_length=80)
     dataset_version: str = Field(default="v1", min_length=1, max_length=40)
+    dataset_snapshot_id: UUID | None = None
     execution_mode: Literal["offline", "live"] = "offline"
     duration_ms: float | None = Field(default=None, ge=0)
     online_model_ready: bool | None = None

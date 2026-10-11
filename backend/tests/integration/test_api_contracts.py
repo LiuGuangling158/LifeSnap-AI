@@ -130,10 +130,23 @@ class ApiContractTests(unittest.TestCase):
             headers = {"Authorization": f"Bearer {session.json()['token']}"}
             response = self.client.get(f"/jobs/{job.job_id}/events", headers=headers)
             queue_status = self.client.get("/jobs/queue-status", headers=headers)
+            dataset_snapshot = self.client.post(
+                "/quality/datasets/snapshots",
+                json={"approval_note": "Contract test snapshot"},
+                headers=headers,
+            )
+            dataset_list = self.client.get("/quality/datasets", headers=headers)
+            consistency = self.client.get("/quality/online-samples/consistency", headers=headers)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(queue_status.status_code, 200)
         self.assertIn(queue_status.json()["backend"], {"database", "redis"})
+        self.assertEqual(dataset_snapshot.status_code, 201)
+        self.assertEqual(dataset_snapshot.json()["status"], "draft")
+        self.assertEqual(dataset_list.status_code, 200)
+        self.assertTrue(dataset_list.json())
+        self.assertEqual(consistency.status_code, 200)
+        self.assertEqual(consistency.json()["dual_annotated_samples"], 0)
         events = response.json()
         self.assertTrue(events)
         self.assertIn("created", [event["event_type"] for event in events])

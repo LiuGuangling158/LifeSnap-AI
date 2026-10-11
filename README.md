@@ -32,7 +32,7 @@ the operational path after a model responds:
 | Bill capture | Manual entry, image receipt recognition, duplicate checks, field-level candidate review, and explicit confirmation before saving |
 | Agent runtime | Intent routing, RAG retrieval, function calling, model/rule fallback, execution steps, and privacy-safe explanations |
 | RAG | Editable business knowledge, BM25 retrieval by default, optional embedding fusion, retrieval testing, version history, reindexing, and rollback |
-| Quality governance | Offline admission evaluation, RAG-specific evaluation, live shadow evaluation, regression comparison, release snapshots, and rollback controls |
+| Quality governance | Offline admission evaluation, RAG-specific evaluation, live shadow evaluation, approved dataset snapshots, online sampling, annotation consistency, model comparison reports, release snapshots, and rollback controls |
 | Feedback loop | User verdicts link to execution traces; administrators review them and promote sanitized examples into regression cases |
 | Reliability | Bounded retries, per-provider/model circuit breakers, local fallback, Token and estimated-cost aggregation, and model health alerts |
 | Operations | SQLite transactions, durable leased jobs, optional Redis multi-node dispatch signals, idempotency controls, audit events, diagnostics, Prometheus metrics, alert state, and layered tests |
@@ -150,6 +150,11 @@ The **Admin** page supports non-JSON knowledge management and Agent governance:
 
 - Edit, search, test, version, reindex, reset, and roll back RAG knowledge.
 - Run offline admission and optional live shadow evaluations.
+- Create and approve immutable evaluation-dataset snapshots, sample privacy-safe
+  online traces, record independent annotations, and inspect agreement plus
+  Cohen's kappa before acting on human labels.
+- Compare any two evaluation runs for pass-rate, case-regression, and RAG
+  metric deltas before promoting a model version.
 - Create, promote, or roll back Agent release snapshots bound to RAG and model
   fingerprints.
 - Inspect asynchronous jobs, traces, alerts, model resilience, and aggregated

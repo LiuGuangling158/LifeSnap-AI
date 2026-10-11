@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Literal
+from typing import Any, Iterator, Literal
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -19,6 +20,12 @@ from app.schemas.quality import (
     AgentQualityFeedbackRead,
     AgentQualityRegression,
     AgentQualitySummary,
+    AnnotationConsistencySummary,
+    EvaluationComparisonReport,
+    EvaluationDatasetSnapshot,
+    OnlineEvaluationAnnotation,
+    OnlineEvaluationAnnotationCreate,
+    OnlineEvaluationSample,
     RagQualityEvaluationCase,
     RagQualityEvaluationSummary,
 )
@@ -104,9 +111,201 @@ class AgentQualityService:
     def list_feedback(self, *, limit: int) -> list[dict]:
         return sqlite_state_store.list_agent_quality_feedback(limit=limit)
 
+    def create_dataset_snapshot(self, *, approval_note: str | None = None) -> EvaluationDatasetSnapshot:
+        suite = self._load_suite()
+        rag_suite = self._load_rag_suite()
+        metadata = self._dataset_snapshot_metadata(suite, rag_suite)
+        snapshot = EvaluationDatasetSnapshot(
+            snapshot_id=uuid4(),
+            dataset_id=metadata["dataset_id"],
+            source_version=metadata["source_version"],
+            content_hash=metadata["content_hash"],
+            case_count=metadata["case_count"],
+            status="draft",
+            created_at=self.now(),
+            approval_note=(approval_note or "").strip() or None,
+        )
+        return EvaluationDatasetSnapshot.model_validate(
+            sqlite_state_store.create_quality_dataset_snapshot(snapshot.model_dump(mode="json"))
+        )
+
+    def list_dataset_snapshots(self, *, limit: int = 50) -> list[EvaluationDatasetSnapshot]:
+        return [
+            EvaluationDatasetSnapshot.model_validate(item)
+            for item in sqlite_state_store.list_quality_dataset_snapshots(limit=limit)
+        ]
+
+    def approve_dataset_snapshot(
+        self,
+        snapshot_id: UUID,
+        *,
+        approval_note: str | None = None,
+    ) -> EvaluationDatasetSnapshot:
+        snapshot = sqlite_state_store.approve_quality_dataset_snapshot(
+            str(snapshot_id),
+            approval_note=(approval_note or "").strip() or None,
+        )
+        if snapshot is None:
+            raise ValueError("Evaluation dataset snapshot was not found")
+        return EvaluationDatasetSnapshot.model_validate(snapshot)
+
+    def collect_online_samples(self, *, requested_count: int) -> list[OnlineEvaluationSample]:
+        traces = sqlite_state_store.list_agent_traces(limit=200)
+        sampled_trace_ids = {
+            str(sample["trace_id"])
+            for sample in sqlite_state_store.list_online_evaluation_samples(limit=200)
+        }
+        candidates = [
+            {
+                "sample_id": uuid4(),
+                "trace_id": str(trace["trace_id"]),
+                "sampled_at": self.now(),
+                "snapshot": self._online_sample_snapshot(trace),
+            }
+            for trace in traces
+            if str(trace["trace_id"]) not in sampled_trace_ids
+        ][: max(1, min(requested_count, 50))]
+        return [
+            OnlineEvaluationSample.model_validate(item)
+            for item in sqlite_state_store.create_online_evaluation_samples(candidates)
+        ]
+
+    def list_online_samples(self, *, limit: int = 100) -> list[OnlineEvaluationSample]:
+        return [
+            OnlineEvaluationSample.model_validate(item)
+            for item in sqlite_state_store.list_online_evaluation_samples(limit=limit)
+        ]
+
+    def annotate_online_sample(
+        self,
+        sample_id: UUID,
+        payload: OnlineEvaluationAnnotationCreate,
+    ) -> OnlineEvaluationAnnotation:
+        annotator_id = payload.annotator_id.strip()
+        if len(annotator_id) < 2:
+            raise ValueError("Annotator identifier must contain at least two non-space characters")
+        annotation = OnlineEvaluationAnnotation(
+            annotation_id=uuid4(),
+            sample_id=sample_id,
+            annotator_id=annotator_id,
+            verdict=payload.verdict,
+            note=(payload.note or "").strip() or None,
+            annotated_at=self.now(),
+        )
+        stored = sqlite_state_store.upsert_online_evaluation_annotation(annotation.model_dump(mode="json"))
+        if stored is None:
+            raise ValueError("Online evaluation sample was not found")
+        return OnlineEvaluationAnnotation.model_validate(stored)
+
+    def annotation_consistency(self) -> AnnotationConsistencySummary:
+        annotations = sqlite_state_store.list_online_evaluation_annotations()
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for annotation in annotations:
+            grouped.setdefault(str(annotation["sample_id"]), []).append(annotation)
+        pairs = [
+            sorted(items, key=lambda item: (str(item["annotator_id"]), str(item["annotated_at"])))[:2]
+            for items in grouped.values()
+            if len({str(item["annotator_id"]) for item in items}) >= 2
+        ]
+        agreements = sum(1 for left, right in pairs if left["verdict"] == right["verdict"])
+        total = len(pairs)
+        labels = ("pass", "fail", "uncertain")
+        if total:
+            first_distribution = {label: sum(1 for left, _ in pairs if left["verdict"] == label) / total for label in labels}
+            second_distribution = {label: sum(1 for _, right in pairs if right["verdict"] == label) / total for label in labels}
+            expected_agreement = sum(first_distribution[label] * second_distribution[label] for label in labels)
+            observed_agreement = agreements / total
+            kappa = None if expected_agreement >= 1 else round((observed_agreement - expected_agreement) / (1 - expected_agreement), 4)
+        else:
+            observed_agreement = None
+            kappa = None
+        return AnnotationConsistencySummary(
+            generated_at=self.now(),
+            dual_annotated_samples=total,
+            agreement_count=agreements,
+            disagreement_count=total - agreements,
+            agreement_rate=round(observed_agreement, 4) if observed_agreement is not None else None,
+            cohens_kappa=kappa,
+        )
+
+    def compare_evaluations(self, baseline_run_id: UUID, candidate_run_id: UUID) -> EvaluationComparisonReport:
+        baseline_raw = sqlite_state_store.get_agent_quality_evaluation(str(baseline_run_id))
+        candidate_raw = sqlite_state_store.get_agent_quality_evaluation(str(candidate_run_id))
+        if baseline_raw is None or candidate_raw is None:
+            raise ValueError("Both evaluation runs must exist before comparison")
+        baseline = AgentQualityEvaluationRun.model_validate(baseline_raw)
+        candidate = AgentQualityEvaluationRun.model_validate(candidate_raw)
+        baseline_cases = {case.case_id: case.passed for case in baseline.cases}
+        candidate_cases = {case.case_id: case.passed for case in candidate.cases}
+        comparable_ids = set(baseline_cases).intersection(candidate_cases)
+        newly_failed = sorted(case_id for case_id in comparable_ids if baseline_cases[case_id] and not candidate_cases[case_id])
+        resolved = sorted(case_id for case_id in comparable_ids if not baseline_cases[case_id] and candidate_cases[case_id])
+        return EvaluationComparisonReport(
+            baseline_run_id=baseline.run_id,
+            candidate_run_id=candidate.run_id,
+            baseline_dataset_version=baseline.dataset_version,
+            candidate_dataset_version=candidate.dataset_version,
+            baseline_execution_mode=baseline.execution_mode,
+            candidate_execution_mode=candidate.execution_mode,
+            pass_rate_delta=round(candidate.pass_rate - baseline.pass_rate, 4),
+            passed_case_delta=candidate.passed_cases - baseline.passed_cases,
+            newly_failed_case_ids=newly_failed,
+            resolved_case_ids=resolved,
+            rag_recall_at_k_delta=self._metric_delta(baseline.rag_evaluation, candidate.rag_evaluation, "recall_at_k"),
+            rag_citation_accuracy_delta=self._metric_delta(baseline.rag_evaluation, candidate.rag_evaluation, "citation_accuracy"),
+            rag_abstention_accuracy_delta=self._metric_delta(baseline.rag_evaluation, candidate.rag_evaluation, "abstention_accuracy"),
+        )
+
     @staticmethod
     def now() -> datetime:
         return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _metric_delta(
+        baseline: RagQualityEvaluationSummary | None,
+        candidate: RagQualityEvaluationSummary | None,
+        metric: str,
+    ) -> float | None:
+        if baseline is None or candidate is None:
+            return None
+        left = getattr(baseline, metric, None)
+        right = getattr(candidate, metric, None)
+        if left is None or right is None:
+            return None
+        return round(float(right) - float(left), 4)
+
+    @staticmethod
+    def _online_sample_snapshot(trace: dict[str, Any]) -> dict[str, Any]:
+        payload = trace.get("payload") if isinstance(trace.get("payload"), dict) else {}
+        return {
+            "occurred_at": trace.get("occurred_at"),
+            "intent": trace.get("intent"),
+            "action_type": trace.get("action_type"),
+            "model_provider": trace.get("model_provider"),
+            "model_strategy": trace.get("model_strategy"),
+            "outcome": trace.get("outcome"),
+            "latency_ms": trace.get("latency_ms"),
+            "function_call_count": trace.get("function_call_count"),
+            "knowledge_hit_count": trace.get("knowledge_hit_count"),
+            "warning_count": trace.get("warning_count"),
+            "agent_release_id": payload.get("agent_release_id"),
+            "agent_release_label": payload.get("agent_release_label"),
+        }
+
+    @staticmethod
+    def _dataset_snapshot_metadata(suite: dict[str, Any], rag_suite: dict[str, Any]) -> dict[str, Any]:
+        content = {
+            "agent": {key: suite[key] for key in ("dataset_id", "dataset_version", "policy_id", "minimum_pass_rate", "require_no_regression", "cases")},
+            "rag": {key: rag_suite[key] for key in ("dataset_id", "dataset_version", "policy_id", "top_k", "cases")},
+        }
+        return {
+            "dataset_id": suite["dataset_id"],
+            "source_version": suite["dataset_version"],
+            "content_hash": hashlib.sha256(
+                json.dumps(content, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+            "case_count": len(suite["cases"]) + len(rag_suite["cases"]),
+        }
 
     def summary(self) -> AgentQualitySummary:
         feedback = sqlite_state_store.list_agent_quality_feedback(limit=500)
@@ -163,6 +362,17 @@ class AgentQualityService:
     ) -> AgentQualityEvaluationRun:
         suite = self._load_suite()
         rag_suite = self._load_rag_suite()
+        dataset_snapshot_metadata = self._dataset_snapshot_metadata(suite, rag_suite)
+        approved_snapshot = next(
+            (
+                snapshot
+                for snapshot in self.list_dataset_snapshots(limit=100)
+                if snapshot.status == "approved"
+                and snapshot.dataset_id == dataset_snapshot_metadata["dataset_id"]
+                and snapshot.content_hash == dataset_snapshot_metadata["content_hash"]
+            ),
+            None,
+        )
         model_trace = agent_runtime_service.model_trace()
         if execution_mode == "live" and not model_trace.external_model_ready:
             raise RuntimeError(
@@ -257,6 +467,7 @@ class AgentQualityService:
             cases=results,
             dataset_id=suite["dataset_id"],
             dataset_version=suite["dataset_version"],
+            dataset_snapshot_id=approved_snapshot.snapshot_id if approved_snapshot else None,
             execution_mode=execution_mode,
             duration_ms=round((time.perf_counter() - started_at) * 1000, 2),
             online_model_ready=(model_trace.external_model_ready if execution_mode == "live" else None),
