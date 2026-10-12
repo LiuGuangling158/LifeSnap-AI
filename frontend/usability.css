@@ -1093,3 +1093,119 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
     border-top-width: 3px !important;
   }
 }
+
+/* Route-aware canvas colors keep each workflow recognizable without competing with data. */
+.simple-shell .main.mobile-main {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  transition: background-color 220ms ease;
+}
+
+.simple-shell .main.mobile-main::before {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  width: min(33vw, 480px);
+  height: 520px;
+  border-left: 1px solid rgba(76, 111, 92, 0.08);
+  border-bottom: 1px solid rgba(76, 111, 92, 0.08);
+  background: #eaf2ed;
+  content: "";
+  pointer-events: none;
+}
+
+.simple-shell .main.mobile-main > * {
+  position: relative;
+  z-index: 1;
+}
+
+.simple-shell .main.mobile-main:has(.simple-home) {
+  background: #f3f7f4;
+}
+
+.simple-shell .main.mobile-main:has(.simple-home)::before {
+  border-color: rgba(42, 105, 75, 0.1);
+  background: #e3f0e8;
+}
+
+.simple-shell .main.mobile-main:has(.simple-bills) {
+  background: #faf7f4;
+}
+
+.simple-shell .main.mobile-main:has(.simple-bills)::before {
+  border-color: rgba(165, 84, 63, 0.1);
+  background: #f8e9e2;
+}
+
+.simple-shell .main.mobile-main:has(.simple-reports) {
+  background: #f7f6fa;
+}
+
+.simple-shell .main.mobile-main:has(.simple-reports)::before {
+  border-color: rgba(106, 91, 167, 0.1);
+  background: #ece9f8;
+}
+
+.simple-shell .main.mobile-main:has(.simple-tasks) {
+  background: #f4f8fa;
+}
+
+.simple-shell .main.mobile-main:has(.simple-tasks)::before {
+  border-color: rgba(57, 104, 142, 0.1);
+  background: #e5f0f7;
+}
+
+.simple-shell .main.mobile-main:has(.simple-diary) {
+  background: #fbf8f2;
+}
+
+.simple-shell .main.mobile-main:has(.simple-diary)::before {
+  border-color: rgba(164, 111, 42, 0.1);
+  background: #f7eddc;
+}
+
+.simple-shell .main.mobile-main:has(.simple-assistant) {
+  background: #f6f5fa;
+}
+
+.simple-shell .main.mobile-main:has(.simple-assistant)::before {
+  width: min(42vw, 560px);
+  border-color: rgba(106, 91, 167, 0.1);
+  background: #eae8f7;
+}
+
+.simple-shell .main.mobile-main:has(.simple-admin) {
+  background: #f6f7f6;
+}
+
+.simple-shell .main.mobile-main:has(.simple-admin)::before {
+  border-color: rgba(57, 92, 76, 0.1);
+  background: #e8efea;
+}
+
+.simple-shell .main.mobile-main:has(.simple-settings) {
+  background: #f7f7f5;
+}
+
+.simple-shell .main.mobile-main:has(.simple-settings)::before {
+  border-color: rgba(133, 108, 75, 0.1);
+  background: #f1ece2;
+}
+
+@media (max-width: 760px) {
+  .simple-shell .main.mobile-main::before {
+    top: 0;
+    right: 0;
+    left: 0;
+    width: auto;
+    height: 180px;
+    border-right: 0;
+    border-left: 0;
+  }
+
+  .simple-shell .main.mobile-main:has(.simple-assistant)::before {
+    width: auto;
+  }
+}
