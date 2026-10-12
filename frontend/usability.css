@@ -1125,7 +1125,7 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
   background-repeat: repeat;
   background-size: 560px 560px;
   content: "";
-  opacity: 0.09;
+  opacity: 0.16;
   pointer-events: none;
 }
 
@@ -1192,7 +1192,7 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
 .simple-shell .main.mobile-main:has(.simple-assistant)::after,
 .simple-shell .main.mobile-main:has(.simple-reports)::after {
   background-position: right -132px top -14px;
-  opacity: 0.115;
+  opacity: 0.2;
 }
 
 .simple-shell .main.mobile-main:has(.simple-admin) {
@@ -1231,11 +1231,11 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
   .simple-shell .main.mobile-main::after {
     background-position: right -74px top -42px;
     background-size: 410px 410px;
-    opacity: 0.075;
+    opacity: 0.14;
   }
 
   .simple-shell .main.mobile-main:has(.simple-assistant)::after,
   .simple-shell .main.mobile-main:has(.simple-reports)::after {
-    opacity: 0.1;
+    opacity: 0.18;
   }
 }
