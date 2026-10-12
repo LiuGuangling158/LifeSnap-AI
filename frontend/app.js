@@ -5428,13 +5428,13 @@ function renderDashboard() {
   return `<div class="simple-home">
     <header class="simple-page-header"><div><p class="simple-kicker">${escapeHtml(dateLabel)}</p><h1>记好每一笔，心里更有数。</h1><p>花了多少、花在哪里，打开就知道。</p></div><button class="button primary" type="button" data-open-bill-modal>${icon("plus")}记一笔</button></header>
     <section class="entry-options" aria-label="选择记账方式">
-      <button class="entry-option" type="button" data-bill-photo-placeholder ${state.saving ? "disabled" : ""}><span class="entry-icon">${icon("camera")}</span><span><strong>${state.saving ? "正在读取图片…" : "上传截图记账"}</strong><small>选择支付截图，核对后保存</small></span>${icon("chevron-right")}</button>
-      <button class="entry-option" type="button" data-route="assistant"><span class="entry-icon blue">${icon("spark")}</span><span><strong>说一句，让 AI 帮记</strong><small>例如：今天午餐花了 28 元</small></span>${icon("chevron-right")}</button>
+      <button class="entry-option entry-option-image" type="button" data-bill-photo-placeholder ${state.saving ? "disabled" : ""}><span class="entry-icon">${icon("camera")}</span><span><strong>${state.saving ? "正在读取图片…" : "上传截图记账"}</strong><small>选择支付截图，核对后保存</small></span>${icon("chevron-right")}</button>
+      <button class="entry-option entry-option-assistant" type="button" data-route="assistant"><span class="entry-icon blue">${icon("spark")}</span><span><strong>说一句，让 AI 帮记</strong><small>例如：今天午餐花了 28 元</small></span>${icon("chevron-right")}</button>
     </section>
-    <section class="simple-finance" aria-label="本月收支">
-      <div class="simple-finance-main"><span>${now.getMonth() + 1} 月支出</span><strong>${money(expense)}</strong><small>已记录 ${Number(monthly.bill_count ?? 0)} 笔收支</small></div>
-      <div class="simple-finance-secondary"><span>本月收入</span><strong>${money(monthly.total_income)}</strong><span>本月退款 <b>${money(monthly.total_refund)}</b></span></div>
-      <button class="simple-budget" type="button" data-open-budget-settings><span><strong>${budget > 0 ? (remaining < 0 ? "已超出预算" : "本月预算还剩") : "设置月预算"}</strong>${icon("chevron-right")}</span><b>${budget > 0 ? money(Math.abs(remaining)) : "给花销定个小目标"}</b><span class="simple-budget-track" aria-hidden="true"><i style="width:${budget > 0 ? Math.min(100, expense / budget * 100) : 0}%"></i></span><small>${budget > 0 ? `月预算 ${money(budget)}` : "点这里设置，方便留意支出"}</small></button>
+    <section class="simple-finance simple-finance-overview" aria-label="本月收支">
+      <div class="simple-finance-main finance-expense"><span>${now.getMonth() + 1} 月支出</span><strong>${money(expense)}</strong><small>已记录 ${Number(monthly.bill_count ?? 0)} 笔收支</small></div>
+      <div class="simple-finance-secondary finance-income"><span>本月收入</span><strong>${money(monthly.total_income)}</strong><span>本月退款 <b>${money(monthly.total_refund)}</b></span></div>
+      <button class="simple-budget finance-budget" type="button" data-open-budget-settings><span><strong>${budget > 0 ? (remaining < 0 ? "已超出预算" : "本月预算还剩") : "设置月预算"}</strong>${icon("chevron-right")}</span><b>${budget > 0 ? money(Math.abs(remaining)) : "给花销定个小目标"}</b><span class="simple-budget-track" aria-hidden="true"><i style="width:${budget > 0 ? Math.min(100, expense / budget * 100) : 0}%"></i></span><small>${budget > 0 ? `月预算 ${money(budget)}` : "点这里设置，方便留意支出"}</small></button>
     </section>
     <div class="simple-home-columns">
       <section class="surface simple-recent"><div class="simple-section-heading"><div><h2>最近账单</h2><p>点开一笔，就能查看和修改。</p></div><button class="button ghost" type="button" data-route="bills">全部账单 ${icon("chevron-right")}</button></div>
