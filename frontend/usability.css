@@ -1116,6 +1116,19 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
   pointer-events: none;
 }
 
+.simple-shell .main.mobile-main::after {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background-image: url("./assets/lifesnap-motif-tile.png");
+  background-position: right -56px top -84px;
+  background-repeat: repeat;
+  background-size: 560px 560px;
+  content: "";
+  opacity: 0.09;
+  pointer-events: none;
+}
+
 .simple-shell .main.mobile-main > * {
   position: relative;
   z-index: 1;
@@ -1176,6 +1189,12 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
   background: #eae8f7;
 }
 
+.simple-shell .main.mobile-main:has(.simple-assistant)::after,
+.simple-shell .main.mobile-main:has(.simple-reports)::after {
+  background-position: right -132px top -14px;
+  opacity: 0.115;
+}
+
 .simple-shell .main.mobile-main:has(.simple-admin) {
   background: #f6f7f6;
 }
@@ -1207,5 +1226,16 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
 
   .simple-shell .main.mobile-main:has(.simple-assistant)::before {
     width: auto;
+  }
+
+  .simple-shell .main.mobile-main::after {
+    background-position: right -74px top -42px;
+    background-size: 410px 410px;
+    opacity: 0.075;
+  }
+
+  .simple-shell .main.mobile-main:has(.simple-assistant)::after,
+  .simple-shell .main.mobile-main:has(.simple-reports)::after {
+    opacity: 0.1;
   }
 }
