@@ -363,3 +363,358 @@ input:focus,textarea:focus,select:focus { outline:2px solid #82b29e; outline-off
 .simple-shell .form { padding:0; }
 .simple-section-heading > div { flex:1; min-width:0; }
 .simple-section-heading > .button { width:auto; flex:none; }
+
+/* Product shell refinement: a calmer, denser working surface for repeated use. */
+:root {
+  --bg: #f3f6f4;
+  --surface: #ffffff;
+  --surface-muted: #f6f8f6;
+  --text: #1e3028;
+  --muted: #607068;
+  --line: #dce5df;
+  --accent: #176b52;
+  --accent-dark: #0f4f3b;
+  --accent-soft: #e4f1ea;
+  --radius: 8px;
+  --shadow-soft: 0 8px 24px rgba(20, 53, 39, 0.06);
+}
+
+.simple-shell .main.mobile-main {
+  max-width: 1520px;
+  padding-top: 38px;
+  padding-bottom: 72px;
+}
+
+.simple-sidebar.sidebar {
+  width: 232px;
+  padding: 26px 14px 20px;
+  background: #fbfcfb;
+}
+
+.simple-sidebar .brand {
+  padding: 0 10px 30px;
+}
+
+.simple-sidebar .brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  box-shadow: 0 5px 12px rgba(23, 107, 82, 0.16);
+}
+
+.simple-sidebar .brand-title {
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.simple-sidebar .nav {
+  gap: 3px;
+}
+
+.simple-sidebar .nav-button {
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0 12px;
+  color: #53645b;
+}
+
+.simple-sidebar .nav-button:hover {
+  background: #f1f6f2;
+  transform: none;
+}
+
+.simple-sidebar .nav-button.is-active {
+  border-color: #c8e0d2;
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.nav-group-label {
+  margin: 22px 0 6px 12px;
+  color: #77877e;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.simple-sidebar-note {
+  border-top: 1px solid var(--line);
+  padding: 16px 10px 0;
+}
+
+.simple-page-header {
+  margin-bottom: 24px;
+}
+
+.simple-page-header h1 {
+  margin-top: 4px;
+  font-size: clamp(26px, 2.25vw, 34px);
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.simple-page-header p {
+  max-width: 680px;
+  line-height: 1.65;
+}
+
+.simple-shell .button {
+  min-height: 40px;
+  border-radius: 7px;
+  font-weight: 620;
+}
+
+.simple-shell .button:not(.ghost):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(20, 53, 39, 0.09);
+}
+
+.simple-shell .surface {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.simple-shell .surface:hover {
+  border-color: #cad8cf;
+  box-shadow: var(--shadow-soft);
+}
+
+.entry-options {
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.entry-option {
+  min-height: 92px;
+  border-radius: 8px;
+  padding: 18px;
+  transition: border-color var(--motion), background-color var(--motion), box-shadow var(--motion), transform var(--motion);
+}
+
+.entry-option:hover {
+  border-color: #9fc5af;
+  box-shadow: 0 7px 18px rgba(20, 53, 39, 0.07);
+  transform: translateY(-1px);
+}
+
+.entry-icon {
+  border-radius: 8px;
+}
+
+.simple-finance {
+  gap: 24px;
+  border-radius: 8px;
+  background: #edf5f0;
+  padding: 26px;
+  margin-bottom: 22px;
+}
+
+.simple-finance-main > strong {
+  letter-spacing: 0;
+}
+
+.simple-budget {
+  border-left-color: #c7dcd0;
+}
+
+.simple-budget-track,
+.simple-budget-track i {
+  border-radius: 999px;
+}
+
+.simple-home-columns,
+.report-grid {
+  gap: 16px;
+}
+
+.simple-recent,
+.simple-life,
+.simple-ledger,
+.simple-settings-group,
+.simple-task-list {
+  padding: 20px;
+}
+
+.simple-section-heading {
+  margin-bottom: 12px;
+}
+
+.simple-section-heading h2,
+.simple-settings-group h2 {
+  font-size: 16px;
+}
+
+.simple-bill-row.bill-feed-item,
+.simple-life-links > button,
+.simple-setting-row {
+  border-color: #e8eeea;
+}
+
+.simple-bill-row.bill-feed-item:hover,
+.simple-life-links > button:hover,
+.simple-setting-row:hover {
+  background: #f6faf7;
+}
+
+.simple-search,
+.simple-segments,
+.simple-form-details {
+  border-radius: 8px;
+}
+
+.simple-assistant {
+  max-width: 1080px;
+}
+
+.simple-assistant .assistant-chat-page {
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(20, 53, 39, 0.05);
+}
+
+.simple-assistant .assistant-runtime-panel {
+  gap: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  background: #fbfdfb;
+  padding: 0;
+}
+
+.simple-assistant .assistant-runtime-chip {
+  min-height: 78px;
+  border-right: 1px solid var(--line);
+  padding: 16px;
+}
+
+.simple-assistant .assistant-runtime-chip:last-of-type {
+  border-right: 0;
+}
+
+.simple-assistant .assistant-runtime-status {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: #f5faf7;
+  padding: 11px 16px;
+}
+
+.simple-assistant .assistant-capabilities {
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 16px;
+}
+
+.simple-assistant .assistant-capability {
+  border-radius: 7px;
+}
+
+.simple-assistant .assistant-thread.chat-thread {
+  background: #fdfefd;
+}
+
+.simple-assistant .assistant-composer {
+  border-top: 1px solid var(--line);
+}
+
+.simple-assistant .assistant-composer textarea {
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.simple-assistant .assistant-send-button,
+.simple-assistant .assistant-tool-button {
+  border-radius: 7px;
+}
+
+.simple-admin {
+  max-width: 1180px;
+  gap: 16px;
+}
+
+.simple-admin .section-header {
+  padding-inline: 20px;
+}
+
+.simple-admin .diagnostics-summary {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.simple-admin .admin-version-card,
+.simple-admin .admin-knowledge-card,
+.simple-admin .admin-rule-editor {
+  border-radius: 8px;
+}
+
+.simple-admin .admin-version-card {
+  padding: 14px;
+}
+
+.simple-admin .admin-job-row {
+  padding-block: 14px;
+}
+
+.simple-shell .modal {
+  border-radius: 12px;
+  box-shadow: 0 20px 55px rgba(16, 43, 32, 0.18);
+}
+
+.simple-shell .field input,
+.simple-shell .field select,
+.simple-shell .field textarea {
+  border-radius: 7px;
+}
+
+@media (max-width: 1100px) {
+  .simple-shell .main.mobile-main {
+    padding-top: 30px;
+  }
+
+  .simple-assistant .assistant-runtime-chip {
+    padding: 14px 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .simple-shell .main.mobile-main {
+    padding-top: 22px;
+  }
+
+  .simple-shell .mobile-tabbar {
+    box-shadow: 0 -8px 20px rgba(20, 53, 39, 0.05);
+  }
+
+  .simple-page-header h1 {
+    letter-spacing: 0;
+  }
+
+  .simple-finance {
+    border-radius: 8px;
+  }
+
+  .simple-assistant .assistant-runtime-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .simple-assistant .assistant-runtime-chip:nth-child(2) {
+    border-right: 0;
+  }
+
+  .simple-assistant .assistant-runtime-chip:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+
+  .simple-assistant .assistant-capabilities {
+    gap: 6px;
+    padding: 10px 12px;
+  }
+
+  .simple-assistant .assistant-thread.chat-thread,
+  .simple-assistant .assistant-composer {
+    padding-inline: 14px;
+  }
+
+  .simple-admin .diagnostics-summary {
+    border-radius: 8px;
+  }
+}
