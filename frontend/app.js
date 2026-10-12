@@ -527,6 +527,11 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-android-floating-capture]")) {
+    requestAndroidFloatingCapture();
+    return;
+  }
+
   if (event.target.closest("[data-bill-filter-panel]")) {
     state.billRangeOpen = true;
     render();
@@ -2477,7 +2482,7 @@ async function importBillImage(file) {
   }
 }
 
-function billDraftFromCandidate(candidate, attachment) {
+function billDraftFromCandidate(candidate, attachment, source = "album") {
   const data = candidate.data ?? {};
   return {
     amount: data.amount ?? "",
@@ -2487,7 +2492,7 @@ function billDraftFromCandidate(candidate, attachment) {
     transaction_type: data.transaction_type || "expense",
     paid_at: data.paid_at || new Date().toISOString(),
     note: billDraftNote(candidate, attachment),
-    source: "album",
+    source,
     candidate_id: candidate.candidate_id,
     confidence: candidate.confidence,
     warnings: candidate.warnings ?? [],
@@ -3199,6 +3204,69 @@ function openAssistantPage(draft = "", options = {}) {
     window.setTimeout(() => startVoiceInput(), 80);
   }
 }
+
+function androidFloatingCaptureAvailable() {
+  return typeof window.LifeSnapAndroid?.enableFloatingCapture === "function";
+}
+
+function requestAndroidFloatingCapture() {
+  if (!androidFloatingCaptureAvailable()) {
+    showToast("请在 LifeSnap Android 应用中开启悬浮记账。");
+    return;
+  }
+  try {
+    window.LifeSnapAndroid.enableFloatingCapture();
+    showToast("已请求开启悬浮记账；首次使用请允许显示在其他应用上层。");
+  } catch {
+    showToast("悬浮记账暂时不可用，请检查安卓权限。");
+  }
+}
+
+async function importNativeBillAttachment(payload) {
+  const attachmentId = String(payload?.id || "").trim();
+  if (!attachmentId || state.saving) {
+    return;
+  }
+  const attachment = {
+    id: attachmentId,
+    filename: String(payload?.filename || "screen-capture.png"),
+    content_type: String(payload?.contentType || "image/png"),
+  };
+  const source = payload?.source === "screenshot" ? "screenshot" : "album";
+
+  state.billRestoreTarget = null;
+  state.saving = true;
+  render();
+  try {
+    const result = await api(`/attachments/${encodeURIComponent(attachmentId)}/recognize-and-parse-bill`, {
+      method: "POST",
+    });
+    state.editingBill = null;
+    state.billDraft = isAttachmentBillCandidateResult(result)
+      ? billDraftFromCandidate(result.candidate, attachment, source)
+      : {
+          ...fallbackBillDraftFromAttachment(attachment, result),
+          source,
+        };
+    state.billDetailsOpen = false;
+    state.modalOpen = true;
+    state.toast = isAttachmentBillCandidateResult(result)
+      ? "已读取悬浮窗图片，请核对金额后保存"
+      : "暂时没能读出图片内容，请填写金额和商家";
+  } catch (error) {
+    state.toast = error.message || "悬浮窗图片导入失败";
+  } finally {
+    state.saving = false;
+    render();
+  }
+}
+
+window.LifeSnapNative = {
+  ...(window.LifeSnapNative || {}),
+  receiveAttachment: (attachment) => {
+    void importNativeBillAttachment(attachment);
+  },
+};
 
 function startAssistantTool(toolId) {
   state.activeAssistantToolId = toolId || null;
@@ -7710,9 +7778,16 @@ function renderProfilePage() {
   const summary = state.bootstrap?.data_summary ?? {};
   const snapshot = state.snapshotStatus;
   const row = (symbol, title, note, attribute) => `<button class="simple-setting-row" type="button" ${attribute} ${state.saving ? "disabled" : ""}>${icon(symbol)}<span><strong>${title}</strong><small>${note}</small></span>${icon("chevron-right")}</button>`;
+  const androidFloatingCapture = androidFloatingCaptureAvailable() ? `
+    <section class="surface simple-settings-group native-capture-setting">
+      <h2>安卓快捷记账</h2>
+      ${row("camera", "开启悬浮记账", "点击悬浮窗可截取当前页面，或从相册选择账单图片", "data-android-floating-capture")}
+    </section>
+  ` : "";
   return `<div class="simple-settings">
     <header class="simple-page-header"><div><p class="simple-kicker">按你的习惯来</p><h1>更多与设置</h1><p>日常工具、个人偏好和数据管理。</p></div></header>
     ${renderLanguageSettings()}
+    ${androidFloatingCapture}
     <section class="surface simple-settings-group"><h2>生活记录</h2>${row("check", "待办事项", "查看、新增和完成待办", 'data-route="tasks"')}${row("book", "我的日记", "记录文字、照片和心情", 'data-route="diary"')}</section>
     <section class="surface simple-settings-group"><h2>记账偏好</h2>${row("pie-chart", "月预算", `当前预算 ${money(getBudgetSettings().monthly_budget)}`, "data-open-budget-settings")}${row("grid", "收支分类", "调整餐饮、交通等常用分类", "data-open-category-settings")}${row("settings", "隐私设置", "选择图片和文字是否允许交给外部 AI 处理", "data-open-privacy-settings")}</section>
     <section class="surface simple-settings-group"><h2>我的数据</h2>${row("download", "导出备份文件", "下载账单、待办和日记，方便保留或迁移", "data-export-json")}${row("upload", "从备份文件恢复", "选择之前导出的文件，预览后再导入", "data-import-json")}${row("trash", "回收站", escapeHtml(recycleBinText(summary)), "data-open-recycle-bin")}</section>

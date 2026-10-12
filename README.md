@@ -30,6 +30,7 @@ the operational path after a model responds:
 | --- | --- |
 | Personal workspace | Bills, budget and spending reports, tasks, diary entries, attachments, import/export, snapshots, and dashboard summaries |
 | Bill capture | Manual entry, image receipt recognition, duplicate checks, field-level candidate review, and explicit confirmation before saving |
+| Android companion | Native floating capture button, Android screen-capture consent, screenshot/gallery review, then the same image bill-confirmation flow |
 | Agent runtime | Intent routing, RAG retrieval, function calling, model/rule fallback, execution steps, and privacy-safe explanations |
 | RAG | Editable business knowledge, BM25 retrieval by default, optional embedding fusion, retrieval testing, version history, reindexing, and rollback |
 | Quality governance | Offline admission evaluation, RAG-specific evaluation, live shadow evaluation, approved dataset snapshots, online sampling, annotation consistency, model comparison reports, release snapshots, and rollback controls |
