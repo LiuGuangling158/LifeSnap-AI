@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
+import android.widget.Toast
 
 class FloatingCaptureService : Service() {
     private lateinit var windowManager: WindowManager

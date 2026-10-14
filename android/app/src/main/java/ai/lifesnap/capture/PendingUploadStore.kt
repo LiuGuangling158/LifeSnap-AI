@@ -26,11 +26,11 @@ object PendingUploadStore {
 
     fun enqueue(context: Context, sourceUri: Uri, source: String): PendingUpload {
         val id = UUID.randomUUID().toString()
-        val filename = "capture-$id.png"
+        val filename = "capture-$id.${extensionFor(context, sourceUri)}"
         val directory = File(context.filesDir, DIRECTORY).apply { mkdirs() }
         val target = File(directory, filename)
         context.contentResolver.openInputStream(sourceUri)?.use { input ->
-            target.outputStream().use(input::copyTo)
+            target.outputStream().use { output -> input.copyTo(output) }
         } ?: error("Unable to preserve the selected image")
         val item = PendingUpload(id, filename, source, System.currentTimeMillis())
         write(context, read(context) + item)
@@ -79,6 +79,13 @@ object PendingUploadStore {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_ITEMS, payload.toString())
-            .apply()
+            .commit()
+    }
+
+    private fun extensionFor(context: Context, uri: Uri): String = when (context.contentResolver.getType(uri)) {
+        "image/jpeg" -> "jpg"
+        "image/webp" -> "webp"
+        "image/gif" -> "gif"
+        else -> "png"
     }
 }

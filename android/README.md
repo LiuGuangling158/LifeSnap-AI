@@ -17,6 +17,14 @@ capture the global screen, so those operations live in this native module.
    preserves the original image, opens LifeSnap, and invokes its existing bill
    recognition and confirmation flow.
 
+If an upload cannot complete, choose **Keep for later upload**. The image is
+copied to the app's private storage and can be retried or deleted from the
+**Pending uploads** button in the companion toolbar. It is never turned into a
+financial record until the existing LifeSnap confirmation screen is completed.
+
+The floating button can be dragged to a comfortable position. Long-press it to
+close it; choosing **Enable Floating Capture** in LifeSnap starts it again.
+
 Nothing is auto-saved as a financial record: the user still reviews the bill
 candidate in LifeSnap before confirming it.
 
@@ -33,9 +41,9 @@ control, or build with:
 ./gradlew :app:assembleDebug -PlifeSnapBaseUrl=https://lifesnap.example.com
 ```
 
-The Android manifest permits cleartext traffic to support local emulator
-development. Release deployments should use HTTPS and restrict network security
-policy before distribution.
+Debug builds permit cleartext traffic to support local emulator development.
+Release builds require HTTPS both in the manifest and when a server URL is
+saved, so a production APK cannot accidentally send financial images over HTTP.
 
 ## Android permissions
 
@@ -46,3 +54,24 @@ policy before distribution.
 
 The app does not record continuously. Each capture requires the Android
 MediaProjection consent flow and is reviewed before upload.
+
+## Acceptance checklist
+
+Run this on at least one emulator and one physical device before release:
+
+1. Enable and deny the overlay permission; verify the app explains the next
+   step and never starts the overlay without approval.
+2. Drag the floating button, leave and reopen the app, then verify its position
+   is retained. Long-press it and verify that it closes.
+3. Allow and deny the MediaProjection prompt. A denial must restore the
+   floating button and upload nothing.
+4. Capture a payment screen, replace it with a JPEG from the gallery, and
+   verify the server receives the correct `screenshot` or `album` source.
+5. Turn off the network during upload, choose **Keep for later upload**, force
+   close and reopen the app, then retry from **Pending uploads**.
+6. Confirm a recognized candidate and verify exactly one bill is created;
+   cancel a candidate and verify no bill is created.
+
+Test Android 10, 13, and 14+ where possible. Overlay permission and background
+service behavior varies noticeably across device vendors, so a physical device
+check is required in addition to emulator testing.
