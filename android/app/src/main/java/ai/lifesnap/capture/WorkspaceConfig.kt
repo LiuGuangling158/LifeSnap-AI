@@ -27,6 +27,9 @@ object WorkspaceConfig {
             "LifeSnap server address must start with http:// or https://"
         }
         require(!parsed.host.isNullOrBlank()) { "LifeSnap server address is missing a host" }
+        require(BuildConfig.DEBUG || parsed.scheme == "https") {
+            "Release builds require an HTTPS LifeSnap server address"
+        }
         return trimmed
     }
 }

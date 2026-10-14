@@ -17,6 +17,15 @@ android {
     buildConfigField("String", "DEFAULT_BACKEND_URL", "\"$defaultUrl\"")
   }
 
+  buildTypes {
+    debug {
+      manifestPlaceholders["usesCleartextTraffic"] = "true"
+    }
+    release {
+      manifestPlaceholders["usesCleartextTraffic"] = "false"
+    }
+  }
+
   buildFeatures {
     buildConfig = true
   }

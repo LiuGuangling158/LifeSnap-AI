@@ -112,10 +112,28 @@ class CaptureReviewActivity : Activity() {
                 .onFailure { error ->
                     runOnUiThread {
                         progress.dismiss()
-                        Toast.makeText(this, error.message ?: "图片导入失败", Toast.LENGTH_LONG).show()
+                        offerPendingUpload(uri, source, error)
                     }
                 }
         }
+    }
+
+    private fun offerPendingUpload(uri: Uri, source: String, error: Throwable) {
+        AlertDialog.Builder(this)
+            .setTitle("图片暂未上传")
+            .setMessage("${error.message ?: "网络或服务器暂时不可用"}\n\n保留图片后，可在应用顶部的“待上传”中重试。")
+            .setNegativeButton("继续编辑", null)
+            .setPositiveButton("保留待上传") { _, _ ->
+                runCatching { PendingUploadStore.enqueue(this, uri, source) }
+                    .onSuccess {
+                        Toast.makeText(this, "已保留到待上传列表", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                    .onFailure {
+                        Toast.makeText(this, "无法保留图片：${it.message}", Toast.LENGTH_LONG).show()
+                    }
+            }
+            .show()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

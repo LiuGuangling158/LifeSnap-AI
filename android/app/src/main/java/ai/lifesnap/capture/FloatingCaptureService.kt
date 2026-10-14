@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
@@ -71,6 +72,11 @@ class FloatingCaptureService : Service() {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 )
             }
+            setOnLongClickListener {
+                Toast.makeText(this@FloatingCaptureService, "悬浮记账已关闭", Toast.LENGTH_SHORT).show()
+                stopSelf()
+                true
+            }
         }
         val params = WindowManager.LayoutParams(
             dp(56),
@@ -80,9 +86,10 @@ class FloatingCaptureService : Service() {
             android.graphics.PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            x = dp(16)
-            y = 0
+            x = preferences().getInt(KEY_X, dp(16))
+            y = preferences().getInt(KEY_Y, 0)
         }
+        button.setOnTouchListener(dragListener(params))
         windowManager.addView(button, params)
         bubble = button
         attached = true
@@ -93,6 +100,52 @@ class FloatingCaptureService : Service() {
         bubble?.let(windowManager::removeViewImmediate)
         attached = false
     }
+
+    private fun dragListener(params: WindowManager.LayoutParams): View.OnTouchListener {
+        var downX = 0f
+        var downY = 0f
+        var initialX = 0
+        var initialY = 0
+        var moved = false
+        val threshold = dp(8)
+        return View.OnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX
+                    downY = event.rawY
+                    initialX = params.x
+                    initialY = params.y
+                    moved = false
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val deltaX = (event.rawX - downX).toInt()
+                    val deltaY = (event.rawY - downY).toInt()
+                    if (!moved && (kotlin.math.abs(deltaX) > threshold || kotlin.math.abs(deltaY) > threshold)) {
+                        moved = true
+                        view.isPressed = false
+                    }
+                    if (moved && attached) {
+                        params.x = initialX - deltaX
+                        params.y = initialY + deltaY
+                        windowManager.updateViewLayout(view, params)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (moved) {
+                        preferences().edit().putInt(KEY_X, params.x).putInt(KEY_Y, params.y).apply()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun preferences() = getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -124,5 +177,8 @@ class FloatingCaptureService : Service() {
     companion object {
         private const val CHANNEL_ID = "lifesnap_floating_capture"
         private const val NOTIFICATION_ID = 4301
+        private const val PREFERENCES = "lifesnap_floating_capture"
+        private const val KEY_X = "bubble_x"
+        private const val KEY_Y = "bubble_y"
     }
 }

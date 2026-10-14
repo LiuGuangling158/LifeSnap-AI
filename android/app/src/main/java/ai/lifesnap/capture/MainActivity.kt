@@ -45,6 +45,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        updatePendingUploadsLabel()
         if (overlayRequested && Settings.canDrawOverlays(this)) {
             overlayRequested = false
             startFloatingCapture()
@@ -71,6 +72,13 @@ class MainActivity : Activity() {
         toolbar.addView(Button(this).apply {
             text = "服务器"
             setOnClickListener { editServerAddress() }
+        })
+        toolbar.addView(Button(this).apply {
+            text = pendingUploadsLabel()
+            tag = PENDING_UPLOADS_BUTTON_TAG
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, PendingUploadsActivity::class.java))
+            }
         })
 
         webView = WebView(this).apply {
@@ -144,6 +152,16 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun pendingUploadsLabel(): String {
+        val count = PendingUploadStore.count(this)
+        return if (count == 0) "待上传" else "待上传($count)"
+    }
+
+    private fun updatePendingUploadsLabel() {
+        val root = webView.parent as? ViewGroup ?: return
+        root.findViewWithTag<Button>(PENDING_UPLOADS_BUTTON_TAG)?.text = pendingUploadsLabel()
+    }
+
     private fun deliverPendingAttachment() {
         val attachment = pendingAttachment ?: return
         if (deliveryAttempts >= 12) {
@@ -205,6 +223,7 @@ class MainActivity : Activity() {
         private const val EXTRA_ATTACHMENT_TYPE = "attachment_type"
         private const val EXTRA_ATTACHMENT_SIZE = "attachment_size"
         private const val EXTRA_ATTACHMENT_SOURCE = "attachment_source"
+        private const val PENDING_UPLOADS_BUTTON_TAG = "pending_uploads"
 
         fun openWithAttachment(context: Context, attachment: UploadedAttachment): Intent =
             Intent(context, MainActivity::class.java)
