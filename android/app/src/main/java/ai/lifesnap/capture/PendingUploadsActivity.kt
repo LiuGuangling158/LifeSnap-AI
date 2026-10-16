@@ -15,6 +15,7 @@ import kotlin.concurrent.thread
 
 class PendingUploadsActivity : Activity() {
     private lateinit var itemsContainer: LinearLayout
+    private val uploadingIds = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,14 +65,18 @@ class PendingUploadsActivity : Activity() {
                 textSize = 13f
             })
             val actions = LinearLayout(this)
-            actions.addView(Button(this).apply {
+            val retryButton = Button(this).apply {
                 text = "重试上传"
-                setOnClickListener { upload(item) }
-            })
-            actions.addView(Button(this).apply {
+                isEnabled = item.id !in uploadingIds
+            }
+            val deleteButton = Button(this).apply {
                 text = "删除"
-                setOnClickListener { confirmRemove(item) }
-            })
+                isEnabled = item.id !in uploadingIds
+            }
+            retryButton.setOnClickListener { upload(item, retryButton, deleteButton) }
+            deleteButton.setOnClickListener { confirmRemove(item) }
+            actions.addView(retryButton)
+            actions.addView(deleteButton)
             row.addView(actions)
             itemsContainer.addView(row, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -80,7 +85,11 @@ class PendingUploadsActivity : Activity() {
         }
     }
 
-    private fun upload(item: PendingUpload) {
+    private fun upload(item: PendingUpload, retryButton: Button, deleteButton: Button) {
+        if (!uploadingIds.add(item.id)) return
+        retryButton.isEnabled = false
+        retryButton.text = "上传中…"
+        deleteButton.isEnabled = false
         Toast.makeText(this, "正在上传图片…", Toast.LENGTH_SHORT).show()
         thread {
             runCatching {
@@ -93,6 +102,10 @@ class PendingUploadsActivity : Activity() {
                 }
             }.onFailure { error ->
                 runOnUiThread {
+                    uploadingIds.remove(item.id)
+                    retryButton.isEnabled = true
+                    retryButton.text = "重试上传"
+                    deleteButton.isEnabled = true
                     Toast.makeText(this, error.message ?: "上传失败，请稍后再试", Toast.LENGTH_LONG).show()
                 }
             }
