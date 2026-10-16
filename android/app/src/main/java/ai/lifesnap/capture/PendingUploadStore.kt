@@ -43,6 +43,9 @@ object PendingUploadStore {
         return FileProvider.getUriForFile(context, "${context.packageName}.files", file)
     }
 
+    fun sizeBytes(context: Context, item: PendingUpload): Long =
+        File(File(context.filesDir, DIRECTORY), item.filename).length()
+
     fun remove(context: Context, item: PendingUpload) {
         File(File(context.filesDir, DIRECTORY), item.filename).delete()
         write(context, read(context).filterNot { it.id == item.id })

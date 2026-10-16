@@ -59,6 +59,10 @@ class PendingUploadsActivity : Activity() {
                 textSize = 16f
                 setTypeface(typeface, 1)
             })
+            row.addView(TextView(this).apply {
+                text = "${item.filename.substringAfterLast('.', "图片").uppercase()} · ${formatSize(PendingUploadStore.sizeBytes(this@PendingUploadsActivity, item))}"
+                textSize = 13f
+            })
             val actions = LinearLayout(this)
             actions.addView(Button(this).apply {
                 text = "重试上传"
@@ -108,4 +112,10 @@ class PendingUploadsActivity : Activity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes >= 1_048_576 -> String.format("%.1f MB", bytes / 1_048_576.0)
+        bytes >= 1_024 -> String.format("%.1f KB", bytes / 1_024.0)
+        else -> "$bytes B"
+    }
 }
