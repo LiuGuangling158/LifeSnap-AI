@@ -17,47 +17,51 @@ object AttachmentUploader {
     ): UploadedAttachment {
         val boundary = "LifeSnap-${UUID.randomUUID()}"
         val connection = (URL("${WorkspaceConfig.baseUrl(context)}/attachments/upload").openConnection() as HttpURLConnection)
-        connection.requestMethod = "POST"
-        connection.connectTimeout = 20_000
-        connection.readTimeout = 60_000
-        connection.doOutput = true
-        connection.setRequestProperty("Accept", "application/json")
-        connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 60_000
+            connection.doOutput = true
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
 
-        val mimeType = context.contentResolver.getType(contentUri) ?: "image/png"
-        val filename = displayName(context, contentUri)
-        BufferedOutputStream(connection.outputStream).use { output ->
-            writeField(output, boundary, "source", source)
-            writeField(output, boundary, "save_original", "true")
-            output.write("--$boundary\r\n".toByteArray())
-            output.write(
-                "Content-Disposition: form-data; name=\"file\"; filename=\"${filename.replace("\"", "_")}\"\r\n"
-                    .toByteArray(),
+            val mimeType = context.contentResolver.getType(contentUri) ?: "image/png"
+            val filename = displayName(context, contentUri)
+            BufferedOutputStream(connection.outputStream).use { output ->
+                writeField(output, boundary, "source", source)
+                writeField(output, boundary, "save_original", "true")
+                output.write("--$boundary\r\n".toByteArray())
+                output.write(
+                    "Content-Disposition: form-data; name=\"file\"; filename=\"${filename.replace("\"", "_")}\"\r\n"
+                        .toByteArray(),
+                )
+                output.write("Content-Type: $mimeType\r\n\r\n".toByteArray())
+                context.contentResolver.openInputStream(contentUri)?.use { input ->
+                    input.copyTo(output)
+                } ?: error("Unable to read selected image")
+                output.write("\r\n--$boundary--\r\n".toByteArray())
+            }
+
+            val status = connection.responseCode
+            val body = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+            if (status !in 200..299) {
+                val detail = runCatching { JSONObject(body).optString("detail") }.getOrDefault("")
+                error(detail.ifBlank { "Image upload failed ($status)" })
+            }
+            val payload = JSONObject(body)
+            UploadedAttachment(
+                id = payload.getString("id"),
+                filename = payload.optString("filename", filename),
+                contentType = payload.optString("content_type", mimeType),
+                fileSize = payload.optLong("file_size", 0L),
+                source = source,
             )
-            output.write("Content-Type: $mimeType\r\n\r\n".toByteArray())
-            context.contentResolver.openInputStream(contentUri)?.use { input ->
-                input.copyTo(output)
-            } ?: error("Unable to read selected image")
-            output.write("\r\n--$boundary--\r\n".toByteArray())
+        } finally {
+            connection.disconnect()
         }
-
-        val status = connection.responseCode
-        val body = (if (status in 200..299) connection.inputStream else connection.errorStream)
-            ?.bufferedReader()
-            ?.use { it.readText() }
-            .orEmpty()
-        if (status !in 200..299) {
-            val detail = runCatching { JSONObject(body).optString("detail") }.getOrDefault("")
-            error(detail.ifBlank { "Image upload failed ($status)" })
-        }
-        val payload = JSONObject(body)
-        return UploadedAttachment(
-            id = payload.getString("id"),
-            filename = payload.optString("filename", filename),
-            contentType = payload.optString("content_type", mimeType),
-            fileSize = payload.optLong("file_size", 0L),
-            source = source,
-        )
     }
 
     private fun writeField(output: BufferedOutputStream, boundary: String, name: String, value: String) {
