@@ -26,6 +26,12 @@ object AttachmentUploader {
             connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
 
             val mimeType = context.contentResolver.getType(contentUri) ?: "image/png"
+            require(mimeType in SUPPORTED_CONTENT_TYPES) {
+                "仅支持 JPEG、PNG 或 WebP 图片"
+            }
+            contentSize(context, contentUri)?.let { size ->
+                require(size <= MAX_FILE_SIZE_BYTES) { "图片不能超过 10MB" }
+            }
             val filename = displayName(context, contentUri)
             BufferedOutputStream(connection.outputStream).use { output ->
                 writeField(output, boundary, "source", source)
@@ -80,4 +86,17 @@ object AttachmentUploader {
         }
         return "lifesnap-capture.png"
     }
+
+    private fun contentSize(context: Context, uri: Uri): Long? {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0 && !cursor.isNull(index)) return cursor.getLong(index)
+            }
+        }
+        return null
+    }
+
+    private val SUPPORTED_CONTENT_TYPES = setOf("image/jpeg", "image/png", "image/webp")
+    private const val MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 }
