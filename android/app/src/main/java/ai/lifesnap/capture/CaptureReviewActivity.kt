@@ -78,7 +78,11 @@ class CaptureReviewActivity : Activity() {
                 startActivityForResult(
                     Intent(Intent.ACTION_OPEN_DOCUMENT)
                         .addCategory(Intent.CATEGORY_OPENABLE)
-                        .setType("image/*"),
+                        .setType("image/*")
+                        .putExtra(
+                            Intent.EXTRA_MIME_TYPES,
+                            arrayOf("image/jpeg", "image/png", "image/webp"),
+                        ),
                     REQUEST_ALBUM,
                 )
             }
