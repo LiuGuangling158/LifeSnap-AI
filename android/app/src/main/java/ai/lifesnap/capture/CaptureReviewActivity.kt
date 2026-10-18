@@ -18,6 +18,7 @@ class CaptureReviewActivity : Activity() {
     private lateinit var preview: ImageView
     private var selectedUri: Uri? = null
     private var selectedSource = "screenshot"
+    private var preservingPendingUpload = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -99,6 +100,7 @@ class CaptureReviewActivity : Activity() {
     }
 
     private fun upload(uri: Uri, source: String) {
+        if (preservingPendingUpload) return
         val progress = AlertDialog.Builder(this)
             .setMessage("正在安全导入图片…")
             .setCancelable(false)
@@ -132,14 +134,23 @@ class CaptureReviewActivity : Activity() {
             .setMessage("${error.message ?: "网络或服务器暂时不可用"}\n\n保留图片后，可在应用顶部的“待上传”中重试。")
             .setNegativeButton("继续编辑", null)
             .setPositiveButton("保留待上传") { _, _ ->
-                runCatching { PendingUploadStore.enqueue(this, uri, source) }
-                    .onSuccess {
-                        Toast.makeText(this, "已保留到待上传列表", Toast.LENGTH_LONG).show()
-                        finish()
-                    }
-                    .onFailure {
-                        Toast.makeText(this, "无法保留图片：${it.message}", Toast.LENGTH_LONG).show()
-                    }
+                preservingPendingUpload = true
+                Toast.makeText(this, "正在保留图片…", Toast.LENGTH_SHORT).show()
+                thread {
+                    runCatching { PendingUploadStore.enqueue(this, uri, source) }
+                        .onSuccess {
+                            runOnUiThread {
+                                Toast.makeText(this, "已保留到待上传列表", Toast.LENGTH_LONG).show()
+                                finish()
+                            }
+                        }
+                        .onFailure {
+                            runOnUiThread {
+                                preservingPendingUpload = false
+                                Toast.makeText(this, "无法保留图片：${it.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                }
             }
             .show()
     }
