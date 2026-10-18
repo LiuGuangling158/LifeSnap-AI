@@ -3,6 +3,7 @@ package ai.lifesnap.capture
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.pm.ServiceInfo
 import android.content.Context
@@ -162,7 +163,12 @@ class FloatingCaptureService : Service() {
         Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle("LifeSnap 悬浮记账已开启")
-            .setContentText("点击悬浮按钮截屏或选择账单图片")
+            .setContentText("点击悬浮按钮截屏或选择账单图片；可长按悬浮球或点通知关闭")
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "关闭悬浮记账",
+                stopPendingIntent(),
+            )
             .setOngoing(true)
             .build()
     } else {
@@ -174,6 +180,14 @@ class FloatingCaptureService : Service() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun stopPendingIntent(): PendingIntent = PendingIntent.getBroadcast(
+        this,
+        NOTIFICATION_ID,
+        Intent(this, FloatingCaptureActionReceiver::class.java)
+            .setAction(FloatingCaptureActionReceiver.ACTION_STOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 
     companion object {
         private const val CHANNEL_ID = "lifesnap_floating_capture"

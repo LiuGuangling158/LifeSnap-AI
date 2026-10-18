@@ -13,6 +13,7 @@
     <activity android:name=".CaptureReviewActivity" android:exported="false" />
     <activity android:name=".CapturePermissionActivity" android:exported="false" />
     <activity android:name=".PendingUploadsActivity" android:exported="false" />
+    <receiver android:name=".FloatingCaptureActionReceiver" android:exported="false" />
     <activity android:name=".MainActivity" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
