@@ -116,7 +116,11 @@ class CaptureReviewActivity : Activity() {
                 .onFailure { error ->
                     runOnUiThread {
                         progress.dismiss()
-                        offerPendingUpload(uri, source, error)
+                        if (error is IllegalArgumentException) {
+                            Toast.makeText(this, error.message ?: "图片不符合上传要求", Toast.LENGTH_LONG).show()
+                        } else {
+                            offerPendingUpload(uri, source, error)
+                        }
                     }
                 }
         }
