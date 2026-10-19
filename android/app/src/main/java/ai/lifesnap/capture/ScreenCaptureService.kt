@@ -20,6 +20,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.provider.Settings
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
@@ -92,7 +93,9 @@ class ScreenCaptureService : Service() {
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 )
             } catch (_: Exception) {
-                // The user can retry from the persistent floating window.
+                Handler(mainLooper).post {
+                    Toast.makeText(this, "截图失败，请重试", Toast.LENGTH_SHORT).show()
+                }
             } finally {
                 image.close()
                 cleanup()
@@ -115,8 +118,8 @@ class ScreenCaptureService : Service() {
         val cropped = Bitmap.createBitmap(fullBitmap, 0, 0, width, height)
         fullBitmap.recycle()
         val directory = File(cacheDir, "captures").apply { mkdirs() }
-        val file = File(directory, "capture-${System.currentTimeMillis()}.png")
-        FileOutputStream(file).use { output -> cropped.compress(Bitmap.CompressFormat.PNG, 100, output) }
+        val file = File(directory, "capture-${System.currentTimeMillis()}.jpg")
+        FileOutputStream(file).use { output -> cropped.compress(Bitmap.CompressFormat.JPEG, 92, output) }
         cropped.recycle()
         return FileProvider.getUriForFile(this, "$packageName.files", file)
     }
