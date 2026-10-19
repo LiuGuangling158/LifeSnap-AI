@@ -119,8 +119,15 @@ class ScreenCaptureService : Service() {
         fullBitmap.recycle()
         val directory = File(cacheDir, "captures").apply { mkdirs() }
         val file = File(directory, "capture-${System.currentTimeMillis()}.jpg")
-        FileOutputStream(file).use { output -> cropped.compress(Bitmap.CompressFormat.JPEG, 92, output) }
-        cropped.recycle()
+        try {
+            FileOutputStream(file).use { output ->
+                check(cropped.compress(Bitmap.CompressFormat.JPEG, 92, output)) {
+                    "Unable to encode screen capture"
+                }
+            }
+        } finally {
+            cropped.recycle()
+        }
         return FileProvider.getUriForFile(this, "$packageName.files", file)
     }
 
