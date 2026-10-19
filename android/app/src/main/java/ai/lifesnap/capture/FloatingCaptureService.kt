@@ -52,6 +52,7 @@ class FloatingCaptureService : Service() {
         if (attached) bubble?.let(windowManager::removeViewImmediate)
         bubble = null
         attached = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
@@ -164,6 +165,7 @@ class FloatingCaptureService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle("LifeSnap 悬浮记账已开启")
             .setContentText("点击悬浮按钮截屏或选择账单图片；可长按悬浮球或点通知关闭")
+            .setContentIntent(openAppPendingIntent())
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "关闭悬浮记账",
@@ -186,6 +188,14 @@ class FloatingCaptureService : Service() {
         NOTIFICATION_ID,
         Intent(this, FloatingCaptureActionReceiver::class.java)
             .setAction(FloatingCaptureActionReceiver.ACTION_STOP),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun openAppPendingIntent(): PendingIntent = PendingIntent.getActivity(
+        this,
+        NOTIFICATION_ID,
+        Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
