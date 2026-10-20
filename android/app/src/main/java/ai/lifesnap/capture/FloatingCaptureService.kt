@@ -59,7 +59,7 @@ class FloatingCaptureService : Service() {
     private fun showBubble() {
         if (attached || !Settings.canDrawOverlays(this)) return
         val button = ImageButton(this).apply {
-            contentDescription = "LifeSnap 截图记账"
+            contentDescription = getString(R.string.floating_capture_button_description)
             setImageResource(android.R.drawable.ic_menu_camera)
             setColorFilter(Color.WHITE)
             background = GradientDrawable().apply {
@@ -76,7 +76,11 @@ class FloatingCaptureService : Service() {
                 )
             }
             setOnLongClickListener {
-                Toast.makeText(this@FloatingCaptureService, "悬浮记账已关闭", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@FloatingCaptureService,
+                    getString(R.string.floating_capture_closed),
+                    Toast.LENGTH_SHORT,
+                ).show()
                 stopSelf()
                 true
             }
@@ -154,21 +158,21 @@ class FloatingCaptureService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "LifeSnap 悬浮记账",
+            getString(R.string.floating_capture_channel_name),
             NotificationManager.IMPORTANCE_LOW,
-        ).apply { description = "让截图记账悬浮窗保持可用" }
+        ).apply { description = getString(R.string.floating_capture_channel_description) }
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
     }
 
     private fun notification(): Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("LifeSnap 悬浮记账已开启")
-            .setContentText("点击悬浮按钮截屏或选择账单图片；可长按悬浮球或点通知关闭")
+            .setContentTitle(getString(R.string.floating_capture_notification_title))
+            .setContentText(getString(R.string.floating_capture_notification_text))
             .setContentIntent(openAppPendingIntent())
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "关闭悬浮记账",
+                getString(R.string.floating_capture_close_action),
                 stopPendingIntent(),
             )
             .setOngoing(true)
@@ -176,7 +180,7 @@ class FloatingCaptureService : Service() {
     } else {
         Notification.Builder(this)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("LifeSnap 悬浮记账已开启")
+            .setContentTitle(getString(R.string.floating_capture_notification_title))
             .setOngoing(true)
             .build()
     }

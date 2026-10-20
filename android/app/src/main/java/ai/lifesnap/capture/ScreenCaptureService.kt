@@ -118,6 +118,7 @@ class ScreenCaptureService : Service() {
         val cropped = Bitmap.createBitmap(fullBitmap, 0, 0, width, height)
         fullBitmap.recycle()
         val directory = File(cacheDir, "captures").apply { mkdirs() }
+        pruneStaleCaptures(directory)
         val file = File(directory, "capture-${System.currentTimeMillis()}.jpg")
         try {
             FileOutputStream(file).use { output ->
@@ -129,6 +130,13 @@ class ScreenCaptureService : Service() {
             cropped.recycle()
         }
         return FileProvider.getUriForFile(this, "$packageName.files", file)
+    }
+
+    private fun pruneStaleCaptures(directory: File) {
+        val cutoff = System.currentTimeMillis() - CAPTURE_CACHE_MAX_AGE_MS
+        directory.listFiles()?.forEach { file ->
+            if (file.isFile && file.lastModified() < cutoff) file.delete()
+        }
     }
 
     private fun cleanup() {
@@ -168,5 +176,6 @@ class ScreenCaptureService : Service() {
         const val EXTRA_RESULT_DATA = "media_projection_result_data"
         private const val CHANNEL_ID = "lifesnap_screen_capture"
         private const val NOTIFICATION_ID = 4302
+        private const val CAPTURE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000L
     }
 }

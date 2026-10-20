@@ -1,0 +1,9 @@
+<resources>
+  <string name="floating_capture_button_description">LifeSnap 截图记账</string>
+  <string name="floating_capture_closed">悬浮记账已关闭</string>
+  <string name="floating_capture_channel_name">LifeSnap 悬浮记账</string>
+  <string name="floating_capture_channel_description">让截图记账悬浮窗保持可用</string>
+  <string name="floating_capture_notification_title">LifeSnap 悬浮记账已开启</string>
+  <string name="floating_capture_notification_text">点击悬浮按钮截屏或选择账单图片；可长按悬浮球或点通知关闭</string>
+  <string name="floating_capture_close_action">关闭悬浮记账</string>
+</resources>

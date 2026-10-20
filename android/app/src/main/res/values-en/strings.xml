@@ -1,0 +1,9 @@
+<resources>
+  <string name="floating_capture_button_description">LifeSnap bill capture</string>
+  <string name="floating_capture_closed">Quick capture closed</string>
+  <string name="floating_capture_channel_name">LifeSnap Quick Capture</string>
+  <string name="floating_capture_channel_description">Keeps the bill capture button available</string>
+  <string name="floating_capture_notification_title">LifeSnap quick capture is on</string>
+  <string name="floating_capture_notification_text">Tap the floating button to capture a bill, or long-press it or use this notification to close it</string>
+  <string name="floating_capture_close_action">Close quick capture</string>
+</resources>
